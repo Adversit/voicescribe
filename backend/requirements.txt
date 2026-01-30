@@ -1,0 +1,27 @@
+# Web server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6
+websockets>=12.0
+
+# ASR Engines
+openai-whisper>=20231117
+faster-whisper>=0.10.0
+funasr>=1.0.0
+modelscope>=1.10.0
+
+# Speaker Diarization
+pyannote.audio>=3.1.0
+speechbrain>=0.5.16
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Audio processing
+numpy>=1.24.0
+soundfile>=0.12.1
+librosa>=0.10.1
+pydub>=0.25.1
+
+# Utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0.1

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>VoiceScribe</string>
+    <key>CFBundleDisplayName</key>
+    <string>VoiceScribe</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.voicescribe.app</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VoiceScribe 需要访问麦克风来录制音频进行语音转文字</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>VoiceScribe 需要控制系统事件来注册全局快捷键</string>
+    <key>LSUIElement</key>
+    <false/>
+</dict>
+</plist>

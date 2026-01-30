@@ -1,0 +1,331 @@
+"""
+Speaker Diarization & Recognition
+说话人分离与识别 - 使用 FunASR CAM++ 模型
+"""
+
+import os
+import json
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+import numpy as np
+
+
+class SpeakerDiarizer:
+    """说话人分离与识别（基于 FunASR）"""
+
+    def __init__(self, data_dir: str = "~/.voicescribe/speakers"):
+        """
+        Args:
+            data_dir: 声纹数据存储目录
+        """
+        self.data_dir = Path(data_dir).expanduser()
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        self.diarization_model = None  # 说话人分离模型
+        self.sv_model = None  # 声纹验证模型
+        self.speakers: Dict[str, Dict] = {}  # speaker_id -> {name, embedding}
+
+        self._load_speakers()
+
+    def _load_speakers(self):
+        """加载已注册的说话人"""
+        speakers_file = self.data_dir / "speakers.json"
+        if speakers_file.exists():
+            with open(speakers_file) as f:
+                data = json.load(f)
+                for sp in data.get("speakers", []):
+                    emb_file = self.data_dir / f"{sp['id']}.npy"
+                    if emb_file.exists():
+                        sp["embedding"] = np.load(emb_file)
+                    self.speakers[sp["id"]] = sp
+
+    def _save_speakers(self):
+        """保存说话人数据"""
+        speakers_file = self.data_dir / "speakers.json"
+        data = {
+            "speakers": [
+                {"id": sp["id"], "name": sp["name"]}
+                for sp in self.speakers.values()
+            ]
+        }
+        with open(speakers_file, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def load(self, load_diarization: bool = True):
+        """加载 FunASR 模型"""
+        try:
+            from funasr import AutoModel
+        except ImportError:
+            raise ImportError(
+                "Speaker diarization requires funasr. "
+                "Install with: pip install funasr"
+            )
+
+        # 加载声纹验证模型 (CAM++ 中文优化)
+        print("[Speaker] Loading speaker verification model...")
+        self.sv_model = AutoModel(
+            model="damo/speech_campplus_sv_zh-cn_16k-common",
+            disable_update=True
+        )
+        print("[Speaker] Speaker verification model loaded")
+
+        # 加载说话人分离模型
+        if load_diarization:
+            try:
+                print("[Speaker] Loading diarization model...")
+                self.diarization_model = AutoModel(
+                    model="damo/speech_campplus_speaker-diarization_common",
+                    disable_update=True
+                )
+                print("[Speaker] Diarization model loaded")
+            except Exception as e:
+                print(f"[Speaker] Diarization model failed to load: {e}")
+                self.diarization_model = None
+
+        print("[Speaker] FunASR speaker models ready")
+
+    def diarize(self, audio_path: str) -> List[Dict]:
+        """
+        说话人分离
+
+        Args:
+            audio_path: 音频文件路径
+
+        Returns:
+            [
+                {"start": 0.0, "end": 2.5, "speaker": "SPEAKER_00"},
+                {"start": 2.5, "end": 5.0, "speaker": "SPEAKER_01"},
+                ...
+            ]
+        """
+        if self.diarization_model is None:
+            # 如果没有 diarization 模型，返回单一说话人
+            print("[Speaker] No diarization model, assuming single speaker")
+            return [{"start": 0.0, "end": 9999.0, "speaker": "SPEAKER_00"}]
+
+        result = self.diarization_model.generate(audio_path)
+
+        # FunASR 返回格式: [(start, end, speaker_id), ...]
+        results = []
+        if isinstance(result, list):
+            for item in result:
+                if len(item) >= 3:
+                    results.append({
+                        "start": float(item[0]),
+                        "end": float(item[1]),
+                        "speaker": str(item[2]),
+                    })
+
+        return results
+
+    def extract_embedding(self, audio_path: str) -> np.ndarray:
+        """提取音频的声纹特征"""
+        if self.sv_model is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        result = self.sv_model.generate(audio_path)
+
+        # 获取 embedding
+        if isinstance(result, dict) and "spk_embedding" in result:
+            embedding = result["spk_embedding"]
+        elif isinstance(result, list) and len(result) > 0:
+            # 可能是列表格式
+            if isinstance(result[0], dict) and "spk_embedding" in result[0]:
+                embedding = result[0]["spk_embedding"]
+            else:
+                embedding = result[0]
+        else:
+            embedding = result
+
+        # 确保是 numpy 数组
+        if not isinstance(embedding, np.ndarray):
+            embedding = np.array(embedding)
+
+        # 展平为一维
+        embedding = embedding.flatten()
+
+        return embedding
+
+    def register_speaker(self, name: str, audio_path: str) -> str:
+        """
+        注册说话人声纹
+
+        Args:
+            name: 说话人姓名
+            audio_path: 包含该说话人声音的音频文件
+
+        Returns:
+            speaker_id
+        """
+        # 生成唯一 ID
+        existing_ids = set(self.speakers.keys())
+        idx = 0
+        while f"speaker_{idx:03d}" in existing_ids:
+            idx += 1
+        speaker_id = f"speaker_{idx:03d}"
+
+        # 提取声纹
+        embedding = self.extract_embedding(audio_path)
+
+        # 保存
+        self.speakers[speaker_id] = {
+            "id": speaker_id,
+            "name": name,
+            "embedding": embedding,
+        }
+
+        np.save(self.data_dir / f"{speaker_id}.npy", embedding)
+        self._save_speakers()
+
+        print(f"[Speaker] Registered: {name} ({speaker_id}), embedding shape: {embedding.shape}")
+        return speaker_id
+
+    def delete_speaker(self, speaker_id: str) -> bool:
+        """
+        删除说话人
+
+        Args:
+            speaker_id: 说话人 ID
+
+        Returns:
+            是否删除成功
+        """
+        if speaker_id not in self.speakers:
+            return False
+
+        # 删除内存中的数据
+        del self.speakers[speaker_id]
+
+        # 删除 embedding 文件
+        emb_file = self.data_dir / f"{speaker_id}.npy"
+        if emb_file.exists():
+            emb_file.unlink()
+
+        # 更新 JSON 文件
+        self._save_speakers()
+
+        print(f"[Speaker] Deleted: {speaker_id}")
+        return True
+
+    def identify_speaker(self, embedding: np.ndarray, threshold: float = 0.7) -> Optional[str]:
+        """
+        根据声纹识别说话人
+
+        Args:
+            embedding: 声纹特征向量
+            threshold: 相似度阈值 (CAM++ 推荐 0.7)
+
+        Returns:
+            speaker_id 或 None（未识别）
+        """
+        if not self.speakers:
+            return None
+
+        best_match = None
+        best_score = -1
+
+        for speaker_id, sp in self.speakers.items():
+            if "embedding" not in sp:
+                continue
+
+            # 计算余弦相似度
+            emb1 = embedding.flatten()
+            emb2 = sp["embedding"].flatten()
+            score = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+
+            if score > best_score and score >= threshold:
+                best_score = score
+                best_match = speaker_id
+
+        if best_match:
+            print(f"[Speaker] Identified: {best_match} (score: {best_score:.3f})")
+
+        return best_match
+
+    def assign_speakers(
+        self,
+        transcription: Dict[str, Any],
+        diarization: List[Dict],
+        audio_path: str = None,
+    ) -> Dict[str, Any]:
+        """
+        将说话人标签分配到转录结果
+
+        Args:
+            transcription: ASR 转录结果 {"text": ..., "segments": [...]}
+            diarization: 说话人分离结果
+            audio_path: 音频文件路径（用于声纹识别）
+
+        Returns:
+            带说话人标签的转录结果
+        """
+        segments = transcription.get("segments", [])
+
+        # 如果有音频路径且有已注册的说话人，尝试声纹识别
+        speaker_mapping = {}  # diarization 标签 -> 真实姓名
+        if audio_path and self.speakers and self.sv_model:
+            try:
+                # 提取整段音频的声纹
+                embedding = self.extract_embedding(audio_path)
+                # 尝试匹配已注册的说话人
+                matched_id = self.identify_speaker(embedding)
+                if matched_id:
+                    matched_name = self.speakers[matched_id].get("name", matched_id)
+                    # 将所有 diarization 标签映射到匹配的说话人
+                    # （单人场景下的简化处理）
+                    for d in diarization:
+                        speaker_mapping[d["speaker"]] = matched_name
+                    print(f"[Speaker] Matched: {matched_name}")
+            except Exception as e:
+                print(f"[Speaker] Embedding extraction failed: {e}")
+
+        # 如果没有 segments，但有原始文本，直接使用原始文本
+        original_text = transcription.get("text", "")
+        if not segments and original_text:
+            # 如果识别出了说话人，在文本前加上说话人名字
+            if speaker_mapping:
+                speaker_name = list(speaker_mapping.values())[0]
+                transcription["text"] = f"[{speaker_name}] {original_text}"
+            return transcription
+
+        for seg in segments:
+            seg_mid = (seg["start"] + seg["end"]) / 2
+
+            # 找到对应的说话人
+            speaker = "UNKNOWN"
+            for d in diarization:
+                if d["start"] <= seg_mid <= d["end"]:
+                    speaker = d["speaker"]
+                    # 使用声纹匹配的映射
+                    if speaker in speaker_mapping:
+                        speaker = speaker_mapping[speaker]
+                    break
+
+            seg["speaker"] = speaker
+
+        # 重新生成带说话人的文本
+        lines = []
+        current_speaker = None
+        current_text = []
+
+        for seg in segments:
+            if seg["speaker"] != current_speaker:
+                if current_text:
+                    lines.append(f"[{current_speaker}] {' '.join(current_text)}")
+                current_speaker = seg["speaker"]
+                current_text = [seg["text"]]
+            else:
+                current_text.append(seg["text"])
+
+        if current_text:
+            lines.append(f"[{current_speaker}] {' '.join(current_text)}")
+
+        transcription["text"] = "\n".join(lines) if lines else original_text
+        return transcription
+
+    def list_speakers(self) -> List[Dict]:
+        """列出已注册的说话人"""
+        return [
+            {"speaker_id": sp["id"], "name": sp["name"]}
+            for sp in self.speakers.values()
+        ]
