@@ -43,7 +43,8 @@ actor BackendService {
         model: String,
         language: String,
         enableDiarization: Bool,
-        hotwords: String = ""
+        hotwords: String = "",
+        enableAIRefine: Bool = false
     ) async throws -> TranscribeResult {
         let url = baseURL.appendingPathComponent("transcribe")
         
@@ -71,7 +72,8 @@ actor BackendService {
             "engine": engine,
             "model": model,
             "language": language,
-            "enable_diarization": enableDiarization ? "true" : "false"
+            "enable_diarization": enableDiarization ? "true" : "false",
+            "enable_ai_refine": enableAIRefine ? "true" : "false"
         ]
 
         // 添加热词参数（如果有）

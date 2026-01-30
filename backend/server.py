@@ -65,6 +65,14 @@ try:
 except ImportError as e:
     print(f"[Warning] Speaker diarization not available: {e}")
 
+# AI 文本优化是可选的
+AI_REFINE_AVAILABLE = False
+try:
+    from postprocess.ai_refiner import AIRefiner
+    AI_REFINE_AVAILABLE = True
+except ImportError as e:
+    print(f"[Warning] AI refiner not available: {e}")
+
 
 app = FastAPI(title="VoiceScribe", version="0.1.0")
 
@@ -116,6 +124,7 @@ async def root():
             "whisper": WHISPER_AVAILABLE,
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
+            "ai_refine": AI_REFINE_AVAILABLE,
         }
     }
 
@@ -194,10 +203,10 @@ async def load_engine(engine: str, model: str):
 def mock_transcribe(audio_path: str, language: str = "zh") -> dict:
     """Mock 转录结果，用于前端开发测试"""
     import time
-    
+
     # 模拟处理时间
     time.sleep(0.5)
-    
+
     # 返回示例结果
     mock_text = "这是一段模拟的语音转文字结果。VoiceScribe 正在开发中，ASR 引擎尚未加载。"
     if language == "en":
@@ -222,6 +231,7 @@ async def transcribe(
     language: str = Form("zh"),
     enable_diarization: bool = Form(False),
     hotwords: str = Form(""),
+    enable_ai_refine: bool = Form(False),
 ) -> TranscribeResult:
     """转录音频文件"""
     global engines, diarizer
@@ -237,6 +247,11 @@ async def transcribe(
         # Mock 模式
         if MOCK_MODE:
             result = mock_transcribe(tmp_path, language)
+            # AI 文本优化（mock 模式也支持）
+            if enable_ai_refine and AI_REFINE_AVAILABLE:
+                refiner = AIRefiner()
+                hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
+                result["text"] = refiner.refine(result["text"], hotwords_list)
             return TranscribeResult(
                 text=result["text"],
                 segments=result.get("segments", []),
@@ -263,8 +278,10 @@ async def transcribe(
 
         # Transcribe (pass hotwords for FunASR)
         if engine == "funasr" and hotwords:
+            print(f"[Transcribe] FunASR with hotwords: {hotwords}")
             result = eng.transcribe(tmp_path, language=language, hotwords=hotwords)
         else:
+            print(f"[Transcribe] Engine={engine}, hotwords={hotwords or '(none)'}")
             result = eng.transcribe(tmp_path, language=language)
         
         # Speaker diarization if enabled
@@ -272,10 +289,19 @@ async def transcribe(
             if diarizer is None:
                 diarizer = SpeakerDiarizer()
                 diarizer.load()
-            
+
             speakers = diarizer.diarize(tmp_path)
             result = diarizer.assign_speakers(result, speakers, audio_path=tmp_path)
-        
+
+        # AI 文本优化
+        if enable_ai_refine and AI_REFINE_AVAILABLE:
+            refiner = AIRefiner()
+            hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
+            print(f"[AI Refine] Hotwords: {hotwords_list}")
+            print(f"[AI Refine] Original: {result['text'][:100]}...")
+            result["text"] = refiner.refine(result["text"], hotwords_list)
+            print(f"[AI Refine] Refined: {result['text'][:100]}...")
+
         return TranscribeResult(
             text=result["text"],
             segments=result.get("segments", []),
@@ -446,6 +472,7 @@ async def health_check():
             "whisper": WHISPER_AVAILABLE,
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
+            "ai_refine": AI_REFINE_AVAILABLE,
         }
     }
 
@@ -475,6 +502,7 @@ def main():
         print(f"   FunASR:      {'✓' if FUNASR_AVAILABLE else '✗'}")
         print(f"   Parakeet:    {'✓' if PARAKEET_AVAILABLE else '✗'}")
         print(f"   Diarization: {'✓' if DIARIZATION_AVAILABLE else '✗'}")
+        print(f"   AI Refine:   {'✓' if AI_REFINE_AVAILABLE else '✗'}")
         print("=" * 50)
     
     uvicorn.run(app, host=args.host, port=args.port)

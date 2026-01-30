@@ -31,6 +31,10 @@ class AppState: ObservableObject {
     // MARK: - Vocabulary
     /// 自定义热词（逗号分隔）
     @AppStorage("hotwords") var hotwords = ""
+
+    // MARK: - AI Refine
+    /// 启用 AI 文本优化
+    @AppStorage("enableAIRefine") var enableAIRefine = false
     
     // MARK: - Backend Status
     @Published var backendConnected = false

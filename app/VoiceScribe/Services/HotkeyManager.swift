@@ -427,7 +427,8 @@ class HotkeyManager {
                     model: state.selectedModel,
                     language: state.language,
                     enableDiarization: state.enableDiarization,
-                    hotwords: state.hotwords
+                    hotwords: state.hotwords,
+                    enableAIRefine: state.enableAIRefine
                 )
                 print("[Transcribe] Success: \(result.text)")
 

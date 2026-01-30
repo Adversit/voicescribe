@@ -102,7 +102,9 @@ struct MenuBarView: View {
                     engine: appState.selectedEngine,
                     model: appState.selectedModel,
                     language: appState.language,
-                    enableDiarization: appState.enableDiarization
+                    enableDiarization: appState.enableDiarization,
+                    hotwords: appState.hotwords,
+                    enableAIRefine: appState.enableAIRefine
                 )
                 
                 await MainActor.run {

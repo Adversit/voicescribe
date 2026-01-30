@@ -79,6 +79,13 @@ struct GeneralSettingsView: View {
 
             Section("其他") {
                 Toggle("启用说话人识别", isOn: $appState.enableDiarization)
+                Toggle("启用 AI 文本优化", isOn: $appState.enableAIRefine)
+
+                if appState.enableAIRefine {
+                    Text("AI 优化将去除语气词、修正错别字")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section("关于") {
