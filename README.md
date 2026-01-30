@@ -9,6 +9,7 @@ macOS 本地语音转文字工具，支持多种 ASR 模型和说话人识别。
 - 🔄 多模型支持：Whisper、FunASR
 - 👥 说话人识别（Speaker Diarization）
 - 🎵 声纹特征学习
+- 🤖 AI 文本优化（去除语气词、修正错别字、热词识别）
 - 📋 自动复制到剪贴板
 
 ## 架构
@@ -37,6 +38,8 @@ VoiceScribe/
 │   │   └── funasr_engine.py
 │   ├── diarization/       # 说话人识别
 │   │   └── speaker.py
+│   ├── postprocess/       # 后处理
+│   │   └── ai_refiner.py  # AI 文本优化
 │   └── requirements.txt
 └── README.md
 ```
@@ -129,6 +132,7 @@ swift build
 - [x] 全局快捷键
 - [x] 说话人识别（基于 FunASR CAM++）
 - [x] 声纹学习
+- [x] AI 文本优化（Claude Haiku）
 - [ ] 本地存储历史
 
 ## 系统要求
