@@ -12,6 +12,7 @@ class FunASREngine:
     MODELS = {
         "paraformer-zh": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         "paraformer-zh-streaming": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+        "seaco-paraformer": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         "sensevoice-small": "iic/SenseVoiceSmall",
     }
     
@@ -37,6 +38,16 @@ class FunASREngine:
                 model=model_id,
                 vad_model="fsmn-vad",
                 vad_kwargs={"max_single_segment_time": 30000},
+                device=device,
+            )
+        elif model_name == "seaco-paraformer":
+            # SeACo-Paraformer: 专门针对热词优化的模型
+            # 热词召回率比普通 Paraformer 高很多
+            self.model = AutoModel(
+                model=model_id,
+                model_revision="v2.0.4",
+                vad_model="fsmn-vad",
+                punc_model="ct-punc",
                 device=device,
             )
         else:
@@ -102,8 +113,14 @@ class FunASREngine:
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
-        # 处理热词：将逗号分隔的字符串转换为空格分隔（FunASR 格式）
-        hotword_str = " ".join(hotwords.split(",")) if hotwords else ""
+        # 处理热词：支持两种格式
+        # 1. 不带权重：claude, deepseek → "claude deepseek"
+        # 2. 带权重：claude 50, deepseek 30 → "claude 50 deepseek 30"
+        hotword_str = ""
+        if hotwords:
+            parts = [p.strip() for p in hotwords.split(",") if p.strip()]
+            hotword_str = " ".join(parts)
+            print(f"[FunASR] Hotwords: {hotword_str}")
 
         result = self.model.generate(
             input=audio_path,

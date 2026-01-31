@@ -27,11 +27,17 @@ struct VoiceScribeApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 启动后端服务
+        BackendManager.shared.start()
+
         // 注册全局快捷键
         HotkeyManager.shared.register()
     }
-    
+
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyManager.shared.unregister()
+
+        // 停止后端服务
+        BackendManager.shared.stop()
     }
 }

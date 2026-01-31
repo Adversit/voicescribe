@@ -1,0 +1,230 @@
+import Foundation
+
+/// 后端进程管理器
+class BackendManager: ObservableObject {
+    static let shared = BackendManager()
+
+    @Published var isRunning = false
+    @Published var statusMessage = "未启动"
+
+    private var process: Process?
+    private var outputPipe: Pipe?
+
+    private init() {}
+
+    /// 启动后端服务
+    func start() {
+        guard process == nil else {
+            print("[BackendManager] 后端已在运行")
+            return
+        }
+
+        // 查找后端路径
+        guard let backendPath = findBackendPath() else {
+            statusMessage = "找不到后端"
+            print("[BackendManager] 找不到后端目录")
+            return
+        }
+
+        // 查找 Python
+        guard let pythonPath = findPython() else {
+            statusMessage = "找不到 Python"
+            print("[BackendManager] 找不到 Python")
+            return
+        }
+
+        print("[BackendManager] 后端路径: \(backendPath)")
+        print("[BackendManager] Python 路径: \(pythonPath)")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = ["server.py"]
+        process.currentDirectoryURL = URL(fileURLWithPath: backendPath)
+
+        // 设置环境变量
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONUNBUFFERED"] = "1"
+        process.environment = env
+
+        // 捕获输出
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        self.outputPipe = pipe
+
+        // 读取输出
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let output = String(data: data, encoding: .utf8), !output.isEmpty {
+                print("[Backend] \(output)")
+
+                // 检测启动成功
+                if output.contains("Uvicorn running") || output.contains("Application startup complete") {
+                    DispatchQueue.main.async {
+                        self?.isRunning = true
+                        self?.statusMessage = "运行中"
+                    }
+                }
+            }
+        }
+
+        // 进程终止处理
+        process.terminationHandler = { [weak self] proc in
+            DispatchQueue.main.async {
+                self?.isRunning = false
+                self?.statusMessage = "已停止 (退出码: \(proc.terminationStatus))"
+                self?.process = nil
+            }
+        }
+
+        do {
+            try process.run()
+            self.process = process
+            statusMessage = "启动中..."
+            print("[BackendManager] 后端进程已启动, PID: \(process.processIdentifier)")
+
+            // 等待一小段时间后检查健康状态
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.checkHealth()
+            }
+        } catch {
+            statusMessage = "启动失败: \(error.localizedDescription)"
+            print("[BackendManager] 启动失败: \(error)")
+        }
+    }
+
+    /// 停止后端服务
+    func stop() {
+        guard let process = process, process.isRunning else {
+            return
+        }
+
+        print("[BackendManager] 正在停止后端...")
+        process.terminate()
+
+        // 等待进程结束
+        DispatchQueue.global().async {
+            process.waitUntilExit()
+            DispatchQueue.main.async {
+                self.process = nil
+                self.isRunning = false
+                self.statusMessage = "已停止"
+            }
+        }
+    }
+
+    /// 检查后端健康状态
+    func checkHealth() {
+        guard let url = URL(string: "http://127.0.0.1:8765/health") else { return }
+
+        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    self?.isRunning = true
+                    self?.statusMessage = "运行中"
+                } else if self?.process?.isRunning == true {
+                    // 进程在运行但还没响应，可能还在启动
+                    self?.statusMessage = "启动中..."
+                }
+            }
+        }
+        task.resume()
+    }
+
+    /// 查找后端路径（优先使用原始项目目录，因为那里有完整的 venv）
+    private func findBackendPath() -> String? {
+        // 1. 检查应用同级目录（优先，因为有完整 venv）
+        if let executablePath = Bundle.main.executablePath {
+            let appDir = (executablePath as NSString).deletingLastPathComponent
+            let possiblePaths = [
+                (appDir as NSString).appendingPathComponent("../../../backend"),  // 开发模式: app/.build/debug/
+                (appDir as NSString).appendingPathComponent("../../../../backend"),  // .app 在 app/build/ 下
+                (appDir as NSString).appendingPathComponent("../../../../../backend"),  // .app 在 build/ 下
+            ]
+
+            for path in possiblePaths {
+                let resolved = (path as NSString).standardizingPath
+                let serverPath = (resolved as NSString).appendingPathComponent("server.py")
+                let venvPath = (resolved as NSString).appendingPathComponent("venv")
+                // 优先选择有 venv 的目录
+                if FileManager.default.fileExists(atPath: serverPath) &&
+                   FileManager.default.fileExists(atPath: venvPath) {
+                    return resolved
+                }
+            }
+
+            // 再次检查，这次不要求 venv
+            for path in possiblePaths {
+                let resolved = (path as NSString).standardizingPath
+                if FileManager.default.fileExists(atPath: (resolved as NSString).appendingPathComponent("server.py")) {
+                    return resolved
+                }
+            }
+        }
+
+        // 2. 检查 .app bundle 内的后端（作为备选）
+        if let bundlePath = Bundle.main.resourcePath {
+            let backendInBundle = (bundlePath as NSString).appendingPathComponent("backend")
+            if FileManager.default.fileExists(atPath: (backendInBundle as NSString).appendingPathComponent("server.py")) {
+                return backendInBundle
+            }
+        }
+
+        // 3. 开发时的相对路径
+        let devPath = "./backend"
+        if FileManager.default.fileExists(atPath: (devPath as NSString).appendingPathComponent("server.py")) {
+            return devPath
+        }
+
+        return nil
+    }
+
+    /// 查找 Python 解释器
+    private func findPython() -> String? {
+        // 查找后端目录下的 venv
+        if let backendPath = findBackendPath() {
+            let venvPython = (backendPath as NSString).appendingPathComponent("venv/bin/python3")
+            if FileManager.default.fileExists(atPath: venvPython) {
+                return venvPython
+            }
+            let venvPython2 = (backendPath as NSString).appendingPathComponent("venv/bin/python")
+            if FileManager.default.fileExists(atPath: venvPython2) {
+                return venvPython2
+            }
+        }
+
+        // 常见 Python 路径
+        let pythonPaths = [
+            "/usr/local/bin/python3",
+            "/opt/homebrew/bin/python3",
+            "/usr/bin/python3",
+        ]
+
+        for path in pythonPaths {
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+
+        // 使用 which 命令查找
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = ["python3"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !path.isEmpty {
+                return path
+            }
+        } catch {
+            print("[BackendManager] which python3 失败: \(error)")
+        }
+
+        return nil
+    }
+}

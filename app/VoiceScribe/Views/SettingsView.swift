@@ -119,7 +119,7 @@ struct EngineSettingsView: View {
     private let staticEngines: [(name: String, displayName: String, models: [String], description: String)] = [
         ("whisper", "Whisper", ["tiny", "base", "small", "medium", "large-v2", "large-v3"], "OpenAI Whisper，多语言支持"),
         ("whispercpp", "Whisper.cpp", ["tiny", "base", "small", "medium", "large"], "轻量高效，Apple Silicon 优化"),
-        ("funasr", "FunASR", ["paraformer-zh", "paraformer-zh-streaming", "sensevoice-small"], "阿里 FunASR，中文识别效果最佳"),
+        ("funasr", "FunASR", ["seaco-paraformer", "paraformer-zh", "sensevoice-small"], "阿里 FunASR，中文识别效果最佳"),
         ("parakeet", "Parakeet", ["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"], "NVIDIA Parakeet，英文优化，需要 GPU"),
     ]
 
@@ -184,7 +184,7 @@ struct EngineSettingsView: View {
                 if newValue == "whisper" || newValue == "whispercpp" {
                     appState.selectedModel = "medium"
                 } else if newValue == "funasr" {
-                    appState.selectedModel = "paraformer-zh"
+                    appState.selectedModel = "seaco-paraformer"
                 } else {
                     appState.selectedModel = firstModel
                 }
@@ -208,8 +208,8 @@ struct EngineSettingsView: View {
         case "large-v2": return "large-v2"
         case "large-v3": return "large-v3 (最准)"
         case "large": return "large"
-        case "paraformer-zh": return "Paraformer 中文 (推荐)"
-        case "paraformer-zh-streaming": return "Paraformer 流式"
+        case "seaco-paraformer": return "SeACo-Paraformer (热词增强)"
+        case "paraformer-zh": return "Paraformer 中文"
         case "sensevoice-small": return "SenseVoice Small"
         case "parakeet-ctc-1.1b": return "Parakeet CTC 1.1B"
         case "parakeet-tdt-1.1b": return "Parakeet TDT 1.1B"
@@ -225,7 +225,7 @@ struct EngineSettingsView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         case "funasr":
-            Text("Paraformer: 标准中文识别\nSenseVoice: 支持更多语种")
+            Text("SeACo-Paraformer: 热词增强，推荐使用热词时选择\nParaformer: 标准中文识别\nSenseVoice: 支持更多语种")
                 .font(.caption)
                 .foregroundColor(.secondary)
         case "parakeet":

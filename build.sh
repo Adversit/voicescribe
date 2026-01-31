@@ -21,6 +21,22 @@ mkdir -p "$APP_DIR/Contents/Resources"
 # 复制可执行文件
 cp ".build/debug/$APP_NAME" "$APP_DIR/Contents/MacOS/"
 
+# 复制后端到 Resources
+echo "📁 打包后端..."
+BACKEND_SRC="../backend"
+BACKEND_DST="$APP_DIR/Contents/Resources/backend"
+mkdir -p "$BACKEND_DST"
+
+# 复制后端源文件
+cp "$BACKEND_SRC/server.py" "$BACKEND_DST/"
+cp -r "$BACKEND_SRC/engines" "$BACKEND_DST/" 2>/dev/null || true
+cp -r "$BACKEND_SRC/diarization" "$BACKEND_DST/" 2>/dev/null || true
+cp -r "$BACKEND_SRC/postprocess" "$BACKEND_DST/" 2>/dev/null || true
+cp "$BACKEND_SRC/requirements"*.txt "$BACKEND_DST/" 2>/dev/null || true
+
+# 注意：不复制 venv（包含绝对路径，复制后无法使用）
+# 应用会在 backend 目录下查找或创建 venv
+
 # 生成应用图标
 ICON_SRC="VoiceScribe/Assets.xcassets/AppIcon.appiconset"
 ICONSET_DIR="$BUILD_DIR/AppIcon.iconset"

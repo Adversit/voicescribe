@@ -147,7 +147,7 @@ async def list_engines() -> List[EngineInfo]:
         ),
         EngineInfo(
             name="funasr",
-            models=["paraformer-zh", "paraformer-zh-streaming", "sensevoice-small"],
+            models=["seaco-paraformer", "paraformer-zh", "sensevoice-small"],
             loaded_model=engines.get("funasr", {}).get("model"),
             available=FUNASR_AVAILABLE or MOCK_MODE,
         ),

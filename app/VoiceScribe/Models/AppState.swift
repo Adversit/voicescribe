@@ -41,23 +41,50 @@ class AppState: ObservableObject {
     @Published var availableEngines: [EngineInfo] = []
     
     private var cancellables = Set<AnyCancellable>()
-    
+    private var connectionCheckTimer: Timer?
+
     private init() {
-        // 启动时检查后端连接
-        checkBackendConnection()
+        // 启动定期检查后端连接
+        startConnectionMonitor()
     }
-    
+
+    /// 启动连接监控（每 2 秒检查一次，直到连接成功后改为 10 秒）
+    func startConnectionMonitor() {
+        // 立即检查一次
+        checkBackendConnection()
+
+        // 定期检查
+        connectionCheckTimer?.invalidate()
+        connectionCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.checkBackendConnection()
+        }
+    }
+
     func checkBackendConnection() {
         Task {
             do {
                 let engines = try await BackendService.shared.listEngines()
                 await MainActor.run {
                     self.availableEngines = engines
-                    self.backendConnected = true
+                    if !self.backendConnected {
+                        self.backendConnected = true
+                        // 连接成功后，降低检查频率
+                        self.connectionCheckTimer?.invalidate()
+                        self.connectionCheckTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+                            self?.checkBackendConnection()
+                        }
+                    }
                 }
             } catch {
                 await MainActor.run {
-                    self.backendConnected = false
+                    if self.backendConnected {
+                        self.backendConnected = false
+                        // 断开连接后，提高检查频率
+                        self.connectionCheckTimer?.invalidate()
+                        self.connectionCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                            self?.checkBackendConnection()
+                        }
+                    }
                 }
             }
         }

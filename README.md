@@ -119,7 +119,31 @@ swift build
 | 引擎 | 模型 | 说明 |
 |------|------|------|
 | Whisper | tiny/base/small/medium/large-v2/large-v3 | OpenAI Whisper，支持多语言 |
+| FunASR | seaco-paraformer | 热词增强版，推荐使用热词时选择 |
 | FunASR | paraformer-zh | 阿里达摩院，中文效果极佳 |
+| FunASR | sensevoice-small | 支持更多语种 |
+
+### 热词功能
+
+支持设置热词提高专有名词识别率，格式：`词语 权重`
+
+```
+claude 50, clawdbot 50, deepseek 30, 江争达 30
+```
+
+- 权重范围 1-100，越大越优先
+- 中文热词效果好，英文专有名词建议配合 AI 优化使用
+
+### AI 智能优化
+
+启用"AI 文本优化"后，系统会智能判断是否需要调用 AI：
+
+| 场景 | 行为 |
+|------|------|
+| 文本有英文 | 调用 AI 修正可能的专有名词误识别 |
+| 纯中文文本 | 跳过 AI，直接返回 |
+
+这样既保证了英文专有名词的修正效果，又避免了纯中文场景的额外延迟。
 
 ## 开发状态
 
