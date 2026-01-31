@@ -110,13 +110,14 @@ class AudioRecorder: NSObject, ObservableObject {
     func stopRecording() -> URL? {
         timer?.invalidate()
         timer = nil
-        
+
         audioRecorder?.stop()
+        audioRecorder = nil  // 释放麦克风
         isRecording = false
-        
+
         let url = currentRecordingURL
         currentRecordingURL = nil
-        
+
         print("[Recorder] Stopped recording. Duration: \(duration)s")
         return url
     }
@@ -125,10 +126,11 @@ class AudioRecorder: NSObject, ObservableObject {
     func cancelRecording() {
         timer?.invalidate()
         timer = nil
-        
+
         audioRecorder?.stop()
+        audioRecorder = nil  // 释放麦克风
         isRecording = false
-        
+
         // 删除临时文件
         if let url = currentRecordingURL {
             try? FileManager.default.removeItem(at: url)
