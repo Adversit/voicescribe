@@ -488,13 +488,20 @@ class HotkeyManager {
     }
 
     private func handleTranscriptionOutput(_ text: String) {
-        let outputMode = AppState.shared.outputMode
+        var outputMode = AppState.shared.outputMode
         print("[Output] Mode: \(outputMode), Text: \(text.prefix(50))...")
+
+        // 如果 previousApp 是 VoiceScribe 本身，强制使用剪贴板模式
+        if let app = previousApp, app.bundleIdentifier == "com.voicescribe.app" {
+            print("[Output] Previous app is VoiceScribe, switching to clipboard mode")
+            outputMode = "clipboard"
+        }
 
         if outputMode == "clipboard" {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             print("[Output] Copied to clipboard")
+            previousApp = nil
             return
         }
 

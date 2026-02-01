@@ -100,12 +100,30 @@ EOF
 
 echo "✅ 构建完成: $APP_DIR"
 
-# 自动安装到 /Applications
+# 自动安装到 /Applications（保留已安装的 venv）
 echo "📲 安装到 /Applications..."
 pkill -f "VoiceScribe" 2>/dev/null || true
 sleep 1
-rm -rf "/Applications/VoiceScribe.app"
-cp -r "$APP_DIR" "/Applications/"
+
+INSTALLED_APP="/Applications/VoiceScribe.app"
+INSTALLED_VENV="$INSTALLED_APP/Contents/Resources/backend/venv"
+
+# 如果已安装的 app 存在 venv，先备份
+if [ -d "$INSTALLED_VENV" ]; then
+    echo "📦 保留已安装的 venv..."
+    mv "$INSTALLED_VENV" "/tmp/voicescribe_venv_backup"
+fi
+
+# 替换 app
+rm -rf "$INSTALLED_APP"
+cp -r "$APP_DIR" "$INSTALLED_APP"
+
+# 恢复 venv
+if [ -d "/tmp/voicescribe_venv_backup" ]; then
+    mv "/tmp/voicescribe_venv_backup" "$INSTALLED_VENV"
+    echo "✅ venv 已恢复"
+fi
+
 echo "✅ 已安装到 /Applications/VoiceScribe.app"
 echo ""
 echo "运行: open /Applications/VoiceScribe.app"
