@@ -90,6 +90,36 @@ engines = {}
 diarizer: Optional[object] = None
 MOCK_MODE = False
 
+# 预加载配置：启动时自动加载的引擎和模型
+PRELOAD_CONFIG = {
+    "funasr": "seaco-paraformer",  # SeACo-Paraformer 支持热词增强
+}
+
+
+@app.on_event("startup")
+async def preload_models():
+    """启动时预加载模型，避免首次转录等待"""
+    if MOCK_MODE:
+        print("[Preload] Mock mode, skipping preload")
+        return
+
+    for engine_name, model_name in PRELOAD_CONFIG.items():
+        try:
+            if engine_name == "funasr" and FUNASR_AVAILABLE:
+                print(f"[Preload] Loading FunASR model: {model_name}...")
+                eng = FunASREngine()
+                eng.load(model_name)
+                engines["funasr"] = {"engine": eng, "model": model_name}
+                print(f"[Preload] FunASR ready!")
+            elif engine_name == "whisper" and WHISPER_AVAILABLE:
+                print(f"[Preload] Loading Whisper model: {model_name}...")
+                eng = WhisperEngine()
+                eng.load(model_name)
+                engines["whisper"] = {"engine": eng, "model": model_name}
+                print(f"[Preload] Whisper ready!")
+        except Exception as e:
+            print(f"[Preload] Failed to load {engine_name}: {e}")
+
 
 class TranscribeRequest(BaseModel):
     engine: str = "whisper"
@@ -204,8 +234,8 @@ def mock_transcribe(audio_path: str, language: str = "zh") -> dict:
     """Mock 转录结果，用于前端开发测试"""
     import time
 
-    # 模拟处理时间
-    time.sleep(0.5)
+    # 模拟处理时间（增加延迟以便看到 thinking 状态）
+    time.sleep(2.0)
 
     # 返回示例结果
     mock_text = "这是一段模拟的语音转文字结果。VoiceScribe 正在开发中，ASR 引擎尚未加载。"

@@ -420,6 +420,15 @@ class HotkeyManager {
         print("[Transcribe] Starting with engine=\(state.selectedEngine), model=\(state.selectedModel), language=\(state.language)")
 
         Task {
+            await transcribeWithRetry(audioURL: audioURL, maxRetries: 30, retryDelay: 2.0)
+        }
+    }
+
+    /// 带重试的转录（等待模型加载完成）
+    private func transcribeWithRetry(audioURL: URL, maxRetries: Int, retryDelay: Double) async {
+        let state = AppState.shared
+
+        for attempt in 1...maxRetries {
             do {
                 let result = try await BackendService.shared.transcribe(
                     audioPath: audioURL.path,
@@ -458,11 +467,21 @@ class HotkeyManager {
                     RecordingOverlayManager.shared.hideRecordingIndicator()
                     self.handleTranscriptionOutput(result.text)
                 }
+                return  // 成功，退出
             } catch {
-                await MainActor.run {
-                    state.isTranscribing = false
-                    RecordingOverlayManager.shared.hideRecordingIndicator()
-                    print("[Transcribe] Error: \(error)")
+                print("[Transcribe] Attempt \(attempt)/\(maxRetries) failed: \(error)")
+
+                if attempt < maxRetries {
+                    // 等待后重试（模型可能还在加载）
+                    print("[Transcribe] Retrying in \(retryDelay)s...")
+                    try? await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+                } else {
+                    // 超过最大重试次数，放弃
+                    await MainActor.run {
+                        state.isTranscribing = false
+                        RecordingOverlayManager.shared.hideRecordingIndicator()
+                        print("[Transcribe] Failed after \(maxRetries) attempts")
+                    }
                 }
             }
         }
