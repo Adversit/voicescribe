@@ -45,16 +45,35 @@ class BackendManager: ObservableObject {
             return
         }
 
+        print("[BackendManager] 后端路径: \(backendPath)")
         print("[BackendManager] Python 路径: \(pythonPath)")
+
+        // 准备日志文件并写入启动信息
+        let logPath = "/tmp/backend.log"
+        let startupLog = """
+        [BackendManager] 启动时间: \(Date())
+        [BackendManager] 后端路径: \(backendPath)
+        [BackendManager] Python 路径: \(pythonPath)
+        [BackendManager] server.py 路径: \(backendPath)/server.py
+
+        """
+        FileManager.default.createFile(atPath: logPath, contents: startupLog.data(using: .utf8))
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: pythonPath)
-        process.arguments = ["server.py"]
+        process.arguments = ["\(backendPath)/server.py"]  // 使用绝对路径
         process.currentDirectoryURL = URL(fileURLWithPath: backendPath)
 
         // 设置环境变量
         var env = ProcessInfo.processInfo.environment
         env["PYTHONUNBUFFERED"] = "1"
+        // 确保 PATH 包含 Homebrew 路径（ffmpeg 等依赖）
+        let homebrewPaths = "/opt/homebrew/bin:/usr/local/bin"
+        if let existingPath = env["PATH"] {
+            env["PATH"] = "\(homebrewPaths):\(existingPath)"
+        } else {
+            env["PATH"] = "\(homebrewPaths):/usr/bin:/bin"
+        }
         process.environment = env
 
         // 捕获输出
@@ -68,6 +87,12 @@ class BackendManager: ObservableObject {
             let data = handle.availableData
             if let output = String(data: data, encoding: .utf8), !output.isEmpty {
                 print("[Backend] \(output)")
+                // 同时写入日志文件
+                if let logHandle = FileHandle(forWritingAtPath: logPath) {
+                    logHandle.seekToEndOfFile()
+                    logHandle.write(data)
+                    try? logHandle.close()
+                }
 
                 // 检测启动成功
                 if output.contains("Uvicorn running") || output.contains("Application startup complete") {
@@ -288,9 +313,24 @@ class BackendManager: ObservableObject {
         return nil
     }
 
-    /// 查找后端路径（优先使用原始项目目录，因为那里有完整的 venv）
+    /// 查找后端路径（优先使用 .app bundle 内的后端）
     private func findBackendPath() -> String? {
-        // 1. 检查应用同级目录（优先，因为有完整 venv）
+        // 1. 优先检查 .app bundle 内的后端（如果有 venv）
+        if let bundlePath = Bundle.main.resourcePath {
+            let backendInBundle = (bundlePath as NSString).appendingPathComponent("backend")
+            let serverPath = (backendInBundle as NSString).appendingPathComponent("server.py")
+            let venvPath = (backendInBundle as NSString).appendingPathComponent("venv")
+
+            if FileManager.default.fileExists(atPath: serverPath) {
+                // 如果有 venv，优先使用 bundle 内的后端
+                if FileManager.default.fileExists(atPath: venvPath) {
+                    print("[BackendManager] 使用 bundle 内后端: \(backendInBundle)")
+                    return backendInBundle
+                }
+            }
+        }
+
+        // 2. 检查项目目录（开发模式）
         if let executablePath = Bundle.main.executablePath {
             let appDir = (executablePath as NSString).deletingLastPathComponent
             let possiblePaths = [
@@ -303,57 +343,50 @@ class BackendManager: ObservableObject {
                 let resolved = (path as NSString).standardizingPath
                 let serverPath = (resolved as NSString).appendingPathComponent("server.py")
                 let venvPath = (resolved as NSString).appendingPathComponent("venv")
-                // 优先选择有 venv 的目录
                 if FileManager.default.fileExists(atPath: serverPath) &&
                    FileManager.default.fileExists(atPath: venvPath) {
-                    return resolved
-                }
-            }
-
-            // 再次检查，这次不要求 venv
-            for path in possiblePaths {
-                let resolved = (path as NSString).standardizingPath
-                if FileManager.default.fileExists(atPath: (resolved as NSString).appendingPathComponent("server.py")) {
+                    print("[BackendManager] 使用项目目录后端: \(resolved)")
                     return resolved
                 }
             }
         }
 
-        // 2. 检查 .app bundle 内的后端（作为备选）
+        // 3. 检查 .app bundle 内的后端（无 venv，需要安装）
         if let bundlePath = Bundle.main.resourcePath {
             let backendInBundle = (bundlePath as NSString).appendingPathComponent("backend")
             if FileManager.default.fileExists(atPath: (backendInBundle as NSString).appendingPathComponent("server.py")) {
+                print("[BackendManager] 使用 bundle 内后端（需安装依赖）: \(backendInBundle)")
                 return backendInBundle
             }
-        }
-
-        // 3. 开发时的相对路径
-        let devPath = "./backend"
-        if FileManager.default.fileExists(atPath: (devPath as NSString).appendingPathComponent("server.py")) {
-            return devPath
         }
 
         return nil
     }
 
-    /// 查找 Python 解释器
+    /// 查找 Python 解释器（优先使用 venv）
     private func findPython() -> String? {
         // 查找后端目录下的 venv
         if let backendPath = findBackendPath() {
+            // 检查 venv 中的 Python（使用符号链接也算存在）
             let venvPython = (backendPath as NSString).appendingPathComponent("venv/bin/python3")
-            if FileManager.default.fileExists(atPath: venvPython) {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: venvPython, isDirectory: &isDir) && !isDir.boolValue {
+                print("[BackendManager] 找到 venv Python: \(venvPython)")
                 return venvPython
             }
             let venvPython2 = (backendPath as NSString).appendingPathComponent("venv/bin/python")
-            if FileManager.default.fileExists(atPath: venvPython2) {
+            if FileManager.default.fileExists(atPath: venvPython2, isDirectory: &isDir) && !isDir.boolValue {
+                print("[BackendManager] 找到 venv Python: \(venvPython2)")
                 return venvPython2
             }
+            print("[BackendManager] venv Python 不存在: \(venvPython)")
         }
 
-        // 常见 Python 路径
+        // 常见 Python 路径（仅作为后备）
+        print("[BackendManager] 警告：使用系统 Python，可能缺少依赖")
         let pythonPaths = [
-            "/usr/local/bin/python3",
             "/opt/homebrew/bin/python3",
+            "/usr/local/bin/python3",
             "/usr/bin/python3",
         ]
 
