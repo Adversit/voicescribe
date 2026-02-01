@@ -1,10 +1,11 @@
 #!/bin/bash
-# VoiceScribe 安装脚本
+# VoiceScribe 快速安装脚本（仅后端）
+# 完整安装请使用项目根目录的 install.sh
 
 set -e
 
 echo "========================================"
-echo "  VoiceScribe 安装脚本"
+echo "  VoiceScribe 后端安装脚本"
 echo "========================================"
 echo
 
@@ -48,40 +49,31 @@ pip install --upgrade pip
 pip install -r requirements.txt
 echo "✓ 依赖安装完成"
 
-# 下载模型
+# 下载 FunASR 模型
 echo
-echo "下载 ASR 模型..."
+echo "下载 FunASR 模型..."
 echo "(这可能需要一些时间，取决于网络速度)"
 echo
 
-# Whisper 模型（会在首次使用时自动下载）
-echo "Whisper 模型将在首次使用时自动下载"
-
-# FunASR 模型
-echo "下载 FunASR 模型..."
 python3 -c "
 from funasr import AutoModel
-print('下载 Paraformer-zh...')
-AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch')
-print('✓ FunASR 模型下载完成')
-" 2>/dev/null || echo "⚠ FunASR 模型下载失败（可稍后手动下载）"
-
-# 说话人识别模型
-echo
-echo "下载说话人识别模型..."
-echo "注意：pyannote 模型需要 Hugging Face token"
-echo "请设置环境变量 HF_TOKEN 或在首次使用时登录"
+print('下载 Paraformer-zh ASR 模型...')
+AutoModel(model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch', disable_update=True)
+print('✓ ASR 模型下载完成')
+print('下载 CAM++ 说话人识别模型...')
+AutoModel(model='damo/speech_campplus_sv_zh-cn_16k-common', disable_update=True)
+print('✓ 说话人识别模型下载完成')
+" 2>/dev/null || echo "⚠ 模型下载失败（将在首次使用时自动下载）"
 
 echo
 echo "========================================"
-echo "  安装完成！"
+echo "  后端安装完成！"
 echo "========================================"
 echo
 echo "使用方法："
 echo "  1. 启动后端: ./scripts/start_backend.sh"
-echo "  2. 用 Xcode 打开 app/VoiceScribe 目录"
-echo "  3. 编译运行应用"
+echo "  2. 用 Xcode 打开 app/VoiceScribe 目录编译前端"
 echo
-echo "或者直接使用命令行测试后端："
-echo "  curl http://127.0.0.1:8765/"
+echo "或使用一键安装（包含前端）："
+echo "  ./install.sh"
 echo

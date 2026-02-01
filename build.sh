@@ -99,9 +99,13 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
 EOF
 
 echo "✅ 构建完成: $APP_DIR"
+
+# 自动安装到 /Applications
+echo "📲 安装到 /Applications..."
+pkill -f "VoiceScribe" 2>/dev/null || true
+sleep 1
+rm -rf "/Applications/VoiceScribe.app"
+cp -r "$APP_DIR" "/Applications/"
+echo "✅ 已安装到 /Applications/VoiceScribe.app"
 echo ""
-echo "运行方式:"
-echo "  open $APP_DIR"
-echo ""
-echo "或安装到 Applications:"
-echo "  cp -r $APP_DIR /Applications/"
+echo "运行: open /Applications/VoiceScribe.app"
