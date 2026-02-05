@@ -26,6 +26,7 @@ DerivedData/
 # Build outputs
 app/build/
 *.app/
+runtime/
 
 # Logs
 *.log
