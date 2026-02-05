@@ -4,14 +4,36 @@
 
 set -e
 
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="VoiceScribe"
-BUILD_DIR="./build"
+BUILD_DIR="$ROOT_DIR/app/build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 
-cd "$(dirname "$0")/app"
+BUILD_CONFIG="${VOICESCRIBE_BUILD_CONFIG:-debug}"
+SKIP_INSTALL="${VOICESCRIBE_SKIP_INSTALL:-0}"
+RUNTIME_SRC="$ROOT_DIR/runtime/python"
+
+for arg in "$@"; do
+    case "$arg" in
+        --release)
+            BUILD_CONFIG="release"
+            ;;
+        --debug)
+            BUILD_CONFIG="debug"
+            ;;
+        --no-install)
+            SKIP_INSTALL="1"
+            ;;
+        --install)
+            SKIP_INSTALL="0"
+            ;;
+    esac
+done
+
+cd "$ROOT_DIR/app"
 
 echo "🔨 编译中..."
-swift build -c debug
+swift build -c "$BUILD_CONFIG"
 
 echo "📦 创建 .app bundle..."
 rm -rf "$BUILD_DIR"
@@ -19,11 +41,11 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # 复制可执行文件
-cp ".build/debug/$APP_NAME" "$APP_DIR/Contents/MacOS/"
+cp ".build/$BUILD_CONFIG/$APP_NAME" "$APP_DIR/Contents/MacOS/"
 
 # 复制后端到 Resources
 echo "📁 打包后端..."
-BACKEND_SRC="../backend"
+BACKEND_SRC="$ROOT_DIR/backend"
 BACKEND_DST="$APP_DIR/Contents/Resources/backend"
 mkdir -p "$BACKEND_DST"
 
@@ -33,6 +55,15 @@ cp -r "$BACKEND_SRC/engines" "$BACKEND_DST/" 2>/dev/null || true
 cp -r "$BACKEND_SRC/diarization" "$BACKEND_DST/" 2>/dev/null || true
 cp -r "$BACKEND_SRC/postprocess" "$BACKEND_DST/" 2>/dev/null || true
 cp "$BACKEND_SRC/requirements"*.txt "$BACKEND_DST/" 2>/dev/null || true
+
+# 复制嵌入式 Python 运行时（如果存在）
+if [ -d "$RUNTIME_SRC" ]; then
+    echo "🐍 打包嵌入式 Python 运行时..."
+    rm -rf "$APP_DIR/Contents/Resources/python"
+    cp -R "$RUNTIME_SRC" "$APP_DIR/Contents/Resources/python"
+else
+    echo "⚠️  未找到嵌入式 Python 运行时: $RUNTIME_SRC"
+fi
 
 # 注意：不复制 venv（包含绝对路径，复制后无法使用）
 # 应用会在 backend 目录下查找或创建 venv
@@ -100,30 +131,34 @@ EOF
 
 echo "✅ 构建完成: $APP_DIR"
 
-# 自动安装到 /Applications（保留已安装的 venv）
-echo "📲 安装到 /Applications..."
-pkill -f "VoiceScribe" 2>/dev/null || true
-sleep 1
+if [ "$SKIP_INSTALL" != "1" ]; then
+    # 自动安装到 /Applications（保留已安装的 venv）
+    echo "📲 安装到 /Applications..."
+    pkill -f "VoiceScribe" 2>/dev/null || true
+    sleep 1
 
-INSTALLED_APP="/Applications/VoiceScribe.app"
-INSTALLED_VENV="$INSTALLED_APP/Contents/Resources/backend/venv"
+    INSTALLED_APP="/Applications/VoiceScribe.app"
+    INSTALLED_VENV="$INSTALLED_APP/Contents/Resources/backend/venv"
 
-# 如果已安装的 app 存在 venv，先备份
-if [ -d "$INSTALLED_VENV" ]; then
-    echo "📦 保留已安装的 venv..."
-    mv "$INSTALLED_VENV" "/tmp/voicescribe_venv_backup"
+    # 如果已安装的 app 存在 venv，先备份
+    if [ -d "$INSTALLED_VENV" ]; then
+        echo "📦 保留已安装的 venv..."
+        mv "$INSTALLED_VENV" "/tmp/voicescribe_venv_backup"
+    fi
+
+    # 替换 app
+    rm -rf "$INSTALLED_APP"
+    cp -r "$APP_DIR" "$INSTALLED_APP"
+
+    # 恢复 venv
+    if [ -d "/tmp/voicescribe_venv_backup" ]; then
+        mv "/tmp/voicescribe_venv_backup" "$INSTALLED_VENV"
+        echo "✅ venv 已恢复"
+    fi
+
+    echo "✅ 已安装到 /Applications/VoiceScribe.app"
+    echo ""
+    echo "运行: open /Applications/VoiceScribe.app"
+else
+    echo "⏭️  跳过安装到 /Applications（SKIP_INSTALL=1）"
 fi
-
-# 替换 app
-rm -rf "$INSTALLED_APP"
-cp -r "$APP_DIR" "$INSTALLED_APP"
-
-# 恢复 venv
-if [ -d "/tmp/voicescribe_venv_backup" ]; then
-    mv "/tmp/voicescribe_venv_backup" "$INSTALLED_VENV"
-    echo "✅ venv 已恢复"
-fi
-
-echo "✅ 已安装到 /Applications/VoiceScribe.app"
-echo ""
-echo "运行: open /Applications/VoiceScribe.app"

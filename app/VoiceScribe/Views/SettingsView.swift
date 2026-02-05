@@ -114,6 +114,7 @@ struct GeneralSettingsView: View {
 struct EngineSettingsView: View {
     @EnvironmentObject var appState: AppState
     @State private var isLoading = false
+    @StateObject private var modelManager = ModelManager.shared
 
     // 静态引擎列表（作为后备）
     private let staticEngines: [(name: String, displayName: String, models: [String], description: String)] = [
@@ -156,6 +157,31 @@ struct EngineSettingsView: View {
 
                 // 模型说明
                 modelDescription
+
+                Divider()
+
+                Text("当前可用模型")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if appState.selectedEngine == "funasr" {
+                    if modelManager.isRefreshing {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("加载中...")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    ForEach(modelsForCurrentEngine, id: \.self) { model in
+                        modelRow(model: model)
+                    }
+                } else {
+                    Text("该引擎模型由系统自动管理")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section("预加载") {
@@ -176,7 +202,15 @@ struct EngineSettingsView: View {
             }
         }
         .padding()
-        .onChange(of: appState.selectedEngine) { newValue in
+        .onAppear {
+            modelManager.refresh()
+        }
+        .onReceive(appState.$backendConnected) { connected in
+            if connected {
+                modelManager.refresh()
+            }
+        }
+        .onChange(of: appState.selectedEngine) { _, newValue in
             // 切换引擎时，重置为该引擎的默认模型
             if let engine = staticEngines.first(where: { $0.name == newValue }),
                let firstModel = engine.models.first {
@@ -189,6 +223,7 @@ struct EngineSettingsView: View {
                     appState.selectedModel = firstModel
                 }
             }
+            modelManager.refresh()
         }
     }
 
@@ -242,8 +277,7 @@ struct EngineSettingsView: View {
         if let engine = appState.availableEngines.first(where: { $0.name == name }) {
             return engine.available
         }
-        // 后备：如果后端未连接，假设都可用（mock 模式）
-        return appState.backendConnected || true
+        return false
     }
 
     private func preloadModel() {
@@ -261,6 +295,71 @@ struct EngineSettingsView: View {
 
             await MainActor.run {
                 isLoading = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelRow(model: String) -> some View {
+        let status = modelManager.status(engine: "funasr", model: model)
+
+        HStack {
+            Text(modelDisplayName(model))
+                .font(.callout)
+
+            Spacer()
+
+            if !appState.backendConnected {
+                Text("后端未连接")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            } else if let status {
+                if status.downloading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    if let downloaded = status.downloadedText {
+                        Text(downloaded)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("下载中...")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                } else if status.available {
+                    if let size = status.sizeText {
+                        Text(size)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    Button {
+                        modelManager.delete(engine: "funasr", model: model)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!appState.backendConnected)
+                    .help("删除模型")
+                } else {
+                    Button {
+                        modelManager.download(engine: "funasr", model: model)
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(!appState.backendConnected)
+                    .help("下载模型")
+                }
+
+                if let error = status.error {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
+            } else {
+                Text("未知状态")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -585,9 +684,7 @@ struct HotkeySettingsView: View {
     @State private var useOption: Bool = true
     @State private var useControl: Bool = false
 
-    let availableKeys = ["无", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-                         "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-                         "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+    let availableKeys = HotkeyKeyMap.availableKeys
 
     var body: some View {
         Form {
@@ -733,26 +830,10 @@ struct HotkeySettingsView: View {
     }
 
     private func letterToKeyCode(_ letter: String) -> Int {
-        let keyMap: [String: Int] = [
-            "A": 0, "S": 1, "D": 2, "F": 3, "H": 4, "G": 5, "Z": 6, "X": 7,
-            "C": 8, "V": 9, "B": 11, "Q": 12, "W": 13, "E": 14, "R": 15,
-            "Y": 16, "T": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22,
-            "5": 23, "9": 25, "7": 26, "8": 28, "0": 29,
-            "O": 31, "U": 32, "I": 34, "P": 35, "L": 37, "J": 38, "K": 40,
-            "N": 45, "M": 46
-        ]
-        return keyMap[letter.uppercased()] ?? 15
+        return HotkeyKeyMap.keyCode(for: letter) ?? 15
     }
 
     private func keyCodeToLetter(_ keyCode: Int) -> String {
-        let keyMap: [Int: String] = [
-            0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
-            8: "C", 9: "V", 11: "B", 12: "Q", 13: "W", 14: "E", 15: "R",
-            16: "Y", 17: "T", 18: "1", 19: "2", 20: "3", 21: "4", 22: "6",
-            23: "5", 25: "9", 26: "7", 28: "8", 29: "0",
-            31: "O", 32: "U", 34: "I", 35: "P", 37: "L", 38: "J", 40: "K",
-            45: "N", 46: "M"
-        ]
-        return keyMap[keyCode] ?? "R"
+        return HotkeyKeyMap.keyCodeToString[keyCode] ?? "R"
     }
 }

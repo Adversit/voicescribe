@@ -5,9 +5,11 @@ Speaker Diarization & Recognition
 
 import os
 import json
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
+import soundfile as sf
 
 
 class SpeakerDiarizer:
@@ -71,18 +73,71 @@ class SpeakerDiarizer:
 
         # 加载说话人分离模型
         if load_diarization:
-            try:
-                print("[Speaker] Loading diarization model...")
-                self.diarization_model = AutoModel(
-                    model="damo/speech_campplus_speaker-diarization_common",
-                    disable_update=True
-                )
-                print("[Speaker] Diarization model loaded")
-            except Exception as e:
-                print(f"[Speaker] Diarization model failed to load: {e}")
-                self.diarization_model = None
+            diarization_candidates = []
+            override = os.environ.get("VOICESCRIBE_DIARIZATION_MODEL")
+            if override:
+                diarization_candidates.append(override)
+            diarization_candidates.extend([
+                "iic/speech_campplus_speaker-diarization_common",
+                "damo/speech_diarization_sond-zh-cn-alimeeting-16k-n16k4-pytorch",
+            ])
+
+            for model_id in diarization_candidates:
+                try:
+                    print(f"[Speaker] Loading diarization model: {model_id}...")
+                    self.diarization_model = AutoModel(
+                        model=model_id,
+                        disable_update=True
+                    )
+                    print(f"[Speaker] Diarization model loaded: {model_id}")
+                    break
+                except Exception as e:
+                    print(f"[Speaker] Diarization model failed to load ({model_id}): {e}")
+                    self.diarization_model = None
 
         print("[Speaker] FunASR speaker models ready")
+
+    def _read_audio_mono(self, audio_path: str) -> tuple[np.ndarray, int]:
+        """读取音频并转换为单声道 float32"""
+        data, sr = sf.read(audio_path)
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+        data = data.astype(np.float32, copy=False)
+        return data, sr
+
+    def _extract_embedding_for_segment(
+        self,
+        audio_data: np.ndarray,
+        sr: int,
+        start: float,
+        end: float,
+        min_duration: float,
+    ) -> Optional[np.ndarray]:
+        """对指定时间片段提取声纹 embedding"""
+        start_idx = max(0, int(start * sr))
+        end_idx = min(len(audio_data), int(end * sr))
+        if end_idx <= start_idx:
+            return None
+        duration = (end_idx - start_idx) / sr
+        if duration < min_duration:
+            return None
+
+        segment = audio_data[start_idx:end_idx]
+        if len(segment) == 0:
+            return None
+
+        tmp_file = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                tmp_file = f.name
+            sf.write(tmp_file, segment, sr)
+            return self.extract_embedding(tmp_file)
+        finally:
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except Exception:
+                    pass
 
     def diarize(self, audio_path: str) -> List[Dict]:
         """
@@ -265,17 +320,42 @@ class SpeakerDiarizer:
         speaker_mapping = {}  # diarization 标签 -> 真实姓名
         if audio_path and self.speakers and self.sv_model:
             try:
-                # 提取整段音频的声纹
-                embedding = self.extract_embedding(audio_path)
-                # 尝试匹配已注册的说话人
-                matched_id = self.identify_speaker(embedding)
-                if matched_id:
-                    matched_name = self.speakers[matched_id].get("name", matched_id)
-                    # 将所有 diarization 标签映射到匹配的说话人
-                    # （单人场景下的简化处理）
+                unique_labels = list({d["speaker"] for d in diarization})
+                min_duration = float(os.environ.get("VOICESCRIBE_SPK_MIN_SEC", "1.0"))
+
+                if len(unique_labels) > 1 and diarization:
+                    audio_data, sr = self._read_audio_mono(audio_path)
+                    embeddings_by_label: Dict[str, List[np.ndarray]] = {}
+
                     for d in diarization:
-                        speaker_mapping[d["speaker"]] = matched_name
-                    print(f"[Speaker] Matched: {matched_name}")
+                        emb = self._extract_embedding_for_segment(
+                            audio_data,
+                            sr,
+                            float(d["start"]),
+                            float(d["end"]),
+                            min_duration,
+                        )
+                        if emb is not None:
+                            embeddings_by_label.setdefault(d["speaker"], []).append(emb)
+
+                    for label, embs in embeddings_by_label.items():
+                        if not embs:
+                            continue
+                        avg_emb = np.mean(np.stack(embs, axis=0), axis=0)
+                        matched_id = self.identify_speaker(avg_emb)
+                        if matched_id:
+                            matched_name = self.speakers[matched_id].get("name", matched_id)
+                            speaker_mapping[label] = matched_name
+                            print(f"[Speaker] Matched {label} -> {matched_name}")
+                else:
+                    # 单人场景：使用整段音频声纹匹配
+                    embedding = self.extract_embedding(audio_path)
+                    matched_id = self.identify_speaker(embedding)
+                    if matched_id:
+                        matched_name = self.speakers[matched_id].get("name", matched_id)
+                        for d in diarization:
+                            speaker_mapping[d["speaker"]] = matched_name
+                        print(f"[Speaker] Matched: {matched_name}")
             except Exception as e:
                 print(f"[Speaker] Embedding extraction failed: {e}")
 

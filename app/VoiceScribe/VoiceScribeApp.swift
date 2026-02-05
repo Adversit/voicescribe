@@ -40,6 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 预加载用户选择的模型
         preloadSelectedModel()
+
+        // 首次启动自动下载默认模型
+        autoDownloadDefaultModel()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -85,6 +88,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 print("[Preload] Failed: \(error)")
             }
+        }
+    }
+
+    /// 首次启动自动下载默认模型（FunASR SeACo-Paraformer）
+    private func autoDownloadDefaultModel() {
+        let state = AppState.shared
+
+        Task {
+            // 等待后端启动（最多等待 30 秒）
+            for _ in 0..<30 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if state.backendConnected {
+                    break
+                }
+            }
+
+            guard state.backendConnected else {
+                print("[AutoDownload] Backend not ready, skip auto download")
+                return
+            }
+
+            await ModelManager.shared.autoDownloadDefaultIfNeeded(
+                engine: "funasr",
+                model: "seaco-paraformer"
+            )
         }
     }
 

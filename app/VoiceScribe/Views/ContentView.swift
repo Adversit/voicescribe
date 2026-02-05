@@ -23,6 +23,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @StateObject private var backendManager = BackendManager.shared
+    @StateObject private var modelManager = ModelManager.shared
     @State private var selectedSection: SettingsSection = .general
 
     var body: some View {
@@ -63,6 +64,14 @@ struct ContentView: View {
             // 安装进度覆盖层
             if backendManager.isInstalling {
                 InstallProgressOverlay()
+            }
+
+            if modelManager.isAutoDownloadActive {
+                ModelDownloadOverlay()
+            }
+
+            if let message = modelManager.toastMessage {
+                ToastView(message: message)
             }
         }
     }
@@ -121,5 +130,84 @@ struct ConnectionStatusView: View {
             Text(appState.backendConnected ? "已连接" : "未连接")
                 .font(.caption)
         }
+    }
+}
+
+// MARK: - Model Download Overlay
+
+struct ModelDownloadOverlay: View {
+    @StateObject private var modelManager = ModelManager.shared
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.7)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.2)
+                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+
+                Text(titleText)
+                    .font(.headline)
+                    .foregroundColor(.white)
+
+                if let status = modelManager.autoDownloadStatus {
+                    if let downloaded = status.downloadedText {
+                        Text("已下载 \(downloaded)")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    if let size = status.sizeText, modelManager.autoDownloadPhase == .loading {
+                        Text("模型大小 \(size)")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+
+                if let error = modelManager.autoDownloadError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
+            }
+            .padding(32)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.black.opacity(0.85))
+            )
+        }
+    }
+
+    private var titleText: String {
+        switch modelManager.autoDownloadPhase {
+        case .downloading:
+            return "正在下载默认模型..."
+        case .loading:
+            return "模型已下载，正在加载..."
+        case .none:
+            return "处理中..."
+        }
+    }
+}
+
+// MARK: - Toast
+
+struct ToastView: View {
+    let message: String
+
+    var body: some View {
+        VStack {
+            Text(message)
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.85))
+                .foregroundColor(.white)
+                .cornerRadius(10)
+                .padding(.top, 12)
+            Spacer()
+        }
+        .transition(.opacity)
     }
 }

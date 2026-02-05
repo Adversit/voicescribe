@@ -20,7 +20,7 @@ class FunASREngine:
         self.model = None
         self.model_name = None
     
-    def load(self, model_name: str = "paraformer-zh"):
+    def load(self, model_name: str = "paraformer-zh", enable_diarization: bool = False):
         """加载模型"""
         if model_name not in self.MODELS:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self.MODELS.keys())}")
@@ -32,6 +32,16 @@ class FunASREngine:
         device = self._get_device()
         print(f"[FunASR] Using device: {device}")
 
+        self.enable_diarization = enable_diarization
+
+        diarization_kwargs = {}
+        if enable_diarization:
+            # 使用 FunASR 内置 CAM++ 说话人特征（spk_model）
+            diarization_kwargs = {
+                "spk_model": "cam++",
+                "spk_mode": "punc_segment",
+            }
+
         if model_name == "sensevoice-small":
             # SenseVoice 特殊配置
             self.model = AutoModel(
@@ -39,6 +49,7 @@ class FunASREngine:
                 vad_model="fsmn-vad",
                 vad_kwargs={"max_single_segment_time": 30000},
                 device=device,
+                **diarization_kwargs,
             )
         elif model_name == "seaco-paraformer":
             # SeACo-Paraformer: 专门针对热词优化的模型
@@ -49,6 +60,7 @@ class FunASREngine:
                 vad_model="fsmn-vad",
                 punc_model="ct-punc",
                 device=device,
+                **diarization_kwargs,
             )
         else:
             # Paraformer 系列 - 启用 VAD 和标点预测
@@ -58,10 +70,14 @@ class FunASREngine:
                 vad_model="fsmn-vad",
                 punc_model="ct-punc",
                 device=device,
+                **diarization_kwargs,
             )
         
         self.model_name = model_name
-        print(f"[FunASR] Loaded model: {model_name}")
+        if enable_diarization:
+            print(f"[FunASR] Loaded model with diarization: {model_name}")
+        else:
+            print(f"[FunASR] Loaded model: {model_name}")
     
     def _get_device(self) -> str:
         """获取最佳计算设备：CUDA > MPS > CPU"""
@@ -142,16 +158,23 @@ class FunASREngine:
 
         # 解析时间戳（如果有）
         segments = []
-        if "timestamp" in output:
-            timestamps = output["timestamp"]
-            sentences = output.get("sentence_info", [])
-            
-            for i, sent in enumerate(sentences):
-                segments.append({
+        sentences = output.get("sentence_info", [])
+        if sentences:
+            for sent in sentences:
+                speaker = None
+                if "spk" in sent:
+                    try:
+                        speaker = f"SPEAKER_{int(sent.get('spk', 0)):02d}"
+                    except Exception:
+                        speaker = None
+                segment = {
                     "start": sent.get("start", 0) / 1000,  # ms -> s
                     "end": sent.get("end", 0) / 1000,
                     "text": sent.get("text", ""),
-                })
+                }
+                if speaker:
+                    segment["speaker"] = speaker
+                segments.append(segment)
         
         # 计算时长
         duration = 0

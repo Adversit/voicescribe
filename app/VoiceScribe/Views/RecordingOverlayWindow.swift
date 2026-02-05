@@ -151,7 +151,7 @@ struct SoundWaveBar: View {
             .fill(Color.white)
             .frame(width: 4, height: barHeight)
             .animation(.easeInOut(duration: 0.1), value: animatedHeight)
-            .onChange(of: level) { newValue in
+            .onChange(of: level) { _, newValue in
                 if isRecording {
                     // 根据音量和索引计算高度，添加随机变化
                     let baseHeight = CGFloat(newValue) * 25
@@ -160,7 +160,7 @@ struct SoundWaveBar: View {
                     animatedHeight = max(4, min(25, baseHeight + variation - indexOffset))
                 }
             }
-            .onChange(of: isRecording) { newValue in
+            .onChange(of: isRecording) { _, newValue in
                 if !newValue {
                     animatedHeight = 4
                 }

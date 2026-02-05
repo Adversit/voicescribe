@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// 后端进程管理器
 class BackendManager: ObservableObject {
@@ -11,8 +12,23 @@ class BackendManager: ObservableObject {
 
     private var process: Process?
     private var outputPipe: Pipe?
+    private var embeddedPythonHome: String?
 
     private init() {}
+
+    private var allowDependencyInstall: Bool {
+#if DEBUG
+        return true
+#else
+        return ProcessInfo.processInfo.environment["VOICESCRIBE_ALLOW_PIP_INSTALL"] == "1"
+#endif
+    }
+
+    private func defaultModelCacheDir() -> String {
+        let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let modelDir = supportDir.appendingPathComponent("VoiceScribe").appendingPathComponent("models")
+        return modelDir.path
+    }
 
     /// 启动后端服务
     func start() {
@@ -30,11 +46,17 @@ class BackendManager: ObservableObject {
 
         print("[BackendManager] 后端路径: \(backendPath)")
 
-        // 检查 venv 是否存在
+        // 检查 venv 是否存在（若有嵌入式 Python 则可跳过）
+        let embeddedPython = findEmbeddedPython()
         let venvPath = (backendPath as NSString).appendingPathComponent("venv")
-        if !FileManager.default.fileExists(atPath: venvPath) {
-            print("[BackendManager] venv 不存在，开始安装依赖...")
-            installDependencies(backendPath: backendPath)
+        if !FileManager.default.fileExists(atPath: venvPath) && embeddedPython == nil {
+            if allowDependencyInstall {
+                print("[BackendManager] venv 不存在，开始安装依赖...")
+                installDependencies(backendPath: backendPath)
+            } else {
+                statusMessage = "依赖缺失（需重新安装应用）"
+                print("[BackendManager] 依赖缺失，已禁用自动安装")
+            }
             return
         }
 
@@ -48,12 +70,25 @@ class BackendManager: ObservableObject {
         print("[BackendManager] 后端路径: \(backendPath)")
         print("[BackendManager] Python 路径: \(pythonPath)")
 
+        // 设置模型缓存目录
+        let modelCacheDir = defaultModelCacheDir()
+        do {
+            try FileManager.default.createDirectory(
+                atPath: modelCacheDir,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            print("[BackendManager] 创建模型缓存目录失败: \(error)")
+        }
+
         // 准备日志文件并写入启动信息
         let logPath = "/tmp/backend.log"
         let startupLog = """
         [BackendManager] 启动时间: \(Date())
         [BackendManager] 后端路径: \(backendPath)
         [BackendManager] Python 路径: \(pythonPath)
+        [BackendManager] 模型缓存目录: \(modelCacheDir)
         [BackendManager] server.py 路径: \(backendPath)/server.py
 
         """
@@ -74,6 +109,12 @@ class BackendManager: ObservableObject {
         } else {
             env["PATH"] = "\(homebrewPaths):/usr/bin:/bin"
         }
+        if let pythonHome = embeddedPythonHome {
+            env["PYTHONHOME"] = pythonHome
+            env["PATH"] = "\(pythonHome)/bin:" + (env["PATH"] ?? "")
+        }
+        env["VOICESCRIBE_MODEL_DIR"] = modelCacheDir
+        env["MODELSCOPE_CACHE"] = modelCacheDir
         process.environment = env
 
         // 捕获输出
@@ -136,14 +177,25 @@ class BackendManager: ObservableObject {
         }
 
         print("[BackendManager] 正在停止后端...")
+        let pid = process.processIdentifier
         process.terminate()
 
-        // 同步等待进程结束，确保应用退出前后端已关闭
-        process.waitUntilExit()
+        // 立即更新状态，避免阻塞退出
         self.process = nil
         self.isRunning = false
         self.statusMessage = "已停止"
-        print("[BackendManager] 后端已停止")
+
+        DispatchQueue.global(qos: .utility).async {
+            let deadline = Date().addingTimeInterval(2.0)
+            while process.isRunning && Date() < deadline {
+                usleep(100_000)
+            }
+            if process.isRunning {
+                print("[BackendManager] 强制终止后端, PID: \(pid)")
+                kill(pid, SIGKILL)
+            }
+            print("[BackendManager] 后端已停止")
+        }
     }
 
     /// 检查后端健康状态
@@ -365,6 +417,11 @@ class BackendManager: ObservableObject {
 
     /// 查找 Python 解释器（优先使用 venv）
     private func findPython() -> String? {
+        if let embedded = findEmbeddedPython() {
+            print("[BackendManager] 使用嵌入式 Python: \(embedded)")
+            return embedded
+        }
+
         // 查找后端目录下的 venv
         if let backendPath = findBackendPath() {
             // 检查 venv 中的 Python（使用符号链接也算存在）
@@ -415,6 +472,19 @@ class BackendManager: ObservableObject {
             print("[BackendManager] which python3 失败: \(error)")
         }
 
+        return nil
+    }
+
+    /// 查找嵌入式 Python（位于 app bundle）
+    private func findEmbeddedPython() -> String? {
+        if let bundlePath = Bundle.main.resourcePath {
+            let pythonHome = (bundlePath as NSString).appendingPathComponent("python")
+            let pythonBin = (pythonHome as NSString).appendingPathComponent("bin/python3")
+            if FileManager.default.fileExists(atPath: pythonBin) {
+                embeddedPythonHome = pythonHome
+                return pythonBin
+            }
+        }
         return nil
     }
 }

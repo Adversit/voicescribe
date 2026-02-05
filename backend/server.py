@@ -21,11 +21,29 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 import argparse
+import importlib.util
+import shutil
+import json
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+
+def _module_available(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
+
+
+def _whispercpp_cli_available() -> bool:
+    # whispercpp_engine.py 使用固定路径 /opt/homebrew/bin/whisper-cli
+    return os.path.exists("/opt/homebrew/bin/whisper-cli")
+
+
+def _whispercpp_model_available() -> bool:
+    # whispercpp_engine.py 默认模型路径
+    model_path = os.path.expanduser("~/.whisper-models/ggml-base.bin")
+    return os.path.exists(model_path)
+
 
 # 尝试导入 ASR 引擎
 WHISPER_AVAILABLE = False
@@ -35,27 +53,109 @@ PARAKEET_AVAILABLE = False
 
 try:
     from engines.whisper_engine import WhisperEngine
-    WHISPER_AVAILABLE = True
+    # faster-whisper 或 whisper 任意可用即可
+    WHISPER_AVAILABLE = _module_available("faster_whisper") or _module_available("whisper")
+    if not WHISPER_AVAILABLE:
+        print("[Warning] Whisper engine not available: missing faster_whisper/whisper")
 except ImportError as e:
     print(f"[Warning] Whisper engine not available: {e}")
 
 try:
     from engines.whispercpp_engine import WhisperCppEngine
-    WHISPERCPP_AVAILABLE = True
+    WHISPERCPP_AVAILABLE = _whispercpp_cli_available() and _whispercpp_model_available()
+    if not WHISPERCPP_AVAILABLE:
+        print("[Warning] Whisper.cpp engine not available: missing whisper-cli or model")
 except Exception as e:
     print(f"[Warning] Whisper.cpp engine not available: {e}")
 
 try:
     from engines.funasr_engine import FunASREngine
-    FUNASR_AVAILABLE = True
+    FUNASR_AVAILABLE = _module_available("funasr")
+    if not FUNASR_AVAILABLE:
+        print("[Warning] FunASR engine not available: missing funasr package")
 except ImportError as e:
     print(f"[Warning] FunASR engine not available: {e}")
 
 try:
     from engines.parakeet_engine import ParakeetEngine
-    PARAKEET_AVAILABLE = True
+    # Parakeet 依赖 nemo_toolkit 和 CUDA，尽量保守标记
+    PARAKEET_AVAILABLE = _module_available("nemo") or _module_available("nemo_toolkit")
+    if not PARAKEET_AVAILABLE:
+        print("[Warning] Parakeet engine not available: missing nemo_toolkit")
 except ImportError as e:
     print(f"[Warning] Parakeet engine not available: {e}")
+
+# 模型缓存目录（用于下载/管理模型权重）
+MODEL_CACHE_DIR = os.environ.get("VOICESCRIBE_MODEL_DIR")
+if not MODEL_CACHE_DIR:
+    MODEL_CACHE_DIR = os.path.join(
+        Path.home(), "Library", "Application Support", "VoiceScribe", "models"
+    )
+
+# 设置 modelscope 缓存目录（如果未设置）
+os.environ.setdefault("MODELSCOPE_CACHE", MODEL_CACHE_DIR)
+os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+
+MODEL_REGISTRY_PATH = os.path.join(MODEL_CACHE_DIR, "voicescribe_models.json")
+
+# 下载状态缓存
+model_downloads = {}
+
+def _load_registry() -> dict:
+    try:
+        if os.path.exists(MODEL_REGISTRY_PATH):
+            with open(MODEL_REGISTRY_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[ModelRegistry] Failed to read registry: {e}")
+    return {}
+
+def _save_registry(registry: dict) -> None:
+    try:
+        with open(MODEL_REGISTRY_PATH, "w", encoding="utf-8") as f:
+            json.dump(registry, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[ModelRegistry] Failed to write registry: {e}")
+
+def _get_registry_entry(engine: str, model: str) -> Optional[dict]:
+    registry = _load_registry()
+    return registry.get(engine, {}).get(model)
+
+def _set_registry_entry(engine: str, model: str, path: str, size_bytes: int) -> None:
+    registry = _load_registry()
+    if engine not in registry:
+        registry[engine] = {}
+    registry[engine][model] = {
+        "path": path,
+        "size_bytes": size_bytes,
+        "updated_at": datetime.now().isoformat(),
+    }
+    _save_registry(registry)
+
+def _delete_registry_entry(engine: str, model: str) -> None:
+    registry = _load_registry()
+    if engine in registry and model in registry[engine]:
+        del registry[engine][model]
+        _save_registry(registry)
+
+def _dir_size(path: str) -> int:
+    total = 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except FileNotFoundError:
+                continue
+    return total
+
+def _cache_total_size() -> int:
+    return _dir_size(MODEL_CACHE_DIR)
+
+def _get_fun_asr_model_id(model_name: str) -> Optional[str]:
+    try:
+        return FunASREngine.MODELS.get(model_name)
+    except Exception:
+        return None
 
 # Speaker diarization 是可选的
 DIARIZATION_AVAILABLE = False
@@ -90,10 +190,12 @@ engines = {}
 diarizer: Optional[object] = None
 MOCK_MODE = False
 
-# 预加载配置：启动时自动加载的引擎和模型
+# 预加载配置：默认禁用，避免阻塞服务启动
+# 若需要启动时预加载，设置环境变量 VOICESCRIBE_PRELOAD_MODELS=1
 PRELOAD_CONFIG = {
-    "funasr": "seaco-paraformer",  # SeACo-Paraformer 支持热词增强
+    "funasr": "seaco-paraformer",
 }
+ENABLE_PRELOAD = os.environ.get("VOICESCRIBE_PRELOAD_MODELS") == "1"
 
 
 @app.on_event("startup")
@@ -101,6 +203,9 @@ async def preload_models():
     """启动时预加载模型，避免首次转录等待"""
     if MOCK_MODE:
         print("[Preload] Mock mode, skipping preload")
+        return
+    if not ENABLE_PRELOAD:
+        print("[Preload] Disabled, skipping preload")
         return
 
     for engine_name, model_name in PRELOAD_CONFIG.items():
@@ -144,6 +249,16 @@ class EngineInfo(BaseModel):
     available: bool
 
 
+class ModelStatus(BaseModel):
+    engine: str
+    model: str
+    available: bool
+    downloading: bool
+    size_bytes: Optional[int] = None
+    downloaded_bytes: Optional[int] = None
+    error: Optional[str] = None
+
+
 @app.get("/")
 async def root():
     return {
@@ -167,32 +282,153 @@ async def list_engines() -> List[EngineInfo]:
             name="whisper",
             models=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
             loaded_model=engines.get("whisper", {}).get("model"),
-            available=WHISPER_AVAILABLE or MOCK_MODE,
+            available=WHISPER_AVAILABLE,
         ),
         EngineInfo(
             name="whispercpp",
             models=["tiny", "base", "small", "medium", "large"],
             loaded_model=engines.get("whispercpp", {}).get("model"),
-            available=WHISPERCPP_AVAILABLE or MOCK_MODE,
+            available=WHISPERCPP_AVAILABLE,
         ),
         EngineInfo(
             name="funasr",
             models=["seaco-paraformer", "paraformer-zh", "sensevoice-small"],
             loaded_model=engines.get("funasr", {}).get("model"),
-            available=FUNASR_AVAILABLE or MOCK_MODE,
+            available=FUNASR_AVAILABLE,
         ),
         EngineInfo(
             name="parakeet",
             models=["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"],
             loaded_model=engines.get("parakeet", {}).get("model"),
-            available=PARAKEET_AVAILABLE or MOCK_MODE,
+            available=PARAKEET_AVAILABLE,
         ),
     ]
     return available
 
 
+def _get_model_status(engine: str, model: str) -> ModelStatus:
+    key = f"{engine}:{model}"
+    download_state = model_downloads.get(key, {})
+
+    entry = _get_registry_entry(engine, model)
+    available = False
+    size_bytes = None
+
+    if entry and os.path.exists(entry.get("path", "")):
+        available = True
+        size_bytes = entry.get("size_bytes")
+    elif entry and not os.path.exists(entry.get("path", "")):
+        _delete_registry_entry(engine, model)
+
+    return ModelStatus(
+        engine=engine,
+        model=model,
+        available=available,
+        downloading=bool(download_state.get("downloading")),
+        size_bytes=size_bytes,
+        downloaded_bytes=download_state.get("downloaded_bytes"),
+        error=download_state.get("error"),
+    )
+
+
+async def _download_funasr_model(model_name: str) -> None:
+    model_id = _get_fun_asr_model_id(model_name)
+    if not model_id:
+        raise ValueError(f"Unknown FunASR model: {model_name}")
+
+    key = f"funasr:{model_name}"
+    state = model_downloads.setdefault(key, {})
+    state["downloading"] = True
+    state["error"] = None
+    state["downloaded_bytes"] = 0
+
+    baseline = _cache_total_size()
+    stop_event = asyncio.Event()
+
+    async def monitor_cache():
+        while not stop_event.is_set():
+            try:
+                current = _cache_total_size()
+                state["downloaded_bytes"] = max(0, current - baseline)
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
+    monitor_task = asyncio.create_task(monitor_cache())
+
+    try:
+        if not _module_available("modelscope"):
+            raise RuntimeError("modelscope not available")
+
+        from modelscope.hub.snapshot_download import snapshot_download
+
+        local_dir = await asyncio.to_thread(
+            snapshot_download, model_id, cache_dir=MODEL_CACHE_DIR
+        )
+
+        size_bytes = _dir_size(local_dir)
+        _set_registry_entry("funasr", model_name, local_dir, size_bytes)
+        state["size_bytes"] = size_bytes
+    except Exception as e:
+        state["error"] = str(e)
+    finally:
+        stop_event.set()
+        try:
+            await monitor_task
+        except Exception:
+            pass
+        state["downloading"] = False
+
+
+@app.get("/models")
+async def list_models() -> List[ModelStatus]:
+    """列出可用模型（当前仅管理 FunASR 模型缓存）"""
+    models = []
+    for model_name in FunASREngine.MODELS.keys():
+        models.append(_get_model_status("funasr", model_name))
+    return models
+
+
+@app.post("/models/download")
+async def download_model(engine: str = Form(...), model: str = Form(...)):
+    if engine != "funasr":
+        raise HTTPException(400, "Only FunASR models are supported for download")
+    if not FUNASR_AVAILABLE:
+        raise HTTPException(400, "FunASR engine not available")
+
+    status = _get_model_status(engine, model)
+    if status.available or status.downloading:
+        return {"status": "already", "engine": engine, "model": model}
+
+    asyncio.create_task(_download_funasr_model(model))
+    return {"status": "started", "engine": engine, "model": model}
+
+
+@app.post("/models/delete")
+async def delete_model(engine: str = Form(...), model: str = Form(...)):
+    if engine != "funasr":
+        raise HTTPException(400, "Only FunASR models are supported for delete")
+
+    entry = _get_registry_entry(engine, model)
+    if entry and os.path.exists(entry.get("path", "")):
+        shutil.rmtree(entry["path"], ignore_errors=True)
+    _delete_registry_entry(engine, model)
+    return {"status": "deleted", "engine": engine, "model": model}
+
+
 @app.post("/load")
-async def load_engine(engine: str, model: str):
+async def load_engine(
+    engine: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    enable_diarization: Optional[bool] = Form(None),
+    request: Request = None,
+):
+    if engine is None or model is None:
+        if request is not None:
+            engine = engine or request.query_params.get("engine")
+            model = model or request.query_params.get("model")
+    if engine is None or model is None:
+        raise HTTPException(422, "Missing engine/model")
     """预加载指定引擎和模型"""
     global engines
     
@@ -216,8 +452,8 @@ async def load_engine(engine: str, model: str):
         if not FUNASR_AVAILABLE:
             raise HTTPException(400, "FunASR engine not available. Install funasr.")
         eng = FunASREngine()
-        eng.load(model)
-        engines["funasr"] = {"engine": eng, "model": model}
+        eng.load(model, enable_diarization=bool(enable_diarization))
+        engines["funasr"] = {"engine": eng, "model": model, "diarization": bool(enable_diarization)}
     elif engine == "parakeet":
         if not PARAKEET_AVAILABLE:
             raise HTTPException(400, "Parakeet engine not available. Requires NVIDIA GPU and NeMo toolkit.")
@@ -302,7 +538,11 @@ async def transcribe(
         
         # Get or create engine
         if engine not in engines or engines[engine]["model"] != model:
-            await load_engine(engine, model)
+            await load_engine(engine, model, enable_diarization=enable_diarization if engine == "funasr" else None)
+        elif engine == "funasr" and enable_diarization:
+            # 如果需要说话人识别但当前引擎未开启，则重新加载
+            if not engines.get("funasr", {}).get("diarization", False):
+                await load_engine(engine, model, enable_diarization=True)
         
         eng = engines[engine]["engine"]
 
@@ -314,8 +554,32 @@ async def transcribe(
             print(f"[Transcribe] Engine={engine}, hotwords={hotwords or '(none)'}")
             result = eng.transcribe(tmp_path, language=language)
         
-        # Speaker diarization if enabled
-        if enable_diarization and DIARIZATION_AVAILABLE:
+        # Speaker diarization if enabled (FunASR 内置 spk_model 时可跳过)
+        diarization_done = False
+        if engine == "funasr" and enable_diarization:
+            if engines.get("funasr", {}).get("diarization", False):
+                # 如果 FunASR 已给出 speaker 标签，尝试将标签映射为已注册说话人姓名
+                try:
+                    diarization_list = [
+                        {
+                            "start": seg["start"],
+                            "end": seg["end"],
+                            "speaker": seg.get("speaker"),
+                        }
+                        for seg in result.get("segments", [])
+                        if seg.get("speaker") is not None
+                    ]
+                    if diarization_list:
+                        diarization_done = True
+                        if diarizer is None:
+                            diarizer = SpeakerDiarizer()
+                        if diarizer.speakers and diarizer.sv_model is None:
+                            diarizer.load(load_diarization=False)
+                        result = diarizer.assign_speakers(result, diarization_list, audio_path=tmp_path)
+                except Exception as e:
+                    print(f"[Speaker] Name mapping failed: {e}")
+
+        if enable_diarization and DIARIZATION_AVAILABLE and not diarization_done:
             if diarizer is None:
                 diarizer = SpeakerDiarizer()
                 diarizer.load()

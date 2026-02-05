@@ -17,11 +17,11 @@ class AppState: ObservableObject {
     @Published var currentTranscription: Transcription?
     
     // MARK: - Settings
-    @AppStorage("selectedEngine") var selectedEngine = "whispercpp"
-    @AppStorage("selectedModel") var selectedModel = "medium"
+    @AppStorage("selectedEngine") var selectedEngine = "funasr"
+    @AppStorage("selectedModel") var selectedModel = "seaco-paraformer"
     @AppStorage("language") var language = "zh"
     @AppStorage("enableDiarization") var enableDiarization = false
-    @AppStorage("hotkeyModifiers") var hotkeyModifiers: Int = 0x100108 // ⌘⇧
+    @AppStorage("hotkeyModifiers") var hotkeyModifiers: Int = 0x120000 // ⌘⇧
     @AppStorage("hotkeyKeyCode") var hotkeyKeyCode: Int = 15 // R
 
     // MARK: - Output Settings
@@ -54,10 +54,7 @@ class AppState: ObservableObject {
         checkBackendConnection()
 
         // 定期检查
-        connectionCheckTimer?.invalidate()
-        connectionCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.checkBackendConnection()
-        }
+        scheduleConnectionTimer(interval: 2.0)
     }
 
     func checkBackendConnection() {
@@ -69,10 +66,7 @@ class AppState: ObservableObject {
                     if !self.backendConnected {
                         self.backendConnected = true
                         // 连接成功后，降低检查频率
-                        self.connectionCheckTimer?.invalidate()
-                        self.connectionCheckTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
-                            self?.checkBackendConnection()
-                        }
+                        self.scheduleConnectionTimer(interval: 10.0)
                     }
                 }
             } catch {
@@ -80,14 +74,26 @@ class AppState: ObservableObject {
                     if self.backendConnected {
                         self.backendConnected = false
                         // 断开连接后，提高检查频率
-                        self.connectionCheckTimer?.invalidate()
-                        self.connectionCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-                            self?.checkBackendConnection()
-                        }
+                        self.scheduleConnectionTimer(interval: 2.0)
                     }
                 }
             }
         }
+    }
+
+    private func scheduleConnectionTimer(interval: TimeInterval) {
+        connectionCheckTimer?.invalidate()
+        connectionCheckTimer = Timer.scheduledTimer(
+            timeInterval: interval,
+            target: self,
+            selector: #selector(handleConnectionTimer(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+    }
+
+    @objc private func handleConnectionTimer(_ timer: Timer) {
+        checkBackendConnection()
     }
 }
 
