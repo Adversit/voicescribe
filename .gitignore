@@ -11,6 +11,11 @@ venv/
 *.egg-info/
 dist/
 build/
+*.pyc
+
+# Python backend logs
+backend/server_out.log
+backend/server_err.log
 
 # Swift
 .build/
@@ -34,7 +39,46 @@ runtime/
 # Cache
 .cache/
 *.cache
+.modelscope/
+.huggingface/
 
 # Temporary files
 *.tmp
 *.temp
+
+# Node.js / Frontend
+node_modules/
+.next/
+out/
+dist-electron/
+frontend/dist/
+frontend/.next/
+frontend/out/
+frontend/dist-electron/
+frontend/node_modules/
+*.tsbuildinfo
+
+# Electron
+frontend/dist/
+
+# Model cache (large files)
+models/
+*.bin
+*.gguf
+*.pt
+*.pth
+*.onnx
+
+# User data
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+desktop.ini

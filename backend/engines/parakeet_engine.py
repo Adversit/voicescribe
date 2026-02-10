@@ -39,13 +39,18 @@ class ParakeetEngine:
         
         import torch
         if not torch.cuda.is_available():
-            raise RuntimeError("Parakeet requires NVIDIA GPU with CUDA")
+            raise RuntimeError(
+                "Parakeet requires NVIDIA GPU with CUDA support. "
+                "Please install GPU support by running: scripts\\windows\\install_gpu.bat (Windows) "
+                "or use other engines (Whisper, FunASR) that support CPU."
+            )
         
         model_id = self.MODELS[model_name]
         self.model = nemo_asr.models.ASRModel.from_pretrained(model_id)
         self.model_name = model_name
         
         print(f"[Parakeet] Loaded model: {model_name}")
+        print(f"[Parakeet] Using GPU: {torch.cuda.get_device_name(0)}")
     
     def transcribe(
         self,

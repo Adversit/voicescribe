@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"D:/learn/AIzhuoyuezhongxin/voicescribe/voicescribe/backend/venv/Scripts/python.exe\":*)",
+      "Bash(curl:*)",
+      "Bash(echo:*)",
+      "Bash(npx next build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls:*)",
+      "Bash(cmd.exe /c \"scripts\\\\test_backend.bat < nul\")",
+      "Bash(cmd.exe:*)",
+      "Bash(npx electron-builder:*)",
+      "Bash(\"D:/learn/AIzhuoyuezhongxin/voicescribe/voicescribe/backend/venv/Scripts/python.exe\" -c \"\ntry:\n    import faster_whisper; print\\(''faster-whisper: OK''\\)\nexcept: print\\(''faster-whisper: NOT INSTALLED''\\)\ntry:\n    from funasr import AutoModel; print\\(''funasr: OK''\\)\nexcept: print\\(''funasr: NOT INSTALLED''\\)\ntry:\n    import nemo_toolkit; print\\(''nemo: OK''\\)\nexcept: print\\(''nemo: NOT INSTALLED''\\)\n\")",
+      "Bash(\"D:/learn/AIzhuoyuezhongxin/voicescribe/voicescribe/backend/venv/Scripts/python.exe\" -c:*)",
+      "Bash(npm run dev:electron:*)",
+      "Bash(tr:*)",
+      "Bash(npx electron .)",
+      "Bash(\"D:/learn/AIzhuoyuezhongxin/voicescribe/voicescribe/backend/venv/Scripts/pip.exe\" install torch torchvision --index-url https://download.pytorch.org/whl/cu126)",
+      "Bash(\"D:/learn/AIzhuoyuezhongxin/voicescribe/voicescribe/backend/venv/Scripts/pip.exe\" install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu126)",
+      "Bash(venvScriptspython.exe -c \"import ctypes, os, glob; site = os.path.join\\(''venv'', ''Lib'', ''site-packages'', ''torch'', ''lib''\\); print\\(''torch lib dir:'', site\\); dlls = glob.glob\\(os.path.join\\(site, ''*.dll''\\)\\); print\\(f''Found {len\\(dlls\\)} DLLs''\\); print\\(''c10.dll exists:'', os.path.exists\\(os.path.join\\(site, ''c10.dll''\\)\\)\\)\")",
+      "Bash(D:\\\\learn\\\\AIzhuoyuezhongxin\\\\voicescribe\\\\voicescribe\\\\backend\\\\venv\\\\Scripts\\\\python.exe -c:*)",
+      "Bash(cmd /c:*)",
+      "Bash(powershell -Command \"& ''D:\\\\learn\\\\AIzhuoyuezhongxin\\\\voicescribe\\\\voicescribe\\\\backend\\\\venv\\\\Scripts\\\\python.exe'' -c ''print\\(\"\"hello world\"\"\\)''\")",
+      "Bash(powershell:*)",
+      "Bash(npm run build:electron:*)",
+      "Bash(pushd:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "WebSearch"
+    ]
+  }
+}

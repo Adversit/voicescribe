@@ -15,6 +15,14 @@ VoiceScribe Backend Server
 
 import os
 import sys
+
+# Windows GBK encoding fix: ensure stdout/stderr use UTF-8
+if sys.platform == 'win32':
+    os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import tempfile
 import asyncio
 from pathlib import Path
@@ -88,12 +96,17 @@ except ImportError as e:
 # 模型缓存目录（用于下载/管理模型权重）
 MODEL_CACHE_DIR = os.environ.get("VOICESCRIBE_MODEL_DIR")
 if not MODEL_CACHE_DIR:
-    MODEL_CACHE_DIR = os.path.join(
-        Path.home(), "Library", "Application Support", "VoiceScribe", "models"
-    )
+    if sys.platform == 'win32':
+        # Windows: let modelscope use its default cache (~/.cache/modelscope/hub/models/)
+        MODEL_CACHE_DIR = os.path.join(Path.home(), ".cache", "modelscope", "hub", "models")
+    else:
+        # macOS
+        MODEL_CACHE_DIR = os.path.join(
+            Path.home(), "Library", "Application Support", "VoiceScribe", "models"
+        )
+        # Only override MODELSCOPE_CACHE on macOS to use custom path
+        os.environ.setdefault("MODELSCOPE_CACHE", MODEL_CACHE_DIR)
 
-# 设置 modelscope 缓存目录（如果未设置）
-os.environ.setdefault("MODELSCOPE_CACHE", MODEL_CACHE_DIR)
 os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
 MODEL_REGISTRY_PATH = os.path.join(MODEL_CACHE_DIR, "voicescribe_models.json")
@@ -247,6 +260,7 @@ class EngineInfo(BaseModel):
     models: List[str]
     loaded_model: Optional[str]
     available: bool
+    requires_gpu: bool = False  # 是否需要 GPU 支持
 
 
 class ModelStatus(BaseModel):
@@ -283,24 +297,28 @@ async def list_engines() -> List[EngineInfo]:
             models=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
             loaded_model=engines.get("whisper", {}).get("model"),
             available=WHISPER_AVAILABLE,
+            requires_gpu=False,  # 支持 CPU 和 GPU
         ),
         EngineInfo(
             name="whispercpp",
             models=["tiny", "base", "small", "medium", "large"],
             loaded_model=engines.get("whispercpp", {}).get("model"),
             available=WHISPERCPP_AVAILABLE,
+            requires_gpu=False,  # 支持 CPU 和 GPU
         ),
         EngineInfo(
             name="funasr",
-            models=["seaco-paraformer", "paraformer-zh", "sensevoice-small"],
+            models=["seaco-paraformer", "paraformer-zh", "paraformer-zh-streaming", "sensevoice-small"],
             loaded_model=engines.get("funasr", {}).get("model"),
             available=FUNASR_AVAILABLE,
+            requires_gpu=False,  # 支持 CPU 和 GPU
         ),
         EngineInfo(
             name="parakeet",
             models=["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"],
             loaded_model=engines.get("parakeet", {}).get("model"),
             available=PARAKEET_AVAILABLE,
+            requires_gpu=True,  # 仅支持 GPU
         ),
     ]
     return available
@@ -786,7 +804,7 @@ def main():
         print("=" * 50)
         print("🎭 Running in MOCK MODE")
         print("   No ASR engines loaded, returning mock results")
-        print("   Install whisper-cpp via: brew install whisper-cpp")
+        print("   Install ASR engines to enable transcription")
         print("=" * 50)
     else:
         print("=" * 50)
