@@ -32,8 +32,9 @@ import argparse
 import importlib.util
 import shutil
 import json
+import wave
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -42,15 +43,25 @@ def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
+def _import_ok(module_name: str) -> bool:
+    """Check runtime import, not just module discovery."""
+    try:
+        __import__(module_name)
+        return True
+    except Exception as e:
+        print(f"[Warning] Runtime import failed for {module_name}: {e}")
+        return False
+
+
 def _whispercpp_cli_available() -> bool:
     # whispercpp_engine.py 使用固定路径 /opt/homebrew/bin/whisper-cli
     return os.path.exists("/opt/homebrew/bin/whisper-cli")
 
 
 def _whispercpp_model_available() -> bool:
-    # whispercpp_engine.py 默认模型路径
-    model_path = os.path.expanduser("~/.whisper-models/ggml-base.bin")
-    return os.path.exists(model_path)
+    # Managed by model registry and per-model checks.
+    return True
+
 
 
 # 尝试导入 ASR 引擎
@@ -59,10 +70,29 @@ WHISPERCPP_AVAILABLE = False
 FUNASR_AVAILABLE = False
 PARAKEET_AVAILABLE = False
 
+WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
+WHISPERCPP_MODELS = ["tiny", "base", "small", "medium", "large"]
+FUNASR_MODELS = ["seaco-paraformer", "paraformer-zh", "paraformer-zh-streaming", "sensevoice-small"]
+PARAKEET_MODELS = ["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"]
+
+WHISPER_HF_REPOS = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "base": "Systran/faster-whisper-base",
+    "small": "Systran/faster-whisper-small",
+    "medium": "Systran/faster-whisper-medium",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+}
+PARAKEET_HF_REPOS = {
+    "parakeet-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
+    "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
+}
+WHISPERCPP_HF_REPO = "ggerganov/whisper.cpp"
+
 try:
     from engines.whisper_engine import WhisperEngine
     # faster-whisper 或 whisper 任意可用即可
-    WHISPER_AVAILABLE = _module_available("faster_whisper") or _module_available("whisper")
+    WHISPER_AVAILABLE = _import_ok("faster_whisper") or _import_ok("whisper")
     if not WHISPER_AVAILABLE:
         print("[Warning] Whisper engine not available: missing faster_whisper/whisper")
 except ImportError as e:
@@ -97,15 +127,23 @@ except ImportError as e:
 MODEL_CACHE_DIR = os.environ.get("VOICESCRIBE_MODEL_DIR")
 if not MODEL_CACHE_DIR:
     if sys.platform == 'win32':
-        # Windows: let modelscope use its default cache (~/.cache/modelscope/hub/models/)
+        # Windows default cache path
         MODEL_CACHE_DIR = os.path.join(Path.home(), ".cache", "modelscope", "hub", "models")
     else:
         # macOS
         MODEL_CACHE_DIR = os.path.join(
             Path.home(), "Library", "Application Support", "VoiceScribe", "models"
         )
-        # Only override MODELSCOPE_CACHE on macOS to use custom path
-        os.environ.setdefault("MODELSCOPE_CACHE", MODEL_CACHE_DIR)
+
+# Keep ModelScope cache root at ".../modelscope" to avoid ".../hub/models/models".
+def _derive_modelscope_cache_root(model_dir: str) -> str:
+    p = Path(model_dir)
+    # If model_dir ends with ".../hub/models", return parent of "hub".
+    if len(p.parts) >= 2 and p.parts[-2].lower() == "hub" and p.parts[-1].lower() == "models":
+        return str(p.parent.parent)
+    return str(p)
+
+os.environ.setdefault("MODELSCOPE_CACHE", _derive_modelscope_cache_root(MODEL_CACHE_DIR))
 
 os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
@@ -294,28 +332,28 @@ async def list_engines() -> List[EngineInfo]:
     available = [
         EngineInfo(
             name="whisper",
-            models=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
+            models=WHISPER_MODELS,
             loaded_model=engines.get("whisper", {}).get("model"),
             available=WHISPER_AVAILABLE,
             requires_gpu=False,  # 支持 CPU 和 GPU
         ),
         EngineInfo(
             name="whispercpp",
-            models=["tiny", "base", "small", "medium", "large"],
+            models=WHISPERCPP_MODELS,
             loaded_model=engines.get("whispercpp", {}).get("model"),
             available=WHISPERCPP_AVAILABLE,
             requires_gpu=False,  # 支持 CPU 和 GPU
         ),
         EngineInfo(
             name="funasr",
-            models=["seaco-paraformer", "paraformer-zh", "paraformer-zh-streaming", "sensevoice-small"],
+            models=FUNASR_MODELS,
             loaded_model=engines.get("funasr", {}).get("model"),
             available=FUNASR_AVAILABLE,
             requires_gpu=False,  # 支持 CPU 和 GPU
         ),
         EngineInfo(
             name="parakeet",
-            models=["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"],
+            models=PARAKEET_MODELS,
             loaded_model=engines.get("parakeet", {}).get("model"),
             available=PARAKEET_AVAILABLE,
             requires_gpu=True,  # 仅支持 GPU
@@ -349,12 +387,77 @@ def _get_model_status(engine: str, model: str) -> ModelStatus:
     )
 
 
-async def _download_funasr_model(model_name: str) -> None:
+async def _download_funasr_model(model_name: str) -> tuple[str, int]:
     model_id = _get_fun_asr_model_id(model_name)
     if not model_id:
         raise ValueError(f"Unknown FunASR model: {model_name}")
+    if not _module_available("modelscope"):
+        raise RuntimeError("modelscope not available")
 
-    key = f"funasr:{model_name}"
+    from modelscope.hub.snapshot_download import snapshot_download
+
+    local_dir = await asyncio.to_thread(
+        snapshot_download, model_id, cache_dir=MODEL_CACHE_DIR
+    )
+    return local_dir, _dir_size(local_dir)
+
+
+async def _download_whisper_model(model_name: str) -> tuple[str, int]:
+    repo_id = WHISPER_HF_REPOS.get(model_name)
+    if not repo_id:
+        raise ValueError(f"Unknown Whisper model: {model_name}")
+
+    from huggingface_hub import snapshot_download
+
+    local_dir = await asyncio.to_thread(
+        snapshot_download, repo_id=repo_id, cache_dir=os.path.join(MODEL_CACHE_DIR, "huggingface")
+    )
+    return local_dir, _dir_size(local_dir)
+
+
+async def _download_whispercpp_model(model_name: str) -> tuple[str, int]:
+    if model_name not in WHISPERCPP_MODELS:
+        raise ValueError(f"Unknown Whisper.cpp model: {model_name}")
+
+    from huggingface_hub import hf_hub_download
+
+    local_dir = os.path.join(MODEL_CACHE_DIR, "whispercpp")
+    os.makedirs(local_dir, exist_ok=True)
+    filename = f"ggml-{model_name}.bin"
+    local_file = await asyncio.to_thread(
+        hf_hub_download,
+        repo_id=WHISPERCPP_HF_REPO,
+        filename=filename,
+        local_dir=local_dir,
+        local_dir_use_symlinks=False,
+    )
+    return local_file, os.path.getsize(local_file)
+
+
+async def _download_parakeet_model(model_name: str) -> tuple[str, int]:
+    repo_id = PARAKEET_HF_REPOS.get(model_name)
+    if not repo_id:
+        raise ValueError(f"Unknown Parakeet model: {model_name}")
+
+    from huggingface_hub import snapshot_download
+
+    local_dir = await asyncio.to_thread(
+        snapshot_download, repo_id=repo_id, cache_dir=os.path.join(MODEL_CACHE_DIR, "huggingface")
+    )
+    return local_dir, _dir_size(local_dir)
+
+
+def _all_managed_models() -> dict:
+    return {
+        "whisper": WHISPER_MODELS,
+        "whispercpp": WHISPERCPP_MODELS,
+        "funasr": FUNASR_MODELS,
+        "parakeet": PARAKEET_MODELS,
+    }
+
+
+async def _download_model_with_progress(engine: str, model: str) -> None:
+    key = f"{engine}:{model}"
     state = model_downloads.setdefault(key, {})
     state["downloading"] = True
     state["error"] = None
@@ -375,17 +478,18 @@ async def _download_funasr_model(model_name: str) -> None:
     monitor_task = asyncio.create_task(monitor_cache())
 
     try:
-        if not _module_available("modelscope"):
-            raise RuntimeError("modelscope not available")
+        if engine == "funasr":
+            local_path, size_bytes = await _download_funasr_model(model)
+        elif engine == "whisper":
+            local_path, size_bytes = await _download_whisper_model(model)
+        elif engine == "whispercpp":
+            local_path, size_bytes = await _download_whispercpp_model(model)
+        elif engine == "parakeet":
+            local_path, size_bytes = await _download_parakeet_model(model)
+        else:
+            raise ValueError(f"Unsupported engine: {engine}")
 
-        from modelscope.hub.snapshot_download import snapshot_download
-
-        local_dir = await asyncio.to_thread(
-            snapshot_download, model_id, cache_dir=MODEL_CACHE_DIR
-        )
-
-        size_bytes = _dir_size(local_dir)
-        _set_registry_entry("funasr", model_name, local_dir, size_bytes)
+        _set_registry_entry(engine, model, local_path, size_bytes)
         state["size_bytes"] = size_bytes
     except Exception as e:
         state["error"] = str(e)
@@ -400,36 +504,46 @@ async def _download_funasr_model(model_name: str) -> None:
 
 @app.get("/models")
 async def list_models() -> List[ModelStatus]:
-    """列出可用模型（当前仅管理 FunASR 模型缓存）"""
+    """List all managed models and their download status."""
     models = []
-    for model_name in FunASREngine.MODELS.keys():
-        models.append(_get_model_status("funasr", model_name))
+    for engine_name, model_names in _all_managed_models().items():
+        for model_name in model_names:
+            models.append(_get_model_status(engine_name, model_name))
     return models
 
 
 @app.post("/models/download")
 async def download_model(engine: str = Form(...), model: str = Form(...)):
-    if engine != "funasr":
-        raise HTTPException(400, "Only FunASR models are supported for download")
-    if not FUNASR_AVAILABLE:
-        raise HTTPException(400, "FunASR engine not available")
+    if engine not in _all_managed_models():
+        raise HTTPException(400, f"Unsupported engine: {engine}")
+    if model not in _all_managed_models()[engine]:
+        raise HTTPException(400, f"Unknown model for {engine}: {model}")
 
     status = _get_model_status(engine, model)
     if status.available or status.downloading:
         return {"status": "already", "engine": engine, "model": model}
 
-    asyncio.create_task(_download_funasr_model(model))
+    asyncio.create_task(_download_model_with_progress(engine, model))
     return {"status": "started", "engine": engine, "model": model}
 
 
 @app.post("/models/delete")
 async def delete_model(engine: str = Form(...), model: str = Form(...)):
-    if engine != "funasr":
-        raise HTTPException(400, "Only FunASR models are supported for delete")
+    if engine not in _all_managed_models():
+        raise HTTPException(400, f"Unsupported engine: {engine}")
+    if model not in _all_managed_models()[engine]:
+        raise HTTPException(400, f"Unknown model for {engine}: {model}")
 
     entry = _get_registry_entry(engine, model)
     if entry and os.path.exists(entry.get("path", "")):
-        shutil.rmtree(entry["path"], ignore_errors=True)
+        path_to_delete = entry["path"]
+        if os.path.isdir(path_to_delete):
+            shutil.rmtree(path_to_delete, ignore_errors=True)
+        else:
+            try:
+                os.remove(path_to_delete)
+            except FileNotFoundError:
+                pass
     _delete_registry_entry(engine, model)
     return {"status": "deleted", "engine": engine, "model": model}
 
@@ -463,7 +577,14 @@ async def load_engine(
     elif engine == "whispercpp":
         if not WHISPERCPP_AVAILABLE:
             raise HTTPException(400, "Whisper.cpp engine not available. Install whisper-cpp via brew.")
-        model_path = os.path.expanduser(f"~/.whisper-models/ggml-{model}.bin")
+        entry = _get_registry_entry("whispercpp", model)
+        model_path = None
+        if entry:
+            candidate = entry.get("path")
+            if candidate and os.path.exists(candidate):
+                model_path = candidate
+        if not model_path:
+            model_path = os.path.expanduser(f"~/.whisper-models/ggml-{model}.bin")
         eng = WhisperCppEngine(model_path=model_path)
         engines["whispercpp"] = {"engine": eng, "model": model}
     elif engine == "funasr":
@@ -628,78 +749,167 @@ async def transcribe(
 
 @app.websocket("/stream")
 async def stream_transcribe(websocket: WebSocket):
-    """实时流式转录（用于长时间录音）"""
+    """WebSocket streaming ASR:
+    - text: {"action":"start","engine","model","language","hotwords","enable_ai_refine"}
+    - binary: PCM16 mono 16k chunks
+    - text: {"action":"end"}
+    """
     await websocket.accept()
-    
-    if MOCK_MODE:
-        # Mock 模式：简单回显
+
+    def pcm16_to_wav_file(pcm_bytes: bytes, sample_rate: int = 16000, channels: int = 1) -> str:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp_path = tmp.name
+        with wave.open(tmp_path, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm_bytes)
+        return tmp_path
+
+    async def transcribe_pcm(pcm_bytes: bytes, engine: str, model: str, language: str, hotwords: str) -> dict:
+        global engines
+        if not pcm_bytes:
+            return {"text": "", "segments": [], "duration": 0}
+
+        if engine == "whisper" and not WHISPER_AVAILABLE:
+            raise RuntimeError("Whisper engine not available")
+        if engine == "whispercpp" and not WHISPERCPP_AVAILABLE:
+            raise RuntimeError("Whisper.cpp engine not available")
+        if engine == "funasr" and not FUNASR_AVAILABLE:
+            raise RuntimeError("FunASR engine not available")
+        if engine == "parakeet" and not PARAKEET_AVAILABLE:
+            raise RuntimeError("Parakeet engine not available")
+
+        if engine not in engines or engines[engine]["model"] != model:
+            await load_engine(engine, model)
+        eng = engines[engine]["engine"]
+
+        wav_path = pcm16_to_wav_file(pcm_bytes)
         try:
-            while True:
-                data = await websocket.receive_bytes()
-                await websocket.send_json({
-                    "type": "partial",
-                    "text": "[Mock] 正在录音...",
-                    "segments": []
-                })
-        except Exception:
-            pass
+            if engine == "funasr" and hotwords:
+                result = eng.transcribe(wav_path, language=language, hotwords=hotwords)
+            else:
+                result = eng.transcribe(wav_path, language=language)
+            return result
         finally:
-            await websocket.close()
-        return
-    
-    if not WHISPER_AVAILABLE:
-        await websocket.send_json({
-            "type": "error",
-            "message": "Whisper engine not available for streaming"
-        })
-        await websocket.close()
-        return
-    
-    engine_name = "whisper"
-    model = "base"  # 流式用小模型，速度优先
-    
-    # 确保引擎已加载
-    if engine_name not in engines:
-        eng = WhisperEngine()
-        eng.load(model)
-        engines[engine_name] = {"engine": eng, "model": model}
-    
-    eng = engines[engine_name]["engine"]
-    
-    buffer = b""
-    chunk_duration = 30  # 每 30 秒处理一次
+            try:
+                os.unlink(wav_path)
+            except Exception:
+                pass
+
+    cfg = {
+        "engine": "funasr",
+        "model": "seaco-paraformer",
+        "language": "zh",
+        "hotwords": "",
+        "enable_ai_refine": False,
+    }
+    # Streaming policy: process one partial every 30s chunk (16kHz, 16-bit mono).
+    chunk_duration = 30
+    overlap_duration = 3
     sample_rate = 16000
-    chunk_size = chunk_duration * sample_rate * 2  # 16-bit audio
-    
+    bytes_per_sample = 2
+    chunk_size = chunk_duration * sample_rate * bytes_per_sample
+    overlap_size = overlap_duration * sample_rate * bytes_per_sample
+    chunk_buffer = bytearray()
+    full_pcm = bytearray()
+
     try:
         while True:
-            data = await websocket.receive_bytes()
-            buffer += data
-            
-            if len(buffer) >= chunk_size:
-                # 处理当前块
-                chunk = buffer[:chunk_size]
-                buffer = buffer[chunk_size:]
-                
-                # 保存临时文件
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                    tmp.write(chunk)
-                    tmp_path = tmp.name
-                
+            msg = await websocket.receive()
+
+            if msg.get("type") == "websocket.disconnect":
+                break
+
+            text_payload = msg.get("text")
+            if text_payload is not None:
                 try:
-                    result = eng.transcribe(tmp_path, language="zh")
+                    payload = json.loads(text_payload)
+                except Exception:
+                    await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
+                    continue
+
+                action = payload.get("action")
+                if action == "start":
+                    cfg["engine"] = payload.get("engine", cfg["engine"])
+                    cfg["model"] = payload.get("model", cfg["model"])
+                    cfg["language"] = payload.get("language", cfg["language"])
+                    cfg["hotwords"] = payload.get("hotwords", cfg["hotwords"])
+                    cfg["enable_ai_refine"] = bool(payload.get("enable_ai_refine", cfg["enable_ai_refine"]))
+                    await websocket.send_json({"type": "started", **cfg})
+                    continue
+
+                if action == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    continue
+
+                if action == "end":
+                    final_result = await transcribe_pcm(
+                        bytes(full_pcm),
+                        cfg["engine"],
+                        cfg["model"],
+                        cfg["language"],
+                        cfg["hotwords"],
+                    )
+                    # AI refine runs once after the whole recording is converted to text.
+                    if cfg["enable_ai_refine"] and AI_REFINE_AVAILABLE:
+                        refiner = AIRefiner()
+                        hotwords_list = [w.strip() for w in cfg["hotwords"].split(",") if w.strip()]
+                        final_result["text"] = refiner.refine(final_result.get("text", ""), hotwords_list)
                     await websocket.send_json({
-                        "type": "partial",
-                        "text": result["text"],
-                        "segments": result.get("segments", [])
+                        "type": "final",
+                        "text": final_result.get("text", ""),
+                        "segments": final_result.get("segments", []),
+                        "duration": final_result.get("duration", 0),
+                        "engine": cfg["engine"],
+                        "model": cfg["model"],
                     })
-                finally:
-                    os.unlink(tmp_path)
-    
+                    break
+
+                await websocket.send_json({"type": "error", "message": f"Unknown action: {action}"})
+                continue
+
+            chunk = msg.get("bytes")
+            if chunk is None:
+                continue
+            chunk_buffer.extend(chunk)
+            full_pcm.extend(chunk)
+
+            while len(chunk_buffer) >= chunk_size:
+                pcm_chunk = bytes(chunk_buffer[:chunk_size])
+                if overlap_size > 0:
+                    keep_from = max(0, chunk_size - overlap_size)
+                    chunk_buffer = bytearray(chunk_buffer[keep_from:])
+                else:
+                    del chunk_buffer[:chunk_size]
+                partial_result = await transcribe_pcm(
+                    pcm_chunk,
+                    cfg["engine"],
+                    cfg["model"],
+                    cfg["language"],
+                    cfg["hotwords"],
+                )
+                await websocket.send_json({
+                    "type": "partial",
+                    "text": partial_result.get("text", ""),
+                    "segments": partial_result.get("segments", []),
+                    "duration": partial_result.get("duration", 0),
+                    "engine": cfg["engine"],
+                    "model": cfg["model"],
+                })
+
+    except WebSocketDisconnect:
+        pass
     except Exception as e:
-        await websocket.send_json({"type": "error", "message": str(e)})
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @app.post("/speakers/register")

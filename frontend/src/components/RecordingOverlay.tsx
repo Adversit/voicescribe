@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface RecordingOverlayProps {
@@ -18,22 +18,13 @@ function formatDuration(seconds: number): string {
 }
 
 function SoundWaveBar({ level, index, isRecording }: { level: number; index: number; isRecording: boolean }) {
-    const [height, setHeight] = useState(4);
-
-    useEffect(() => {
-        if (isRecording) {
-            const baseHeight = level * 25;
-            const variation = (Math.random() - 0.5) * 6;
-            const indexOffset = Math.abs(index - 2) * 2;
-            setHeight(Math.max(4, Math.min(25, baseHeight + variation - indexOffset)));
-        } else {
-            setHeight(4);
-        }
-    }, [level, index, isRecording]);
+    const profile = [0.55, 0.8, 1.0, 0.8, 0.55];
+    const scaled = isRecording ? level * profile[index] : 0;
+    const height = Math.max(4, Math.min(25, 4 + scaled * 21));
 
     return (
         <div
-            className="w-1 bg-white rounded-sm transition-all duration-100 ease-in-out"
+            className="w-1 bg-white rounded-sm transition-all duration-120 ease-out"
             style={{ height: `${height}px` }}
         />
     );

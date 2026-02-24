@@ -388,13 +388,6 @@ function handleTranscriptionOutput(text: string) {
 
     console.log(`[Output] Mode: ${outputMode}, Text: ${text.substring(0, 50)}...`);
 
-    // If VoiceScribe window is focused, force clipboard mode
-    // (Similar to macOS logic: if previousApp is VoiceScribe itself)
-    if (mainWindow && mainWindow.isFocused()) {
-        console.log('[Output] VoiceScribe window is focused, switching to clipboard mode');
-        outputMode = 'clipboard';
-    }
-
     if (outputMode === 'clipboard') {
         clipboard.writeText(text);
         console.log('[Output] Copied to clipboard');
@@ -660,6 +653,11 @@ function setupIpcHandlers() {
     // Recording complete
     ipcMain.on('recording-complete', (_event, text: string) => {
         transcriptionComplete(text);
+    });
+
+    // Recording complete with full result payload (streaming path)
+    ipcMain.on('recording-complete-result', (_event, payload: { text: string; result?: backend.TranscribeResult }) => {
+        transcriptionComplete(payload?.text || '', payload?.result);
     });
     
     // Recording error

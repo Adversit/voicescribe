@@ -10,6 +10,7 @@ export interface WavRecorderOptions {
     channelCount?: 1; // currently only mono is supported
     echoCancellation?: boolean;
     noiseSuppression?: boolean;
+    onPcmChunk?: (chunk: Int16Array) => void;
 }
 
 function writeAscii(view: DataView, offset: number, text: string) {
@@ -110,7 +111,12 @@ function encodeWavPcm16Mono(samples: Int16Array, sampleRate: number): ArrayBuffe
 }
 
 export class WavRecorder {
-    private opts: Required<WavRecorderOptions>;
+    private opts: {
+        targetSampleRate: number;
+        channelCount: 1;
+        echoCancellation: boolean;
+        noiseSuppression: boolean;
+    };
     private stream: MediaStream | null = null;
     private audioContext: AudioContext | null = null;
     private source: MediaStreamAudioSourceNode | null = null;
@@ -120,7 +126,9 @@ export class WavRecorder {
     private chunks: Int16Array[] = [];
     private recording = false;
     private lastLevel = 0;
+    private smoothedLevel = 0;
     private inputSampleRate = 48000;
+    private onPcmChunk?: (chunk: Int16Array) => void;
 
     constructor(options: WavRecorderOptions = {}) {
         this.opts = {
@@ -129,6 +137,11 @@ export class WavRecorder {
             echoCancellation: options.echoCancellation ?? true,
             noiseSuppression: options.noiseSuppression ?? true,
         };
+        this.onPcmChunk = options.onPcmChunk;
+    }
+
+    setOnPcmChunk(callback?: (chunk: Int16Array) => void): void {
+        this.onPcmChunk = callback;
     }
 
     isRecording(): boolean {
@@ -136,7 +149,7 @@ export class WavRecorder {
     }
 
     getAudioLevel(): number {
-        return this.lastLevel;
+        return this.smoothedLevel;
     }
 
     async start(): Promise<void> {
@@ -168,13 +181,22 @@ export class WavRecorder {
 
         this.chunks = [];
         this.lastLevel = 0;
+        this.smoothedLevel = 0;
 
         this.processor.onaudioprocess = (e) => {
             const input = e.inputBuffer.getChannelData(0);
-            this.lastLevel = rmsLevel(input);
+            const rawLevel = rmsLevel(input);
+            // Suppress ambient floor and smooth quick spikes for steadier UI waveform.
+            const gated = rawLevel < 0.03 ? 0 : rawLevel;
+            const attack = 0.35;
+            const release = 0.12;
+            const alpha = gated > this.smoothedLevel ? attack : release;
+            this.lastLevel = gated;
+            this.smoothedLevel = this.smoothedLevel + (gated - this.smoothedLevel) * alpha;
 
             const pcm16 = downsampleToInt16(input, this.inputSampleRate, this.opts.targetSampleRate);
             this.chunks.push(pcm16);
+            this.onPcmChunk?.(pcm16);
         };
 
         this.source.connect(this.processor);
@@ -230,6 +252,7 @@ export class WavRecorder {
 
         this.chunks = [];
         this.lastLevel = 0;
+        this.smoothedLevel = 0;
 
         return encodeWavPcm16Mono(merged, this.opts.targetSampleRate);
     }
@@ -258,6 +281,7 @@ export class WavRecorder {
         this.stream = null;
         this.chunks = [];
         this.lastLevel = 0;
+        this.smoothedLevel = 0;
 
         // Closing async is fine to fire-and-forget here.
         if (ctx) {

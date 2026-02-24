@@ -29,6 +29,7 @@ export interface AppSettings {
     // General settings
     outputFormat: 'clipboard' | 'directInput' | 'both';
     launchAtLogin: boolean;
+    enableStreaming: boolean;
 
     // Vocabulary
     vocabulary: string[];
@@ -49,6 +50,7 @@ const defaults: AppSettings = {
     enableAiRefine: false,
     outputFormat: 'clipboard',
     launchAtLogin: false,
+    enableStreaming: false,
     vocabulary: [],
 };
 

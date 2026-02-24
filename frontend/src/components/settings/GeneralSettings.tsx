@@ -17,6 +17,7 @@ interface GeneralConfig {
     outputMode: string;
     enableDiarization: boolean;
     enableAIRefine: boolean;
+    enableStreaming: boolean;
 }
 
 export function GeneralSettings() {
@@ -25,6 +26,7 @@ export function GeneralSettings() {
         outputMode: "clipboard",
         enableDiarization: false,
         enableAIRefine: false,
+        enableStreaming: false,
     });
     const [backendConnected, setBackendConnected] = useState(false);
     const [appVersion, setAppVersion] = useState("0.0.0");
@@ -39,6 +41,7 @@ export function GeneralSettings() {
                         outputMode: settings.outputFormat || 'clipboard',
                         enableDiarization: settings.enableDiarization || false,
                         enableAIRefine: settings.enableAiRefine || false,
+                        enableStreaming: settings.enableStreaming || false,
                     });
                 } catch (err) {
                     console.error('Failed to load settings:', err);
@@ -83,6 +86,7 @@ export function GeneralSettings() {
             if (updates.outputMode !== undefined) settingsUpdate.outputFormat = updates.outputMode;
             if (updates.enableDiarization !== undefined) settingsUpdate.enableDiarization = updates.enableDiarization;
             if (updates.enableAIRefine !== undefined) settingsUpdate.enableAiRefine = updates.enableAIRefine;
+            if (updates.enableStreaming !== undefined) settingsUpdate.enableStreaming = updates.enableStreaming;
             window.electron.settings.update(settingsUpdate);
         }
     };
@@ -149,6 +153,16 @@ export function GeneralSettings() {
                     <h3 className="text-lg font-medium">其他</h3>
                 </div>
                 <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <Label htmlFor="streaming">启用流式传输</Label>
+                        <Switch
+                            id="streaming"
+                            checked={config.enableStreaming}
+                            onCheckedChange={(checked) =>
+                                updateConfig({ enableStreaming: checked })
+                            }
+                        />
+                    </div>
                     <div className="flex items-center justify-between">
                         <Label htmlFor="diarization">启用说话人识别</Label>
                         <Switch

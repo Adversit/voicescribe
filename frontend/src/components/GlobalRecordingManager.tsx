@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { getGlobalRecorder } from "@/lib/audio-recorder";
 import { useAppStore } from "@/store/app-store";
+import { StreamTranscriber } from "@/lib/stream-transcriber";
 
 /**
  * Global Recording Manager
@@ -23,11 +24,38 @@ export function GlobalRecordingManager() {
 
         const recorder = getGlobalRecorder();
         let levelTimer: ReturnType<typeof setInterval> | null = null;
+        let stream: StreamTranscriber | null = null;
 
         // Listen for start recording event
         const handleStartRecording = async () => {
             try {
                 console.log('[GlobalRecordingManager] Starting recording...');
+                const settings = await window.electron.settings.get();
+                if (settings.enableStreaming) {
+                    stream = new StreamTranscriber((partial) => {
+                        if (partial) {
+                            console.log("[Stream] partial:", partial.slice(0, 40));
+                        }
+                    });
+                    try {
+                        await stream.start({
+                            engine: settings.engine,
+                            model: settings.model,
+                            language: settings.language,
+                            hotwords: (settings.vocabulary || []).join(","),
+                            enableAiRefine: settings.enableAiRefine,
+                        });
+                        recorder.setOnPcmChunk((chunk) => stream?.sendChunk(chunk));
+                        console.log("[Stream] started");
+                    } catch (e) {
+                        console.warn("[Stream] start failed, fallback to file upload:", e);
+                        stream = null;
+                        recorder.setOnPcmChunk(undefined);
+                    }
+                } else {
+                    stream = null;
+                    recorder.setOnPcmChunk(undefined);
+                }
                 await recorder.startRecording();
 
                 // Push real audio level to main process for the overlay waveform.
@@ -56,17 +84,31 @@ export function GlobalRecordingManager() {
                     levelTimer = null;
                 }
                 window.electron?.recording?.updateAudioLevel?.(0);
+                recorder.setOnPcmChunk(undefined);
                 const audioBuffer = await recorder.stopRecording();
-                
-                // Transcribe via backend (main process handles settings and backend call)
-                console.log('[GlobalRecordingManager] Transcribing audio...');
-                const result = await window.electron.recording.transcribeAudio(audioBuffer);
-                
-                if (!result.success) {
-                    throw new Error(result.error || 'Transcription failed');
+
+                if (stream) {
+                    try {
+                        console.log("[Stream] finishing...");
+                        const finalResult = await stream.finish(600000);
+                        window.electron?.recording?.completeWithResult?.({
+                            text: finalResult.text,
+                            result: finalResult,
+                        });
+                        console.log('[GlobalRecordingManager] Stream transcription complete');
+                        return;
+                    } catch (e) {
+                        console.warn("[Stream] finish failed, fallback to file upload:", e);
+                    } finally {
+                        stream = null;
+                    }
                 }
-                
-                console.log('[GlobalRecordingManager] Transcription complete');
+
+                // Fallback: non-stream upload transcription
+                console.log('[GlobalRecordingManager] Transcribing audio (fallback upload)...');
+                const result = await window.electron.recording.transcribeAudio(audioBuffer);
+                if (!result.success) throw new Error(result.error || 'Transcription failed');
+                console.log('[GlobalRecordingManager] Transcription complete (fallback)');
                 
                 // Note: Main process handles transcription result, output mode, and history
                 // The recording-complete event is sent by main process after transcription
@@ -84,6 +126,9 @@ export function GlobalRecordingManager() {
                 levelTimer = null;
             }
             window.electron?.recording?.updateAudioLevel?.(0);
+            recorder.setOnPcmChunk(undefined);
+            stream?.abort();
+            stream = null;
             recorder.cancelRecording();
         };
 
@@ -142,6 +187,8 @@ export function GlobalRecordingManager() {
             }
             // Note: Other Electron IPC cleanup is handled by the preload script
             if (recorder.isRecording()) {
+                recorder.setOnPcmChunk(undefined);
+                stream?.abort();
                 recorder.cancelRecording();
             }
         };

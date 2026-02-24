@@ -34,6 +34,10 @@ export class AudioRecorder {
     getAudioLevel(): number {
         return this.wav.getAudioLevel();
     }
+
+    setOnPcmChunk(callback?: (chunk: Int16Array) => void): void {
+        this.wav.setOnPcmChunk(callback);
+    }
 }
 
 // Global instance

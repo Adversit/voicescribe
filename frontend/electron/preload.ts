@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electron', {
         getState: () => ipcRenderer.invoke('get-recording-state'),
         transcribeAudio: (audioBuffer: ArrayBuffer) => ipcRenderer.invoke('transcribe-audio', audioBuffer),
         complete: (text: string) => ipcRenderer.send('recording-complete', text),
+        completeWithResult: (payload: { text: string; result?: unknown }) => ipcRenderer.send('recording-complete-result', payload),
         error: (error: string) => ipcRenderer.send('recording-error', error),
         updateAudioLevel: (level: number) => ipcRenderer.send('recording-audio-level', level),
         onStateChange: (callback: (state: unknown) => void) => {
@@ -87,6 +88,7 @@ export interface ElectronAPI {
         getState: () => Promise<{ isRecording: boolean; startTime: number | null; isTranscribing?: boolean; cancelled?: boolean; audioLevel?: number }>;
         transcribeAudio: (audioBuffer: ArrayBuffer) => Promise<{ success: boolean; error?: string }>;
         complete: (text: string) => void;
+        completeWithResult: (payload: { text: string; result?: unknown }) => void;
         error: (error: string) => void;
         updateAudioLevel: (level: number) => void;
         onStateChange: (callback: (state: unknown) => void) => () => void;
@@ -122,6 +124,7 @@ export interface ElectronAPI {
             enableAiRefine: boolean;
             outputFormat: 'clipboard' | 'directInput' | 'both';
             launchAtLogin: boolean;
+            enableStreaming: boolean;
             vocabulary: string[];
         }>;
         update: (partial: Record<string, unknown>) => Promise<{ success: boolean }>;
