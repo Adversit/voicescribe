@@ -1,4 +1,5 @@
 @echo off
+
 REM VoiceScribe Development Mode Launcher
 REM Starts backend and Electron frontend in development mode
 setlocal enabledelayedexpansion

@@ -12,3 +12,4 @@ soundfile>=0.12.1
 
 # Utilities
 python-dotenv>=1.0.0
+huggingface-hub>=0.24.0

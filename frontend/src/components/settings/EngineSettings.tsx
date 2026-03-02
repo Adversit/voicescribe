@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,38 +31,42 @@ interface ModelStatus {
     error?: string;
 }
 
-// Display names and descriptions for engines (backend doesn't return these)
+interface PersistedSettings {
+    engine: string;
+    model: string;
+}
+
 const ENGINE_UI_META: Record<string, { displayName: string; description: string }> = {
     whisper: {
-        displayName: "Whisper (faster-whisper)",
-        description: "OpenAI Whisper 模型，通过 faster-whisper 优化",
+        displayName: "Whisper",
+        description: "通用 Whisper 模型家族，兼顾多语种识别能力。",
     },
     whispercpp: {
         displayName: "Whisper.cpp",
-        description: "C++ 优化的 Whisper 实现",
+        description: "whisper.cpp 使用的 GGML 模型，适合轻量本地推理。",
     },
     funasr: {
         displayName: "FunASR",
-        description: "阿里达摩院语音识别引擎，支持热词增强",
+        description: "阿里 FunASR 模型家族，中文识别与热词效果更好。",
     },
     parakeet: {
         displayName: "Parakeet",
-        description: "NVIDIA NeMo 引擎，需要 GPU",
+        description: "NVIDIA Parakeet 模型家族，需要 CUDA 环境。",
     },
 };
 
 function modelDisplayName(model: string): string {
     const names: Record<string, string> = {
-        tiny: "tiny (最快)",
+        tiny: "tiny",
         base: "base",
         small: "small",
-        medium: "medium (推荐)",
+        medium: "medium",
         "large-v2": "large-v2",
-        "large-v3": "large-v3 (最准)",
+        "large-v3": "large-v3",
         large: "large",
-        "seaco-paraformer": "SeACo-Paraformer (热词增强)",
-        "paraformer-zh": "Paraformer 中文",
-        "paraformer-zh-streaming": "Paraformer 流式",
+        "seaco-paraformer": "SeACo-Paraformer",
+        "paraformer-zh": "Paraformer zh",
+        "paraformer-zh-streaming": "Paraformer zh streaming",
         "sensevoice-small": "SenseVoice Small",
         "parakeet-ctc-1.1b": "Parakeet CTC 1.1B",
         "parakeet-tdt-1.1b": "Parakeet TDT 1.1B",
@@ -75,143 +79,183 @@ export function EngineSettings() {
     const [selectedModel, setSelectedModel] = useState("");
     const [engines, setEngines] = useState<Engine[]>([]);
     const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([]);
+    const [persistedSettings, setPersistedSettings] = useState<PersistedSettings | null>(null);
+    const [isReady, setIsReady] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
 
-    const currentEngine = engines.find((e) => e.name === selectedEngine);
+    const currentEngine = useMemo(
+        () => engines.find((e) => e.name === selectedEngine),
+        [engines, selectedEngine]
+    );
+
+    const getModelStatus = (engine: string, model: string): ModelStatus | undefined =>
+        modelStatuses.find((s) => s.engine === engine && s.model === model);
+
+    const getOrderedModels = (engine: string, models: string[]): string[] => {
+        return [...models].sort((a, b) => {
+            const aAvailable = getModelStatus(engine, a)?.available ? 1 : 0;
+            const bAvailable = getModelStatus(engine, b)?.available ? 1 : 0;
+            if (aAvailable !== bAvailable) return bAvailable - aAvailable;
+            return a.localeCompare(b);
+        });
+    };
+
+    const persistSelection = async (engine: string, model: string) => {
+        if (typeof window === "undefined" || !window.electron) return;
+        await window.electron.settings.update({ engine, model });
+    };
+
+    const fetchModelStatuses = async () => {
+        if (typeof window === "undefined" || !window.electron) return;
+        try {
+            const statuses = await window.electron.backend.getModels();
+            setModelStatuses(statuses);
+
+            const hasDownloading = statuses.some((s: ModelStatus) => s.downloading);
+            if (hasDownloading && !pollingInterval) {
+                const interval = setInterval(() => {
+                    void fetchModelStatuses();
+                }, 1000);
+                setPollingInterval(interval);
+            } else if (!hasDownloading && pollingInterval) {
+                clearInterval(pollingInterval);
+                setPollingInterval(null);
+            }
+        } catch (err) {
+            console.error("Failed to fetch model statuses:", err);
+        }
+    };
+
+    const fetchEngines = async (preferred?: PersistedSettings | null) => {
+        if (typeof window === "undefined" || !window.electron) return;
+        try {
+            const backendEngines = await window.electron.backend.getEngines();
+            if (!backendEngines || backendEngines.length === 0) return;
+
+            const mapped: Engine[] = backendEngines.map(
+                (be: { name: string; models: string[]; loaded_model: string | null; available: boolean }) => {
+                    const meta = ENGINE_UI_META[be.name] || { displayName: be.name, description: "" };
+                    return { ...be, displayName: meta.displayName, description: meta.description };
+                }
+            );
+            setEngines(mapped);
+
+            const names = new Set(mapped.map((e) => e.name));
+            const loadedEngine = mapped.find((e) => e.loaded_model)?.name;
+            const firstAvailable = mapped.find((e) => e.available)?.name;
+            const firstAny = mapped[0]?.name;
+
+            const initialEngine =
+                (preferred?.engine && names.has(preferred.engine) && preferred.engine) ||
+                (selectedEngine && names.has(selectedEngine) && selectedEngine) ||
+                loadedEngine ||
+                firstAvailable ||
+                firstAny ||
+                "";
+
+            if (initialEngine && initialEngine !== selectedEngine) {
+                setSelectedEngine(initialEngine);
+            }
+        } catch (err) {
+            console.error("Failed to fetch engines:", err);
+        }
+    };
 
     useEffect(() => {
-        fetchEngines();
-        fetchModelStatuses();
-        
-        // Cleanup polling on unmount
-        return () => {
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
+        let active = true;
+
+        const bootstrap = async () => {
+            if (typeof window === "undefined" || !window.electron) return;
+
+            try {
+                const settings = await window.electron.settings.get();
+                const preferred = {
+                    engine: settings.engine || "funasr",
+                    model: settings.model || "seaco-paraformer",
+                };
+                if (!active) return;
+                setPersistedSettings(preferred);
+
+                await Promise.all([fetchModelStatuses(), fetchEngines(preferred)]);
+            } catch (err) {
+                console.error("Failed to initialize engine settings:", err);
+                await Promise.all([fetchModelStatuses(), fetchEngines(null)]);
+            } finally {
+                if (active) setIsReady(true);
             }
+        };
+
+        void bootstrap();
+
+        return () => {
+            active = false;
+            if (pollingInterval) clearInterval(pollingInterval);
         };
     }, []);
 
     useEffect(() => {
-        // Reset model when engine changes
-        if (currentEngine && currentEngine.models.length > 0) {
-            if (currentEngine.loaded_model) {
-                setSelectedModel(currentEngine.loaded_model);
-            } else {
-                // Use first model as default
-                setSelectedModel(currentEngine.models[0]);
-            }
-        }
-    }, [selectedEngine, currentEngine]);
+        if (!currentEngine || currentEngine.models.length === 0) return;
 
-    const fetchEngines = async () => {
-        if (typeof window !== 'undefined' && window.electron) {
-            try {
-                const backendEngines = await window.electron.backend.getEngines();
-                if (backendEngines && backendEngines.length > 0) {
-                    const mappedEngines = backendEngines.map((be: { name: string; models: string[]; loaded_model: string | null; available: boolean }) => {
-                        const meta = ENGINE_UI_META[be.name] || {
-                            displayName: be.name,
-                            description: "",
-                        };
-                        return {
-                            ...be,
-                            displayName: meta.displayName,
-                            description: meta.description,
-                        };
-                    });
-                    setEngines(mappedEngines);
-                    
-                    // Set default engine to first available engine
-                    const firstAvailable = mappedEngines.find((e: Engine) => e.available);
-                    if (firstAvailable && !selectedEngine) {
-                        setSelectedEngine(firstAvailable.name);
-                    }
-                }
-            } catch (err) {
-                console.error('Failed to fetch engines:', err);
-            }
-        }
-    };
+        const modelSet = new Set(currentEngine.models);
+        const preferredModel =
+            persistedSettings?.engine === currentEngine.name ? persistedSettings.model : "";
+        const ordered = getOrderedModels(currentEngine.name, currentEngine.models);
 
-    const fetchModelStatuses = async () => {
-        if (typeof window !== 'undefined' && window.electron) {
-            try {
-                const statuses = await window.electron.backend.getModels();
-                console.log('[EngineSettings] Model statuses:', statuses);
-                setModelStatuses(statuses);
-                
-                // Start/stop polling based on downloading status
-                const hasDownloading = statuses.some((s: ModelStatus) => s.downloading);
-                if (hasDownloading && !pollingInterval) {
-                    console.log('[EngineSettings] Starting polling (models downloading)');
-                    const interval = setInterval(() => {
-                        fetchModelStatuses();
-                    }, 1000);
-                    setPollingInterval(interval);
-                } else if (!hasDownloading && pollingInterval) {
-                    console.log('[EngineSettings] Stopping polling (no downloads)');
-                    clearInterval(pollingInterval);
-                    setPollingInterval(null);
-                }
-            } catch (err) {
-                console.error('[EngineSettings] Failed to fetch model statuses:', err);
-            }
-        }
-    };
+        const nextModel =
+            (selectedModel && modelSet.has(selectedModel) && selectedModel) ||
+            (preferredModel && modelSet.has(preferredModel) && preferredModel) ||
+            (currentEngine.loaded_model && modelSet.has(currentEngine.loaded_model) && currentEngine.loaded_model) ||
+            ordered[0] ||
+            "";
 
-    const getModelStatus = (engine: string, model: string): ModelStatus | undefined => {
-        const status = modelStatuses.find(s => s.engine === engine && s.model === model);
-        console.log(`[EngineSettings] Status for ${engine}:${model}:`, status);
-        return status;
-    };
+        if (nextModel && nextModel !== selectedModel) {
+            setSelectedModel(nextModel);
+        }
+    }, [currentEngine, modelStatuses, persistedSettings]);
+
+    useEffect(() => {
+        if (!isReady || !selectedEngine || !selectedModel) return;
+        void persistSelection(selectedEngine, selectedModel);
+    }, [isReady, selectedEngine, selectedModel]);
 
     const downloadModel = async (engine: string, model: string) => {
-        console.log(`[EngineSettings] Downloading model: ${engine}:${model}`);
         try {
-            const result = await window.electron.backend.downloadModel(engine, model);
-            console.log('[EngineSettings] Download started:', result);
+            await window.electron.backend.downloadModel(engine, model);
             await fetchModelStatuses();
         } catch (err) {
-            console.error('[EngineSettings] Failed to download model:', err);
+            console.error("Failed to download model:", err);
         }
     };
 
     const deleteModel = async (engine: string, model: string) => {
-        console.log(`[EngineSettings] Deleting model: ${engine}:${model}`);
         try {
-            const result = await window.electron.backend.deleteModel(engine, model);
-            console.log('[EngineSettings] Delete completed:', result);
+            await window.electron.backend.deleteModel(engine, model);
             await fetchModelStatuses();
         } catch (err) {
-            console.error('[EngineSettings] Failed to delete model:', err);
+            console.error("Failed to delete model:", err);
         }
     };
 
     const formatBytes = (bytes: number): string => {
-        if (bytes < 1024 * 1024) {
-            return `${(bytes / 1024).toFixed(1)} KB`;
-        } else if (bytes < 1024 * 1024 * 1024) {
-            return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-        } else {
-            return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-        }
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
     };
 
     const loadModel = async () => {
+        if (!currentEngine || !selectedModel) return;
         setIsLoading(true);
         setLoadError(null);
         try {
-            if (typeof window !== 'undefined' && window.electron) {
-                const result = await window.electron.backend.loadEngine(selectedEngine, selectedModel);
-                if (result.error) {
-                    setLoadError(result.error);
-                } else {
-                    // Refresh engines to get updated loaded_model state
-                    await fetchEngines();
-                }
+            const result = await window.electron.backend.loadEngine(selectedEngine, selectedModel);
+            if (result.error) {
+                setLoadError(result.error);
+                return;
             }
+            await persistSelection(selectedEngine, selectedModel);
+            await fetchEngines(persistedSettings);
         } catch (error) {
             setLoadError(String(error));
         } finally {
@@ -219,32 +263,34 @@ export function EngineSettings() {
         }
     };
 
-    const getModelDescription = () => {
-        switch (selectedEngine) {
-            case "whisper":
-            case "whispercpp":
-                return "tiny/base: 速度快但准确率较低\nmedium: 速度与准确率平衡\nlarge: 最准确但较慢";
-            case "funasr":
-                return "SeACo-Paraformer: 热词增强，推荐使用热词时选择\nParaformer: 标准中文识别\nSenseVoice: 支持更多语种";
-            case "parakeet":
-                return "需要 NVIDIA GPU，主要针对英文优化";
-            default:
-                return "";
-        }
-    };
+    const engineModelStatuses = currentEngine
+        ? getOrderedModels(currentEngine.name, currentEngine.models)
+              .map((modelName) => getModelStatus(currentEngine.name, modelName))
+              .filter((status): status is ModelStatus => Boolean(status))
+        : [];
 
     return (
         <div className="space-y-6">
-            {/* Engine Selection */}
             <div className="space-y-4">
                 <div>
                     <h3 className="text-lg font-medium">引擎</h3>
                 </div>
                 <div className="space-y-2">
                     <Label>选择引擎</Label>
-                    <Select value={selectedEngine} onValueChange={setSelectedEngine}>
-                        <SelectTrigger className="w-[280px]">
-                            <SelectValue placeholder="选择引擎" />
+                    <Select
+                        value={selectedEngine}
+                        onValueChange={(value) => {
+                            setSelectedEngine(value);
+                            setSelectedModel("");
+                            setPersistedSettings((prev) =>
+                                prev
+                                    ? { ...prev, engine: value }
+                                    : { engine: value, model: "" }
+                            );
+                        }}
+                    >
+                        <SelectTrigger className="w-[320px]">
+                            <SelectValue placeholder="请选择引擎" />
                         </SelectTrigger>
                         <SelectContent>
                             {engines.map((engine) => (
@@ -252,153 +298,141 @@ export function EngineSettings() {
                                     <span className="flex items-center gap-2">
                                         {engine.displayName}
                                         {!engine.available && (
-                                            <span className="text-xs text-muted-foreground">
-                                                (未安装)
-                                            </span>
+                                            <span className="text-xs text-muted-foreground">(当前环境不可用)</span>
                                         )}
                                     </span>
                                 </SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
-                    {currentEngine && (
-                        <p className="text-sm text-muted-foreground">
-                            {currentEngine.description}
-                        </p>
-                    )}
-                    {engines.length === 0 && (
-                        <p className="text-sm text-muted-foreground">
-                            正在从后端获取引擎列表...
-                        </p>
-                    )}
+                    {currentEngine && <p className="text-sm text-muted-foreground">{currentEngine.description}</p>}
                 </div>
             </div>
 
-            {/* Model Selection */}
             <div className="space-y-4">
                 <div>
                     <h3 className="text-lg font-medium">模型</h3>
                 </div>
                 <div className="space-y-2">
                     <Label>选择模型</Label>
-                    <Select value={selectedModel} onValueChange={setSelectedModel}>
-                        <SelectTrigger className="w-[280px]">
-                            <SelectValue placeholder="选择模型" />
+                    <Select
+                        value={selectedModel}
+                        onValueChange={(value) => {
+                            setSelectedModel(value);
+                            setPersistedSettings((prev) =>
+                                prev
+                                    ? { ...prev, engine: selectedEngine || prev.engine, model: value }
+                                    : { engine: selectedEngine, model: value }
+                            );
+                        }}
+                    >
+                        <SelectTrigger className="w-[320px]">
+                            <SelectValue placeholder="请选择模型" />
                         </SelectTrigger>
                         <SelectContent>
-                            {currentEngine?.models.map((model) => (
-                                <SelectItem key={model} value={model}>
-                                    <span className="flex items-center gap-2">
-                                        {modelDisplayName(model)}
-                                        {currentEngine.loaded_model === model && (
-                                            <Check className="h-3 w-3 text-green-500" />
-                                        )}
-                                    </span>
-                                </SelectItem>
-                            ))}
+                            {currentEngine
+                                ? getOrderedModels(currentEngine.name, currentEngine.models).map((model) => (
+                                      <SelectItem key={model} value={model}>
+                                          <span className="flex items-center gap-2">
+                                              {modelDisplayName(model)}
+                                              {getModelStatus(currentEngine.name, model)?.available && (
+                                                  <span className="text-xs text-green-600">已下载</span>
+                                              )}
+                                              {currentEngine.loaded_model === model && (
+                                                  <Check className="h-3 w-3 text-green-500" />
+                                              )}
+                                          </span>
+                                      </SelectItem>
+                                  ))
+                                : null}
                         </SelectContent>
                     </Select>
-                    <p className="text-sm text-muted-foreground whitespace-pre-line">
-                        {getModelDescription()}
-                    </p>
                     {currentEngine?.loaded_model && (
                         <p className="text-sm text-green-600">
-                            当前已加载: {modelDisplayName(currentEngine.loaded_model)}
+                            当前已加载：{modelDisplayName(currentEngine.loaded_model)}
                         </p>
                     )}
                 </div>
 
-                {/* Model Management - Show all models from backend */}
-                {selectedEngine === "funasr" && currentEngine && modelStatuses.length > 0 ? (
-                    <div className="space-y-2">
-                        <Label>模型管理</Label>
+                <div className="space-y-2">
+                    <Label>模型下载状态</Label>
+                    {engineModelStatuses.length > 0 ? (
                         <div className="border rounded-md divide-y">
-                            {modelStatuses
-                                .filter(status => status.engine === "funasr")
-                                .map((status) => (
-                                    <div key={status.model} className="flex items-center justify-between p-3">
-                                        <span className="text-sm">{modelDisplayName(status.model)}</span>
-                                        <div className="flex items-center gap-2">
-                                            {status.downloading ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                                                    {status.downloaded_bytes && status.size_bytes ? (
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {formatBytes(status.downloaded_bytes)} / {formatBytes(status.size_bytes)}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-xs text-muted-foreground">下载中...</span>
-                                                    )}
-                                                </>
-                                            ) : status.available ? (
-                                                <>
-                                                    {status.size_bytes && (
-                                                        <span className="text-xs text-muted-foreground">
-                                                            {formatBytes(status.size_bytes)}
-                                                        </span>
-                                                    )}
+                            {engineModelStatuses.map((status) => (
+                                <div key={status.model} className="flex items-center justify-between p-3">
+                                    <span className="text-sm">{modelDisplayName(status.model)}</span>
+                                    <div className="flex items-center gap-2">
+                                        {status.downloading ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                                                {status.downloaded_bytes && status.size_bytes ? (
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {formatBytes(status.downloaded_bytes)} /{" "}
+                                                        {formatBytes(status.size_bytes)}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground">下载中...</span>
+                                                )}
+                                            </>
+                                        ) : status.available ? (
+                                            <>
+                                                {status.size_bytes && (
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {formatBytes(status.size_bytes)}
+                                                    </span>
+                                                )}
+                                                {currentEngine && (
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        onClick={() => deleteModel("funasr", status.model)}
+                                                        onClick={() => void deleteModel(currentEngine.name, status.model)}
                                                         title="删除模型"
                                                     >
                                                         <Trash2 className="h-4 w-4 text-red-500" />
                                                     </Button>
-                                                </>
-                                            ) : (
+                                                )}
+                                            </>
+                                        ) : (
+                                            currentEngine && (
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
-                                                    onClick={() => downloadModel("funasr", status.model)}
+                                                    onClick={() => void downloadModel(currentEngine.name, status.model)}
                                                     title="下载模型"
                                                 >
                                                     <Download className="h-4 w-4 text-blue-500" />
                                                 </Button>
-                                            )}
-                                            {status.error && (
-                                                <span className="text-xs text-red-500">{status.error}</span>
-                                            )}
-                                        </div>
+                                            )
+                                        )}
+                                        {status.error && <span className="text-xs text-red-500">{status.error}</span>}
                                     </div>
-                                ))}
+                                </div>
+                            ))}
                         </div>
-                    </div>
-                ) : selectedEngine === "funasr" && currentEngine ? (
-                    <div className="space-y-2">
-                        <Label>模型管理</Label>
+                    ) : (
                         <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/30">
-                            正在加载模型状态...
+                            后端暂未返回模型状态。
                         </div>
-                    </div>
-                ) : selectedEngine && currentEngine ? (
-                    <div className="space-y-2">
-                        <Label>模型管理</Label>
-                        <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/30">
-                            该引擎模型由系统自动管理
-                        </div>
-                    </div>
-                ) : null}
+                    )}
+                </div>
             </div>
 
-            {/* Load Model */}
             <div className="space-y-4">
                 <div>
-                    <h3 className="text-lg font-medium">加载模型</h3>
+                    <h3 className="text-lg font-medium">加载所选模型</h3>
                 </div>
                 <div className="space-y-2">
-                    <Button
-                        onClick={loadModel}
-                        disabled={isLoading || !currentEngine?.available}
-                    >
+                    <Button onClick={() => void loadModel()} disabled={isLoading || !currentEngine?.available}>
                         {isLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        {isLoading ? "加载中..." : currentEngine?.loaded_model === selectedModel ? "重新加载" : "加载模型"}
+                        {isLoading
+                            ? "加载中..."
+                            : currentEngine?.loaded_model === selectedModel
+                              ? "已加载"
+                              : "加载模型"}
                     </Button>
-                    {loadError && (
-                        <p className="text-sm text-red-500">{loadError}</p>
-                    )}
+                    {loadError && <p className="text-sm text-red-500">{loadError}</p>}
                     <p className="text-sm text-muted-foreground">
-                        首次加载模型时会自动下载，请耐心等待
+                        首次加载可能会自动下载模型文件，耗时取决于模型大小和网络速度。
                     </p>
                 </div>
             </div>

@@ -199,7 +199,8 @@ export async function registerSpeaker(
     return request<{ status: string; speaker_id: string; name: string }>(
         'POST',
         '/speakers/register',
-        formData
+        formData,
+        600000
     );
 }
 

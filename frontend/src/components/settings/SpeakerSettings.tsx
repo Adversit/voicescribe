@@ -144,7 +144,7 @@ export function SpeakerSettings() {
                     注册说话人后，转录时可以自动识别每个人的发言。
                 </p>
                 <p className="text-sm text-blue-500 mt-1">
-                    请在"引擎设置"中启用"说话人识别"功能
+                    请在"通用设置"中启用"说话人识别"功能
                 </p>
             </div>
 

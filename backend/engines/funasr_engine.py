@@ -49,6 +49,7 @@ class FunASREngine:
                 vad_model="fsmn-vad",
                 vad_kwargs={"max_single_segment_time": 30000},
                 device=device,
+                disable_update=True,
                 **diarization_kwargs,
             )
         elif model_name == "seaco-paraformer":
@@ -60,6 +61,7 @@ class FunASREngine:
                 vad_model="fsmn-vad",
                 punc_model="ct-punc",
                 device=device,
+                disable_update=True,
                 **diarization_kwargs,
             )
         else:
@@ -70,6 +72,7 @@ class FunASREngine:
                 vad_model="fsmn-vad",
                 punc_model="ct-punc",
                 device=device,
+                disable_update=True,
                 **diarization_kwargs,
             )
         

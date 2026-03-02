@@ -19,6 +19,7 @@ ffmpeg-python>=0.2.0  # FFmpeg Python bindings
 # Utilities
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
+huggingface-hub>=0.24.0
 
 # PyTorch (for FunASR)
 torch>=2.0.0
