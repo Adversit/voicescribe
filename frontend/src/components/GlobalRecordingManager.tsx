@@ -5,37 +5,50 @@ import { getGlobalRecorder } from "@/lib/audio-recorder";
 import { useAppStore } from "@/store/app-store";
 import { StreamTranscriber } from "@/lib/stream-transcriber";
 
+function findSuffixPrefixOverlap(previous: string, current: string, maxWindow = 160): number {
+    const max = Math.min(previous.length, current.length, maxWindow);
+    for (let len = max; len > 0; len -= 1) {
+        if (previous.slice(-len) === current.slice(0, len)) {
+            return len;
+        }
+    }
+    return 0;
+}
+
 /**
  * Global Recording Manager
  * Listens to Electron IPC events and manages audio recording
  */
 export function GlobalRecordingManager() {
-    const { addTranscription } = useAppStore();
+    const { addTranscription, setAskAnswer, setOperationNotice } = useAppStore();
 
     useEffect(() => {
-        console.log('[GlobalRecordingManager] Component mounted');
-        console.log('[GlobalRecordingManager] window.electron:', window.electron);
-        console.log('[GlobalRecordingManager] window.electron.on:', window.electron?.on);
-        
         if (typeof window === "undefined" || !window.electron) {
-            console.error('[GlobalRecordingManager] window.electron is not available');
+            console.error("[GlobalRecordingManager] window.electron is not available");
             return;
         }
 
         const recorder = getGlobalRecorder();
         let levelTimer: ReturnType<typeof setInterval> | null = null;
         let stream: StreamTranscriber | null = null;
+        let lastPartialText = "";
 
-        // Listen for start recording event
         const handleStartRecording = async () => {
             try {
-                console.log('[GlobalRecordingManager] Starting recording...');
+                lastPartialText = "";
                 const settings = await window.electron.settings.get();
                 if (settings.enableStreaming) {
                     stream = new StreamTranscriber((partial) => {
-                        if (partial) {
-                            console.log("[Stream] partial:", partial.slice(0, 40));
-                        }
+                        const current = String(partial || "").trim();
+                        if (!current) return;
+
+                        const overlap = findSuffixPrefixOverlap(lastPartialText, current);
+                        const delta = overlap > 0 ? current.slice(overlap) : current;
+                        lastPartialText = current;
+
+                        if (!delta.trim()) return;
+                        console.log("[Stream] partial delta:", delta.slice(0, 40));
+                        window.electron?.recording?.partial(delta);
                     });
                     try {
                         await stream.start({
@@ -46,19 +59,19 @@ export function GlobalRecordingManager() {
                             enableAiRefine: settings.enableAiRefine,
                         });
                         recorder.setOnPcmChunk((chunk) => stream?.sendChunk(chunk));
-                        console.log("[Stream] started");
                     } catch (e) {
                         console.warn("[Stream] start failed, fallback to file upload:", e);
                         stream = null;
+                        lastPartialText = "";
                         recorder.setOnPcmChunk(undefined);
                     }
                 } else {
                     stream = null;
+                    lastPartialText = "";
                     recorder.setOnPcmChunk(undefined);
                 }
-                await recorder.startRecording();
 
-                // Push real audio level to main process for the overlay waveform.
+                await recorder.startRecording();
                 if (levelTimer) clearInterval(levelTimer);
                 levelTimer = setInterval(() => {
                     try {
@@ -69,16 +82,13 @@ export function GlobalRecordingManager() {
                     }
                 }, 100);
             } catch (error) {
-                console.error('[GlobalRecordingManager] Failed to start recording:', error);
-                // Notify main process of error
+                console.error("[GlobalRecordingManager] Failed to start recording:", error);
                 window.electron?.recording?.cancel();
             }
         };
 
-        // Listen for stop recording event
         const handleStopRecording = async () => {
             try {
-                console.log('[GlobalRecordingManager] Stopping recording...');
                 if (levelTimer) {
                     clearInterval(levelTimer);
                     levelTimer = null;
@@ -89,38 +99,29 @@ export function GlobalRecordingManager() {
 
                 if (stream) {
                     try {
-                        console.log("[Stream] finishing...");
                         const finalResult = await stream.finish(600000);
                         window.electron?.recording?.completeWithResult?.({
                             text: finalResult.text,
                             result: finalResult,
                         });
-                        console.log('[GlobalRecordingManager] Stream transcription complete');
                         return;
                     } catch (e) {
                         console.warn("[Stream] finish failed, fallback to file upload:", e);
                     } finally {
                         stream = null;
+                        lastPartialText = "";
                     }
                 }
 
-                // Fallback: non-stream upload transcription
-                console.log('[GlobalRecordingManager] Transcribing audio (fallback upload)...');
                 const result = await window.electron.recording.transcribeAudio(audioBuffer);
-                if (!result.success) throw new Error(result.error || 'Transcription failed');
-                console.log('[GlobalRecordingManager] Transcription complete (fallback)');
-                
-                // Note: Main process handles transcription result, output mode, and history
-                // The recording-complete event is sent by main process after transcription
+                if (!result.success) throw new Error(result.error || "Transcription failed");
             } catch (error) {
-                console.error('[GlobalRecordingManager] Failed to transcribe:', error);
+                console.error("[GlobalRecordingManager] Failed to transcribe:", error);
                 window.electron?.recording?.error(String(error));
             }
         };
 
-        // Listen for cancel recording event
         const handleCancelRecording = () => {
-            console.log('[GlobalRecordingManager] Cancelling recording...');
             if (levelTimer) {
                 clearInterval(levelTimer);
                 levelTimer = null;
@@ -129,70 +130,80 @@ export function GlobalRecordingManager() {
             recorder.setOnPcmChunk(undefined);
             stream?.abort();
             stream = null;
+            lastPartialText = "";
             recorder.cancelRecording();
         };
 
-        // Listen for transcription complete event from main process
-        const handleTranscriptionComplete = async (data: { text: string; result?: { duration: number; segments: any[]; engine: string; model: string } }) => {
-            console.log('[GlobalRecordingManager] ===== TRANSCRIPTION COMPLETE EVENT =====');
-            console.log('[GlobalRecordingManager] Event data:', data);
-            console.log('[GlobalRecordingManager] Text:', data.text.substring(0, 50));
-            console.log('[GlobalRecordingManager] Result:', data.result);
-            
+        const handleTranscriptionComplete = async (data: {
+            text: string;
+            result?: { duration: number; segments: any[]; engine: string; model: string };
+        }) => {
             try {
-                // Get settings to save with history
-                const settings = await window.electron.settings.get();
-                console.log('[GlobalRecordingManager] Settings:', settings);
-                
-                const transcription = {
+                const settings = await window.electron!.settings.get();
+                addTranscription({
                     duration: data.result?.duration || 0,
                     text: data.text,
                     segments: data.result?.segments || [],
                     engine: data.result?.engine || settings.engine,
                     model: data.result?.model || settings.model,
                     language: settings.language,
-                };
-                
-                console.log('[GlobalRecordingManager] Adding transcription:', transcription);
-                
-                // Add to history
-                addTranscription(transcription);
-                
-                console.log('[GlobalRecordingManager] Transcription added to store');
+                });
             } catch (error) {
-                console.error('[GlobalRecordingManager] Error handling transcription complete:', error);
+                console.error("[GlobalRecordingManager] Error handling transcription complete:", error);
             }
         };
 
-        // Register IPC listeners
-        console.log('[GlobalRecordingManager] Registering IPC listeners...');
-        window.electron?.on?.('start-audio-recording', handleStartRecording);
-        window.electron?.on?.('stop-audio-recording', handleStopRecording);
-        window.electron?.on?.('cancel-audio-recording', handleCancelRecording);
-        
-        // Use the correct API for transcription-complete event
-        const unsubscribeTranscription = window.electron?.transcription?.onComplete(handleTranscriptionComplete);
-        console.log('[GlobalRecordingManager] IPC listeners registered');
+        const handleAskAnswer = (payload: {
+            question: string;
+            answer: string;
+            contextPreview?: string;
+            timestamp: string;
+        }) => {
+            setAskAnswer({
+                question: payload.question || "",
+                answer: payload.answer || "",
+                contextPreview: payload.contextPreview || "",
+                timestamp: payload.timestamp || new Date().toISOString(),
+            });
+        };
 
-        // Cleanup
+        const handleOperationNotice = (payload: {
+            type: "info" | "success" | "error";
+            message: string;
+            detail?: string;
+            timestamp: string;
+        }) => {
+            setOperationNotice({
+                type: payload.type || "info",
+                message: payload.message || "",
+                detail: payload.detail,
+                timestamp: payload.timestamp || new Date().toISOString(),
+            });
+        };
+
+        window.electron?.on?.("start-audio-recording", handleStartRecording);
+        window.electron?.on?.("stop-audio-recording", handleStopRecording);
+        window.electron?.on?.("cancel-audio-recording", handleCancelRecording);
+        const unsubscribeAskAnswer = window.electron?.on?.("ask-answer", handleAskAnswer);
+        const unsubscribeOperationNotice = window.electron?.on?.("operation-notice", handleOperationNotice);
+        const unsubscribeTranscription = window.electron?.transcription?.onComplete(handleTranscriptionComplete);
+
         return () => {
-            console.log('[GlobalRecordingManager] Component unmounting, cleaning up...');
-            // Unsubscribe from transcription-complete event
-            if (unsubscribeTranscription) {
-                unsubscribeTranscription();
-            }
+            if (unsubscribeTranscription) unsubscribeTranscription();
+            if (unsubscribeAskAnswer) unsubscribeAskAnswer();
+            if (unsubscribeOperationNotice) unsubscribeOperationNotice();
             if (levelTimer) {
                 clearInterval(levelTimer);
                 levelTimer = null;
             }
-            // Note: Other Electron IPC cleanup is handled by the preload script
             if (recorder.isRecording()) {
                 recorder.setOnPcmChunk(undefined);
                 stream?.abort();
+                lastPartialText = "";
                 recorder.cancelRecording();
             }
         };
-    }, [addTranscription]);
+    }, [addTranscription, setAskAnswer, setOperationNotice]);
 
-    return null; // This component doesn't render anything
+    return null;
 }

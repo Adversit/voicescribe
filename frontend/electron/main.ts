@@ -1,6 +1,6 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, clipboard } from 'electron';
+﻿import { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, clipboard } from 'electron';
 import path from 'path';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, spawnSync, ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import { store, getSetting, setSetting, getSettings, updateSettings, type HotkeyConfig, type AppSettings } from './store';
@@ -35,6 +35,7 @@ let recordingStartTime: number | null = null;
 let lastTranscription: string | null = null;
 let previousWindowTitle: string | null = null; // Track previous window for directInput mode
 let currentAudioLevel = 0;
+let streamedOutputText = '';
 
 // Current hotkey configuration (loaded from store)
 let currentHotkey: HotkeyConfig = getSetting('hotkey');
@@ -47,6 +48,33 @@ let backendProcess: ChildProcess | null = null;
 
 // Temp audio file path for current recording
 let currentAudioPath: string | null = null;
+
+type OperationNoticeType = 'info' | 'success' | 'error';
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function findSuffixPrefixOverlap(previous: string, current: string, maxWindow = 240): number {
+    const max = Math.min(previous.length, current.length, maxWindow);
+    for (let len = max; len > 0; len -= 1) {
+        if (previous.slice(-len) === current.slice(0, len)) {
+            return len;
+        }
+    }
+    return 0;
+}
+
+function computeFinalOutputDelta(alreadyOutput: string, finalText: string): string {
+    const committed = String(alreadyOutput || '');
+    const full = String(finalText || '').trim();
+    if (!full) return '';
+    if (!committed) return full;
+    if (full.startsWith(committed)) return full.slice(committed.length);
+    if (committed.endsWith(full)) return '';
+    const overlap = findSuffixPrefixOverlap(committed, full);
+    return overlap > 0 ? full.slice(overlap) : full;
+}
 
 // -------------------------------------
 // Window Creation
@@ -153,18 +181,18 @@ function updateTrayMenu() {
 
     const contextMenu = Menu.buildFromTemplate([
         {
-            label: isRecording ? '🔴 录音中...' : '⚪ 待命',
+            label: isRecording ? 'Recording...' : 'Idle',
             enabled: false,
         },
         { type: 'separator' },
         {
-            label: isRecording ? '停止录音' : '开始录音',
+            label: isRecording ? 'Stop Recording' : 'Start Recording',
             click: () => toggleRecording(),
             accelerator: getHotkeyString(),
         },
         { type: 'separator' },
         {
-            label: '复制最近结果',
+            label: 'Copy Last Result',
             enabled: !!lastTranscription,
             click: () => {
                 if (lastTranscription) {
@@ -174,17 +202,17 @@ function updateTrayMenu() {
         },
         { type: 'separator' },
         {
-            label: '设置...',
+            label: 'Settings...',
             click: () => showMainWindow(),
             accelerator: 'CmdOrCtrl+,',
         },
         {
-            label: '打开主窗口',
+            label: 'Show Main Window',
             click: () => showMainWindow(),
         },
         { type: 'separator' },
         {
-            label: '退出 VoiceScribe',
+            label: 'Quit VoiceScribe',
             click: () => {
                 appIsQuitting = true;
                 app.quit();
@@ -218,7 +246,7 @@ function getHotkeyString(): string {
     if (currentHotkey.useCommand) parts.push('Super');
     // Treat "no key" sentinel as empty.
     const key = currentHotkey.selectedKey;
-    if (key && key !== '无') parts.push(key);
+    if (key && key !== 'None') parts.push(key);
     return parts.join('+');
 }
 
@@ -297,6 +325,7 @@ function startRecording() {
     isTranscribing = false;
     isCancelled = false;
     currentAudioLevel = 0;
+    streamedOutputText = '';
     recordingStartTime = Date.now();
 
     // Save current active window title (for directInput mode)
@@ -347,12 +376,205 @@ function stopRecording() {
     }
 }
 
+function notifyOperation(type: OperationNoticeType, message: string, detail?: string) {
+    if (!mainWindow) return;
+    try {
+        mainWindow.webContents.send('operation-notice', {
+            type,
+            message,
+            detail,
+            timestamp: new Date().toISOString(),
+        });
+    } catch {
+        // ignore
+    }
+}
+
+async function sendCtrlKey(key: 'c' | 'v'): Promise<boolean> {
+    // Method 1: robotjs if available.
+    try {
+        const robot = require('robotjs');
+        robot.keyTap(key, ['control']);
+        return true;
+    } catch {
+        // fallback
+    }
+
+    if (process.platform === 'win32') {
+        try {
+            const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^${key}')`;
+            const res = spawnSync('powershell', ['-NoProfile', '-Command', script], {
+                windowsHide: true,
+                encoding: 'utf8',
+            });
+            return res.status === 0;
+        } catch {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+async function getSelectedTextFromActiveApp(): Promise<{ success: boolean; text: string; error?: string }> {
+    const originalClipboard = clipboard.readText();
+    const sentinel = `__VOICESCRIBE_SELECTION_SENTINEL_${Date.now()}__`;
+    try {
+        clipboard.writeText(sentinel);
+        await sleep(60);
+        const copied = await sendCtrlKey('c');
+        if (!copied) {
+            return { success: false, text: '', error: 'Failed to trigger copy shortcut (Ctrl+C)' };
+        }
+        await sleep(140);
+        const selectedText = clipboard.readText();
+        if (!selectedText || selectedText === sentinel) {
+            return { success: false, text: '', error: 'No selected text detected' };
+        }
+        return { success: true, text: selectedText };
+    } finally {
+        clipboard.writeText(originalClipboard);
+    }
+}
+
+async function replaceSelectedTextInActiveApp(text: string): Promise<boolean> {
+    const originalClipboard = clipboard.readText();
+    try {
+        clipboard.writeText(text);
+        await sleep(80);
+        const pasted = await sendCtrlKey('v');
+        await sleep(80);
+        return pasted;
+    } finally {
+        clipboard.writeText(originalClipboard);
+    }
+}
+
+async function runEditSelectedWorkflow(instruction: string, settings: AppSettings): Promise<{ text: string; replaced: boolean }> {
+    const selected = await getSelectedTextFromActiveApp();
+    if (!selected.success) {
+        console.warn('[EditSelected] failed to read selected text:', selected.error || 'unknown');
+        notifyOperation('error', 'Edit selected text failed', selected.error || 'Unable to read selected text');
+        return { text: instruction, replaced: false };
+    }
+
+    try {
+        const processed = await backend.processText({
+            mode: 'edit_selected',
+            selectedText: selected.text,
+            instruction,
+            language: settings.language,
+            command: settings.editCommand,
+            customPrompt: settings.customCommandPrompt,
+        });
+        const editedText = processed.result_text || selected.text;
+        const replaced = await replaceSelectedTextInActiveApp(editedText);
+        if (replaced) {
+            notifyOperation('success', 'Selected text replaced', `provider=${processed.meta?.provider || 'unknown'}`);
+            return { text: editedText, replaced: true };
+        }
+
+        clipboard.writeText(editedText);
+        notifyOperation('error', 'Write-back failed; result copied to clipboard', 'Paste manually into target app');
+        return { text: editedText, replaced: false };
+    } catch (error) {
+        notifyOperation('error', 'Edit selected text failed', String(error));
+        return { text: selected.text, replaced: false };
+    }
+}
+
+async function runAskSelectedWorkflow(question: string, settings: AppSettings): Promise<{ answer: string; contextPreview: string }> {
+    const selected = await getSelectedTextFromActiveApp();
+    if (!selected.success) {
+        const fallbackAnswer = `Unable to read selected text: ${selected.error || 'unknown error'}`;
+        notifyOperation('error', 'Ask selected text failed', fallbackAnswer);
+        return { answer: fallbackAnswer, contextPreview: '' };
+    }
+
+    const contextPreview = selected.text.length > 240 ? `${selected.text.slice(0, 240)}...` : selected.text;
+    try {
+        const processed = await backend.processText({
+            mode: 'ask_selected',
+            selectedText: selected.text,
+            question,
+            language: settings.language,
+        });
+        const answer = processed.result_text || '(empty response)';
+        notifyOperation('success', 'Q&A completed', `provider=${processed.meta?.provider || 'unknown'}`);
+        return { answer, contextPreview };
+    } catch (error) {
+        const fallbackAnswer = `Q&A processing failed: ${String(error)}`;
+        notifyOperation('error', 'Ask selected text failed', fallbackAnswer);
+        return { answer: fallbackAnswer, contextPreview };
+    }
+}
+
+function handleStreamingPartial(text: string) {
+    const settings = getSettings();
+    if (settings.mode !== 'dictate') return;
+
+    const delta = String(text || '');
+    if (!delta.trim()) return;
+
+    if (
+        streamedOutputText &&
+        /[A-Za-z0-9]$/.test(streamedOutputText) &&
+        /^[A-Za-z0-9]/.test(delta)
+    ) {
+        streamedOutputText += ' ';
+    }
+    streamedOutputText += delta;
+
+    handleTranscriptionOutput(delta);
+}
+
 function transcriptionComplete(text: string, result?: backend.TranscribeResult) {
+    void transcriptionCompleteAsync(text, result);
+}
+
+async function transcriptionCompleteAsync(text: string, result?: backend.TranscribeResult) {
     console.log('[Main] ===== TRANSCRIPTION COMPLETE =====');
     console.log('[Main] Text:', text.substring(0, 50));
     console.log('[Main] Result:', result);
-    
-    lastTranscription = text;
+
+    const settings = getSettings();
+    console.log('[Main] Mode settings:', {
+        mode: settings.mode,
+        editCommand: settings.editCommand,
+        outputFormat: settings.outputFormat,
+        enableStreaming: settings.enableStreaming,
+    });
+    let finalText = text;
+    let shouldAutoOutput = true;
+
+    if (settings.mode === 'edit_selected') {
+        shouldAutoOutput = false;
+        const processed = await runEditSelectedWorkflow(text, settings);
+        finalText = processed.text;
+        if (!processed.replaced) {
+            clipboard.writeText(finalText);
+        }
+    } else if (settings.mode === 'ask_selected') {
+        shouldAutoOutput = false;
+        const qa = await runAskSelectedWorkflow(text, settings);
+        finalText = qa.answer;
+        if (mainWindow) {
+            try {
+                mainWindow.webContents.send('ask-answer', {
+                    question: text,
+                    answer: qa.answer,
+                    contextPreview: qa.contextPreview,
+                    timestamp: new Date().toISOString(),
+                });
+                mainWindow.show();
+                mainWindow.focus();
+            } catch {
+                // ignore
+            }
+        }
+    }
+
+    lastTranscription = finalText;
 
     // Keep overlay visible for a moment to show completion
     // Then hide after a short delay
@@ -369,8 +591,9 @@ function transcriptionComplete(text: string, result?: backend.TranscribeResult) 
     // Notify main window with full result for history
     if (mainWindow) {
         console.log('[Main] Sending transcription-complete event to main window');
-        console.log('[Main] Event data:', { text, result });
-        mainWindow.webContents.send('transcription-complete', { text, result });
+        const nextResult = result ? { ...result, text: finalText } : undefined;
+        console.log('[Main] Event data:', { text: finalText, result: nextResult });
+        mainWindow.webContents.send('transcription-complete', { text: finalText, result: nextResult });
     } else {
         console.error('[Main] Main window is null, cannot send transcription-complete event');
     }
@@ -379,7 +602,17 @@ function transcriptionComplete(text: string, result?: backend.TranscribeResult) 
     updateTrayMenu();
 
     // Handle output based on settings
-    handleTranscriptionOutput(text);
+    if (shouldAutoOutput) {
+        if (settings.enableStreaming && settings.mode === 'dictate') {
+            const delta = computeFinalOutputDelta(streamedOutputText, finalText);
+            if (delta.trim()) {
+                handleTranscriptionOutput(delta);
+                streamedOutputText += delta;
+            }
+        } else {
+            handleTranscriptionOutput(finalText);
+        }
+    }
 }
 
 function handleTranscriptionOutput(text: string) {
@@ -409,41 +642,13 @@ function handleTranscriptionOutput(text: string) {
 }
 
 function simulatePaste() {
-    // Use Windows SendInput API via node-ffi or similar
-    // For now, we'll use a simpler approach with uiohook-napi or just clipboard
-    
-    // Method 1: Try robotjs if available (optional dependency)
-    try {
-        const robot = require('robotjs');
-        robot.keyTap('v', ['control']);
-        console.log('[Output] Simulated Ctrl+V paste using robotjs');
-        return;
-    } catch (error) {
-        // robotjs not available, try alternative methods
-    }
-
-    // Method 2: Use PowerShell to send keys (Windows-specific)
-    if (process.platform === 'win32') {
-        try {
-            const { exec } = require('child_process');
-            // Use PowerShell to send Ctrl+V with proper escaping
-            const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')`;
-            exec(`powershell -Command "${script}"`, (error: Error | null) => {
-                if (error) {
-                    console.warn('[Output] PowerShell paste failed:', error.message);
-                    console.log('[Output] Text is in clipboard, press Ctrl+V to paste');
-                } else {
-                    console.log('[Output] Simulated Ctrl+V paste using PowerShell');
-                }
-            });
+    void sendCtrlKey('v').then((ok) => {
+        if (ok) {
+            console.log('[Output] Simulated Ctrl+V paste');
             return;
-        } catch (error) {
-            console.warn('[Output] PowerShell method failed:', error);
         }
-    }
-
-    // Fallback: Just notify user
-    console.log('[Output] Direct input mode: Text ready in clipboard, press Ctrl+V to paste');
+        console.log('[Output] Direct input mode: Text ready in clipboard, press Ctrl+V to paste');
+    });
 }
 
 // -------------------------------------
@@ -475,6 +680,7 @@ function setupIpcHandlers() {
             isTranscribing = false;
             isCancelled = true;
             currentAudioLevel = 0;
+            streamedOutputText = '';
 
             if (overlayWindow) {
                 broadcastRecordingState();
@@ -533,7 +739,31 @@ function setupIpcHandlers() {
 
     // Update settings
     ipcMain.handle('update-settings', (_event, partial: Partial<AppSettings>) => {
+        console.log('[Settings] update-settings called with:', partial);
         updateSettings(partial);
+        console.log('[Settings] current settings snapshot:', {
+            mode: getSetting('mode'),
+            editCommand: getSetting('editCommand'),
+            outputFormat: getSetting('outputFormat'),
+        });
+        return { success: true };
+    });
+
+    // Selection bridge: get selected text from current active app
+    ipcMain.handle('selection-get', async () => {
+        return await getSelectedTextFromActiveApp();
+    });
+
+    // Selection bridge: replace selected text in current active app
+    ipcMain.handle('selection-replace', async (_event, text: string) => {
+        if (!text || !String(text).trim()) {
+            return { success: false, error: 'text is empty' };
+        }
+        const ok = await replaceSelectedTextInActiveApp(String(text));
+        if (!ok) {
+            clipboard.writeText(String(text));
+            return { success: false, error: 'paste failed, copied to clipboard' };
+        }
         return { success: true };
     });
 
@@ -649,6 +879,12 @@ function setupIpcHandlers() {
         currentAudioLevel = Math.max(0, Math.min(1, n));
         broadcastRecordingState();
     });
+
+    // Streaming partial text chunks from renderer
+    ipcMain.on('recording-partial', (_event, text: string) => {
+        if (!isRecording && !isTranscribing) return;
+        handleStreamingPartial(text);
+    });
     
     // Recording complete
     ipcMain.on('recording-complete', (_event, text: string) => {
@@ -667,6 +903,7 @@ function setupIpcHandlers() {
         isTranscribing = false;
         isCancelled = false;
         currentAudioLevel = 0;
+        streamedOutputText = '';
         if (overlayWindow) {
             overlayWindow.hide();
         }
@@ -849,7 +1086,7 @@ async function transcribeAudioFile(audioPath: string): Promise<void> {
             await new Promise(resolve => setTimeout(resolve, minDisplayTime - elapsed));
         }
         
-        transcriptionComplete('[转录失败]');
+        transcriptionComplete('[杞綍澶辫触]');
     } finally {
         // Cleanup temp file
         if (fs.existsSync(audioPath)) {
@@ -857,4 +1094,5 @@ async function transcribeAudioFile(audioPath: string): Promise<void> {
         }
     }
 }
+
 

@@ -67,6 +67,25 @@ export interface ModelStatus {
     error?: string;
 }
 
+export interface ProcessTextOptions {
+    mode: 'edit_selected' | 'ask_selected';
+    selectedText: string;
+    instruction?: string;
+    question?: string;
+    language?: string;
+    command?: 'rewrite' | 'summarize' | 'polish' | 'custom';
+    customPrompt?: string;
+}
+
+export interface ProcessTextResult {
+    result_text: string;
+    mode: string;
+    meta: {
+        provider: string;
+        latency_ms: number;
+    };
+}
+
 /**
  * Make HTTP request to backend
  */
@@ -236,4 +255,19 @@ export async function deleteModel(engine: string, model: string): Promise<{ stat
     formData.append('engine', engine);
     formData.append('model', model);
     return request<{ status: string }>('POST', '/models/delete', formData);
+}
+
+/**
+ * Process selected text for edit/ask workflows
+ */
+export async function processText(options: ProcessTextOptions): Promise<ProcessTextResult> {
+    return request<ProcessTextResult>('POST', '/process_text', {
+        mode: options.mode,
+        selected_text: options.selectedText,
+        instruction: options.instruction || '',
+        question: options.question || '',
+        language: options.language || 'zh',
+        command: options.command || 'rewrite',
+        custom_prompt: options.customPrompt || '',
+    }, 120000);
 }

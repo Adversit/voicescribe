@@ -30,6 +30,9 @@ export interface AppSettings {
     outputFormat: 'clipboard' | 'directInput' | 'both';
     launchAtLogin: boolean;
     enableStreaming: boolean;
+    mode: 'dictate' | 'edit_selected' | 'ask_selected';
+    editCommand: 'rewrite' | 'summarize' | 'polish' | 'custom';
+    customCommandPrompt: string;
 
     // Vocabulary
     vocabulary: string[];
@@ -51,6 +54,9 @@ const defaults: AppSettings = {
     outputFormat: 'clipboard',
     launchAtLogin: false,
     enableStreaming: false,
+    mode: 'dictate',
+    editCommand: 'rewrite',
+    customCommandPrompt: '',
     vocabulary: [],
 };
 

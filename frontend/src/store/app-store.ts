@@ -22,6 +22,20 @@ export interface TranscriptionHistory {
     audioPath?: string;
 }
 
+export interface AskAnswerPayload {
+    question: string;
+    answer: string;
+    contextPreview?: string;
+    timestamp: string;
+}
+
+export interface OperationNotice {
+    type: 'info' | 'success' | 'error';
+    message: string;
+    detail?: string;
+    timestamp: string;
+}
+
 interface AppState {
     selectedSection: SettingsSection;
     setSelectedSection: (section: SettingsSection) => void;
@@ -32,6 +46,14 @@ interface AppState {
     updateTranscription: (id: string, updates: Partial<TranscriptionHistory>) => void;
     deleteTranscription: (id: string) => void;
     clearHistory: () => void;
+
+    // Ask mode result panel
+    askAnswer: AskAnswerPayload | null;
+    setAskAnswer: (payload: AskAnswerPayload | null) => void;
+
+    // In-app operation notice
+    operationNotice: OperationNotice | null;
+    setOperationNotice: (notice: OperationNotice | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -61,6 +83,12 @@ export const useAppStore = create<AppState>()(
                 transcriptions: state.transcriptions.filter((t) => t.id !== id),
             })),
             clearHistory: () => set({ transcriptions: [] }),
+
+            askAnswer: null,
+            setAskAnswer: (payload) => set({ askAnswer: payload }),
+
+            operationNotice: null,
+            setOperationNotice: (notice) => set({ operationNotice: notice }),
         }),
         {
             name: 'voicescribe-storage',

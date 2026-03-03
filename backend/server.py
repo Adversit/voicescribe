@@ -25,6 +25,7 @@ if sys.platform == 'win32':
 
 import tempfile
 import asyncio
+import time
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -88,6 +89,10 @@ PARAKEET_HF_REPOS = {
     "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
 }
 WHISPERCPP_HF_REPO = "ggerganov/whisper.cpp"
+FUNASR_AUX_MODELSCOPE_IDS = {
+    "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
+}
 
 try:
     from engines.whisper_engine import WhisperEngine
@@ -172,6 +177,15 @@ def _get_registry_entry(engine: str, model: str) -> Optional[dict]:
     registry = _load_registry()
     return registry.get(engine, {}).get(model)
 
+def _get_registry_local_path(engine: str, model: str) -> Optional[str]:
+    entry = _get_registry_entry(engine, model)
+    if not entry:
+        return None
+    candidate = entry.get("path")
+    if candidate and os.path.exists(candidate):
+        return candidate
+    return None
+
 def _set_registry_entry(engine: str, model: str, path: str, size_bytes: int) -> None:
     registry = _load_registry()
     if engine not in registry:
@@ -224,6 +238,13 @@ try:
 except ImportError as e:
     print(f"[Warning] AI refiner not available: {e}")
 
+TEXT_PROCESS_AVAILABLE = False
+try:
+    from postprocess.text_processor import TextProcessor
+    TEXT_PROCESS_AVAILABLE = True
+except ImportError as e:
+    print(f"[Warning] Text processor not available: {e}")
+
 
 app = FastAPI(title="VoiceScribe", version="0.1.0")
 
@@ -264,7 +285,13 @@ async def preload_models():
             if engine_name == "funasr" and FUNASR_AVAILABLE:
                 print(f"[Preload] Loading FunASR model: {model_name}...")
                 eng = FunASREngine()
-                eng.load(model_name)
+                local_vad_path, local_punc_path = await _prepare_funasr_aux_paths(model_name)
+                eng.load(
+                    model_name,
+                    local_model_path=_get_registry_local_path("funasr", model_name),
+                    local_vad_path=local_vad_path,
+                    local_punc_path=local_punc_path,
+                )
                 engines["funasr"] = {"engine": eng, "model": model_name}
                 print(f"[Preload] FunASR ready!")
             elif engine_name == "whisper" and WHISPER_AVAILABLE:
@@ -309,6 +336,22 @@ class ModelStatus(BaseModel):
     size_bytes: Optional[int] = None
     downloaded_bytes: Optional[int] = None
     error: Optional[str] = None
+
+
+class ProcessTextRequest(BaseModel):
+    mode: str  # edit_selected | ask_selected
+    selected_text: str
+    instruction: Optional[str] = ""
+    question: Optional[str] = ""
+    language: str = "zh"
+    command: str = "rewrite"  # rewrite | summarize | polish | custom
+    custom_prompt: Optional[str] = ""
+
+
+class ProcessTextResult(BaseModel):
+    result_text: str
+    mode: str
+    meta: dict
 
 
 @app.get("/")
@@ -391,6 +434,27 @@ async def _download_funasr_model(model_name: str) -> tuple[str, int]:
     model_id = _get_fun_asr_model_id(model_name)
     if not model_id:
         raise ValueError(f"Unknown FunASR model: {model_name}")
+    return await _ensure_modelscope_model(model_id)
+
+
+def _modelscope_local_dir(model_id: str) -> str:
+    return os.path.join(MODEL_CACHE_DIR, *model_id.split("/"))
+
+
+def _path_has_files(path: str) -> bool:
+    if not os.path.isdir(path):
+        return False
+    for _, _, files in os.walk(path):
+        if files:
+            return True
+    return False
+
+
+async def _ensure_modelscope_model(model_id: str) -> tuple[str, int]:
+    local_dir = _modelscope_local_dir(model_id)
+    if _path_has_files(local_dir):
+        return local_dir, _dir_size(local_dir)
+
     if not _module_available("modelscope"):
         raise RuntimeError("modelscope not available")
 
@@ -400,6 +464,19 @@ async def _download_funasr_model(model_name: str) -> tuple[str, int]:
         snapshot_download, model_id, cache_dir=MODEL_CACHE_DIR
     )
     return local_dir, _dir_size(local_dir)
+
+
+async def _prepare_funasr_aux_paths(model_name: str) -> tuple[Optional[str], Optional[str]]:
+    local_vad_path = None
+    local_punc_path = None
+    try:
+        local_vad_path, _ = await _ensure_modelscope_model(FUNASR_AUX_MODELSCOPE_IDS["vad"])
+        if model_name != "sensevoice-small":
+            local_punc_path, _ = await _ensure_modelscope_model(FUNASR_AUX_MODELSCOPE_IDS["punc"])
+    except Exception as e:
+        # Keep runtime fallback to model IDs if dependency prefetch fails.
+        print(f"[FunASR] Prepare aux models failed, fallback to model IDs: {e}")
+    return local_vad_path, local_punc_path
 
 
 async def _download_whisper_model(model_name: str) -> tuple[str, int]:
@@ -590,8 +667,16 @@ async def load_engine(
     elif engine == "funasr":
         if not FUNASR_AVAILABLE:
             raise HTTPException(400, "FunASR engine not available. Install funasr.")
+        local_model_path = _get_registry_local_path("funasr", model)
+        local_vad_path, local_punc_path = await _prepare_funasr_aux_paths(model)
         eng = FunASREngine()
-        eng.load(model, enable_diarization=bool(enable_diarization))
+        eng.load(
+            model,
+            enable_diarization=bool(enable_diarization),
+            local_model_path=local_model_path,
+            local_vad_path=local_vad_path,
+            local_punc_path=local_punc_path,
+        )
         engines["funasr"] = {"engine": eng, "model": model, "diarization": bool(enable_diarization)}
     elif engine == "parakeet":
         if not PARAKEET_AVAILABLE:
@@ -745,6 +830,50 @@ async def transcribe(
     
     finally:
         os.unlink(tmp_path)
+
+
+@app.post("/process_text")
+async def process_text(payload: ProcessTextRequest) -> ProcessTextResult:
+    """Process selected text for edit/ask workflows."""
+    if not TEXT_PROCESS_AVAILABLE:
+        raise HTTPException(503, "Text processor not available")
+    if not payload.selected_text or not payload.selected_text.strip():
+        raise HTTPException(400, "selected_text is required")
+
+    mode = (payload.mode or "").strip().lower()
+    if mode not in {"edit_selected", "ask_selected"}:
+        raise HTTPException(400, "mode must be edit_selected or ask_selected")
+
+    processor = TextProcessor()
+    started = time.perf_counter()
+
+    try:
+        if mode == "edit_selected":
+            result_text, provider = processor.edit_selected(
+                selected_text=payload.selected_text,
+                instruction=payload.instruction or "",
+                command=payload.command or "rewrite",
+                custom_prompt=payload.custom_prompt or "",
+                language=payload.language or "zh",
+            )
+        else:
+            result_text, provider = processor.ask_selected(
+                selected_text=payload.selected_text,
+                question=payload.question or "",
+                language=payload.language or "zh",
+            )
+    except Exception as e:
+        raise HTTPException(500, f"process_text failed: {e}")
+
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    return ProcessTextResult(
+        result_text=result_text,
+        mode=mode,
+        meta={
+            "provider": provider,
+            "latency_ms": latency_ms,
+        },
+    )
 
 
 @app.websocket("/stream")

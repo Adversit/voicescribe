@@ -3,6 +3,7 @@ FunASR Engine
 阿里达摩院开源的语音识别，中文效果极佳
 """
 
+import os
 from typing import Dict, Any, Optional
 
 
@@ -20,7 +21,14 @@ class FunASREngine:
         self.model = None
         self.model_name = None
     
-    def load(self, model_name: str = "paraformer-zh", enable_diarization: bool = False):
+    def load(
+        self,
+        model_name: str = "paraformer-zh",
+        enable_diarization: bool = False,
+        local_model_path: Optional[str] = None,
+        local_vad_path: Optional[str] = None,
+        local_punc_path: Optional[str] = None,
+    ):
         """加载模型"""
         if model_name not in self.MODELS:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self.MODELS.keys())}")
@@ -28,6 +36,26 @@ class FunASREngine:
         from funasr import AutoModel
         
         model_id = self.MODELS[model_name]
+        model_source = model_id
+        if local_model_path:
+            if not os.path.exists(local_model_path):
+                raise FileNotFoundError(f"FunASR local model path not found: {local_model_path}")
+            model_source = local_model_path
+            print(f"[FunASR] Using local model path: {local_model_path}")
+
+        vad_source = "fsmn-vad"
+        if local_vad_path:
+            if not os.path.exists(local_vad_path):
+                raise FileNotFoundError(f"FunASR local VAD path not found: {local_vad_path}")
+            vad_source = local_vad_path
+            print(f"[FunASR] Using local VAD path: {local_vad_path}")
+
+        punc_source = "ct-punc"
+        if local_punc_path:
+            if not os.path.exists(local_punc_path):
+                raise FileNotFoundError(f"FunASR local PUNC path not found: {local_punc_path}")
+            punc_source = local_punc_path
+            print(f"[FunASR] Using local PUNC path: {local_punc_path}")
         
         device = self._get_device()
         print(f"[FunASR] Using device: {device}")
@@ -45,8 +73,8 @@ class FunASREngine:
         if model_name == "sensevoice-small":
             # SenseVoice 特殊配置
             self.model = AutoModel(
-                model=model_id,
-                vad_model="fsmn-vad",
+                model=model_source,
+                vad_model=vad_source,
                 vad_kwargs={"max_single_segment_time": 30000},
                 device=device,
                 disable_update=True,
@@ -56,10 +84,10 @@ class FunASREngine:
             # SeACo-Paraformer: 专门针对热词优化的模型
             # 热词召回率比普通 Paraformer 高很多
             self.model = AutoModel(
-                model=model_id,
+                model=model_source,
                 model_revision="v2.0.4",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
+                vad_model=vad_source,
+                punc_model=punc_source,
                 device=device,
                 disable_update=True,
                 **diarization_kwargs,
@@ -67,10 +95,10 @@ class FunASREngine:
         else:
             # Paraformer 系列 - 启用 VAD 和标点预测
             self.model = AutoModel(
-                model=model_id,
+                model=model_source,
                 model_revision="v2.0.4",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
+                vad_model=vad_source,
+                punc_model=punc_source,
                 device=device,
                 disable_update=True,
                 **diarization_kwargs,

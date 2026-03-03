@@ -59,7 +59,7 @@ class AIRefiner:
 
         return template.replace("{hotwords_section}", hotwords_section)
 
-    def refine(self, text: str, hotwords: list = None, timeout: int = 30) -> str:
+    def refine(self, text: str, hotwords: list = None, timeout: int = 1200) -> str:
         if not text or not text.strip():
             return text
 
@@ -83,7 +83,7 @@ class AIRefiner:
         import re
         return bool(re.search(r'[a-zA-Z]{2,}', text))
 
-    def _replace_hotwords(self, text: str, hotwords: list, timeout: int = 30) -> str:
+    def _replace_hotwords(self, text: str, hotwords: list, timeout: int = 1200) -> str:
         """专门针对热词的替换处理"""
         hotwords_str = ", ".join(hotwords)
         prompt = HOTWORD_REPLACEMENT_PROMPT.format(hotwords=hotwords_str, text=text)
@@ -93,11 +93,14 @@ class AIRefiner:
                 ["claude", "--model", "haiku", "--print", prompt],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
 
-            if result.returncode == 0 and result.stdout.strip():
-                replaced = result.stdout.strip()
+            output = (result.stdout or "").strip()
+            if result.returncode == 0 and output:
+                replaced = output
                 print(f"[AIRefiner] Hotword replacement: {text[:50]}... -> {replaced[:50]}...")
                 return replaced
             else:

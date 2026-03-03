@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('electron', {
         cancel: () => ipcRenderer.send('cancel-recording'),
         getState: () => ipcRenderer.invoke('get-recording-state'),
         transcribeAudio: (audioBuffer: ArrayBuffer) => ipcRenderer.invoke('transcribe-audio', audioBuffer),
+        partial: (text: string) => ipcRenderer.send('recording-partial', text),
         complete: (text: string) => ipcRenderer.send('recording-complete', text),
         completeWithResult: (payload: { text: string; result?: unknown }) => ipcRenderer.send('recording-complete-result', payload),
         error: (error: string) => ipcRenderer.send('recording-error', error),
@@ -60,6 +61,11 @@ contextBridge.exposeInMainWorld('electron', {
     window: {
         showMain: () => ipcRenderer.send('show-main-window'),
     },
+    // Selection bridge
+    selection: {
+        get: () => ipcRenderer.invoke('selection-get'),
+        replace: (text: string) => ipcRenderer.invoke('selection-replace', text),
+    },
     // App info
     app: {
         getVersion: () => ipcRenderer.invoke('get-app-version'),
@@ -87,6 +93,7 @@ export interface ElectronAPI {
         cancel: () => void;
         getState: () => Promise<{ isRecording: boolean; startTime: number | null; isTranscribing?: boolean; cancelled?: boolean; audioLevel?: number }>;
         transcribeAudio: (audioBuffer: ArrayBuffer) => Promise<{ success: boolean; error?: string }>;
+        partial: (text: string) => void;
         complete: (text: string) => void;
         completeWithResult: (payload: { text: string; result?: unknown }) => void;
         error: (error: string) => void;
@@ -125,12 +132,19 @@ export interface ElectronAPI {
             outputFormat: 'clipboard' | 'directInput' | 'both';
             launchAtLogin: boolean;
             enableStreaming: boolean;
+            mode: 'dictate' | 'edit_selected' | 'ask_selected';
+            editCommand: 'rewrite' | 'summarize' | 'polish' | 'custom';
+            customCommandPrompt: string;
             vocabulary: string[];
         }>;
         update: (partial: Record<string, unknown>) => Promise<{ success: boolean }>;
     };
     window: {
         showMain: () => void;
+    };
+    selection: {
+        get: () => Promise<{ success: boolean; text: string; error?: string }>;
+        replace: (text: string) => Promise<{ success: boolean; error?: string }>;
     };
     app: {
         getVersion: () => Promise<string>;
