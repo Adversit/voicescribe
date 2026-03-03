@@ -396,15 +396,7 @@ function notifyOperation(type: OperationNoticeType, message: string, detail?: st
 }
 
 async function sendCtrlKey(key: 'c' | 'v'): Promise<boolean> {
-    // Method 1: robotjs if available.
-    try {
-        const robot = require('robotjs');
-        robot.keyTap(key, ['control']);
-        return true;
-    } catch {
-        // fallback
-    }
-
+    // On Windows, prefer SendKeys first for better cross-app reliability.
     if (process.platform === 'win32') {
         try {
             const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^${key}')`;
@@ -412,12 +404,62 @@ async function sendCtrlKey(key: 'c' | 'v'): Promise<boolean> {
                 windowsHide: true,
                 encoding: 'utf8',
             });
-            return res.status === 0;
+            if (res.status === 0) {
+                return true;
+            }
         } catch {
-            return false;
+            // fallback
         }
     }
 
+    // Fallback: robotjs if available.
+    try {
+        const robot = require('robotjs');
+        robot.keyTap(key, ['control']);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function restoreClipboardLater(originalClipboard: string, expectedCurrent?: string) {
+    // Delay restore to avoid racing target app paste.
+    setTimeout(() => {
+        try {
+            if (expectedCurrent !== undefined) {
+                const current = clipboard.readText();
+                if (current !== expectedCurrent) {
+                    return;
+                }
+            }
+            clipboard.writeText(originalClipboard);
+        } catch {
+            // ignore
+        }
+    }, 1200);
+}
+
+async function replaceSelectedTextInActiveApp(text: string): Promise<boolean> {
+    const originalClipboard = clipboard.readText();
+    try {
+        clipboard.writeText(text);
+        await sleep(140);
+        const pasted = await sendCtrlKey('v');
+        await sleep(260);
+        if (pasted) {
+            restoreClipboardLater(originalClipboard, text);
+            return true;
+        }
+    } catch {
+        // ignore
+    }
+
+    // Paste not confirmed. Keep result in clipboard for manual paste.
+    try {
+        clipboard.writeText(text);
+    } catch {
+        // ignore
+    }
     return false;
 }
 
@@ -445,28 +487,24 @@ async function getSelectedTextFromActiveApp(): Promise<{ success: boolean; text:
     }
 }
 
-async function replaceSelectedTextInActiveApp(text: string): Promise<boolean> {
-    const originalClipboard = clipboard.readText();
-    try {
-        clipboard.writeText(text);
-        await sleep(80);
-        const pasted = await sendCtrlKey('v');
-        await sleep(80);
-        return pasted;
-    } finally {
-        clipboard.writeText(originalClipboard);
-    }
-}
-
 async function runEditSelectedWorkflow(instruction: string, settings: AppSettings): Promise<{ text: string; replaced: boolean }> {
+    console.log('[EditSelected] workflow start', {
+        instructionPreview: String(instruction || '').slice(0, 80),
+        command: settings.editCommand,
+    });
     const selected = await getSelectedTextFromActiveApp();
     if (!selected.success) {
         console.warn('[EditSelected] failed to read selected text:', selected.error || 'unknown');
         notifyOperation('error', 'Edit selected text failed', selected.error || 'Unable to read selected text');
         return { text: instruction, replaced: false };
     }
+    console.log('[EditSelected] selected text read', {
+        selectedLen: selected.text.length,
+        selectedPreview: selected.text.slice(0, 80),
+    });
 
     try {
+        console.log('[EditSelected] calling /process_text ...');
         const processed = await backend.processText({
             mode: 'edit_selected',
             selectedText: selected.text,
@@ -476,7 +514,14 @@ async function runEditSelectedWorkflow(instruction: string, settings: AppSetting
             customPrompt: settings.customCommandPrompt,
         });
         const editedText = processed.result_text || selected.text;
+        console.log('[EditSelected] /process_text done', {
+            provider: processed.meta?.provider || 'unknown',
+            changed: editedText !== selected.text,
+            editedLen: editedText.length,
+            editedPreview: editedText.slice(0, 80),
+        });
         const replaced = await replaceSelectedTextInActiveApp(editedText);
+        console.log('[EditSelected] write-back result', { replaced });
         if (replaced) {
             notifyOperation('success', 'Selected text replaced', `provider=${processed.meta?.provider || 'unknown'}`);
             return { text: editedText, replaced: true };
@@ -486,6 +531,7 @@ async function runEditSelectedWorkflow(instruction: string, settings: AppSetting
         notifyOperation('error', 'Write-back failed; result copied to clipboard', 'Paste manually into target app');
         return { text: editedText, replaced: false };
     } catch (error) {
+        console.error('[EditSelected] /process_text failed:', error);
         notifyOperation('error', 'Edit selected text failed', String(error));
         return { text: selected.text, replaced: false };
     }
@@ -556,6 +602,7 @@ async function transcriptionCompleteAsync(text: string, result?: backend.Transcr
     let shouldAutoOutput = true;
 
     if (settings.mode === 'edit_selected') {
+        console.log('[Main] entering edit_selected branch');
         // Hide overlay early to reduce focus interference with selection workflows.
         if (overlayWindow) overlayWindow.hide();
         await sleep(80);
@@ -566,6 +613,7 @@ async function transcriptionCompleteAsync(text: string, result?: backend.Transcr
             clipboard.writeText(finalText);
         }
     } else if (settings.mode === 'ask_selected') {
+        console.log('[Main] entering ask_selected branch');
         if (overlayWindow) overlayWindow.hide();
         await sleep(80);
         shouldAutoOutput = false;
