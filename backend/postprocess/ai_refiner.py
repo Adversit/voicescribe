@@ -92,13 +92,11 @@ class AIRefiner:
             result = subprocess.run(
                 ["claude", "--model", "haiku", "--print", prompt],
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=timeout,
             )
 
-            output = (result.stdout or "").strip()
+            stdout_bytes = result.stdout or b""
+            output = stdout_bytes.decode("utf-8", errors="replace").strip()
             if result.returncode == 0 and output:
                 replaced = output
                 print(f"[AIRefiner] Hotword replacement: {text[:50]}... -> {replaced[:50]}...")

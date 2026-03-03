@@ -1,145 +1,156 @@
 """
-Text processing utilities for non-dictation workflows:
+LLM-first text processing for non-dictation workflows.
 - edit_selected: rewrite/summarize/polish/custom
 - ask_selected: answer question from selected context
+
+Primary provider: Claude CLI (haiku, headless).
+Optional fallback provider: DeepSeek API (OpenAI-compatible endpoint).
 """
 
 from __future__ import annotations
 
-import re
+import json
+import os
 import shutil
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from typing import Optional, Tuple
 
 
 class TextProcessor:
-    """Best-effort text processor with optional Claude CLI and local fallback."""
+    """LLM-first text processor. Avoids rule-based rewriting."""
 
     def __init__(self):
         self.claude_bin = shutil.which("claude")
+        self.model_timeout = self._read_int_env("VOICESCRIBE_TEXT_MODEL_TIMEOUT", 120)
+        self.model_retries = max(1, self._read_int_env("VOICESCRIBE_TEXT_MODEL_RETRIES", 2))
 
-    def _run_claude(self, prompt: str, timeout: int = 45) -> Optional[str]:
+        # DeepSeek fallback (optional)
+        self.enable_deepseek_fallback = os.getenv("VOICESCRIBE_ENABLE_DEEPSEEK_FALLBACK", "1") != "0"
+        self.deepseek_api_key = (os.getenv("DEEPSEEK_API_KEY") or "").strip()
+        self.deepseek_base_url = (os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").strip().rstrip("/")
+        self.deepseek_model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-chat").strip()
+
+    @staticmethod
+    def _read_int_env(name: str, default: int) -> int:
+        raw = os.getenv(name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+            return value if value > 0 else default
+        except Exception:
+            return default
+
+    def _run_claude(self, prompt: str) -> Optional[str]:
         if not self.claude_bin:
             return None
-        try:
-            result = subprocess.run(
-                [self.claude_bin, "--model", "haiku", "--print", prompt],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-            )
-            output = (result.stdout or "").strip()
-            if result.returncode == 0 and output:
-                return output
-            stderr = (result.stderr or "").strip()
-            if stderr:
-                print(f"[TextProcessor] Claude failed rc={result.returncode}: {stderr[:200]}")
-            elif output:
-                print(f"[TextProcessor] Claude failed rc={result.returncode}: {output[:200]}")
-        except subprocess.TimeoutExpired:
-            print(f"[TextProcessor] Claude timed out after {timeout}s")
-            return None
-        except Exception as e:
-            print(f"[TextProcessor] Claude invoke error: {e}")
-            return None
+
+        for attempt in range(1, self.model_retries + 1):
+            try:
+                result = subprocess.run(
+                    [self.claude_bin, "--model", "haiku", "--print", prompt],
+                    capture_output=True,
+                    timeout=self.model_timeout,
+                )
+                stdout_bytes = result.stdout or b""
+                stderr_bytes = result.stderr or b""
+                output = stdout_bytes.decode("utf-8", errors="replace").strip()
+                if result.returncode == 0 and output:
+                    return output
+
+                stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+                if stderr:
+                    print(
+                        f"[TextProcessor] Claude failed attempt={attempt}/{self.model_retries} "
+                        f"rc={result.returncode}: {stderr[:300]}"
+                    )
+                else:
+                    print(
+                        f"[TextProcessor] Claude empty output attempt={attempt}/{self.model_retries} "
+                        f"rc={result.returncode}"
+                    )
+            except subprocess.TimeoutExpired:
+                print(
+                    f"[TextProcessor] Claude timeout attempt={attempt}/{self.model_retries} "
+                    f"after {self.model_timeout}s"
+                )
+            except Exception as e:
+                print(f"[TextProcessor] Claude invoke error attempt={attempt}/{self.model_retries}: {e}")
+
+            if attempt < self.model_retries:
+                time.sleep(min(2 * attempt, 4))
+
         return None
 
-    def _normalize_spaces(self, text: str) -> str:
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
-        text = re.sub(r"[ \t]+", " ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        return text.strip()
-
-    def _split_sentences(self, text: str) -> list[str]:
-        text = self._normalize_spaces(text)
-        if not text:
-            return []
-        parts = re.split(r"(?<=[。！？.!?])\s+|\n+", text)
-        return [p.strip() for p in parts if p and p.strip()]
-
-    def _summarize_fallback(self, selected_text: str) -> str:
-        sentences = self._split_sentences(selected_text)
-        if not sentences:
-            return ""
-        if len(sentences) <= 2:
-            return " ".join(sentences)
-        return " ".join(sentences[:2])
-
-    def _polish_fallback(self, selected_text: str) -> str:
-        text = self._normalize_spaces(selected_text)
-        # Light punctuation cleanup for Chinese/English mixed text.
-        text = re.sub(r"\s+([,.!?;:，。！？；：])", r"\1", text)
-        text = re.sub(r"([，。！？；：])([^\s])", r"\1 \2", text)
-        text = re.sub(r"\s{2,}", " ", text)
-        return text.strip()
-
-    def _rewrite_fallback(self, selected_text: str, instruction: str = "") -> str:
-        delete_result = self._delete_phrase_fallback(selected_text, instruction)
-        if delete_result is not None:
-            return delete_result
-
-        instruction_l = (instruction or "").lower()
-        if any(k in instruction_l for k in ["summarize", "summary", "shorter"]):
-            return self._summarize_fallback(selected_text)
-        if any(k in instruction_l for k in ["polish", "formal", "improve"]):
-            return self._polish_fallback(selected_text)
-        if any(k in instruction for k in ["总结", "摘要", "精简", "更短"]):
-            return self._summarize_fallback(selected_text)
-        if any(k in instruction for k in ["润色", "正式", "优化", "通顺"]):
-            return self._polish_fallback(selected_text)
-        # Default rewrite fallback: keep original meaning with light cleanup.
-        return self._polish_fallback(selected_text)
-
-    def _delete_phrase_fallback(self, selected_text: str, instruction: str) -> Optional[str]:
-        instruction = (instruction or "").strip()
-        if not instruction:
+    def _post_json(self, url: str, payload: dict, headers: dict, timeout: int) -> Optional[dict]:
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                if not raw:
+                    return None
+                return json.loads(raw)
+        except urllib.error.HTTPError as e:
+            err_body = ""
+            try:
+                err_body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            print(f"[TextProcessor] HTTPError {e.code} on {url}: {err_body[:300]}")
             return None
-        if not any(k in instruction for k in ["删除", "删掉", "去掉", "移除"]):
+        except Exception as e:
+            print(f"[TextProcessor] request error on {url}: {e}")
             return None
 
-        terms: list[str] = []
-
-        # 1) Prefer explicit quoted terms.
-        quoted = re.findall(r"[\"'“”‘’《》](.+?)[\"'“”‘’《》]", instruction)
-        terms.extend([q.strip() for q in quoted if q and q.strip()])
-
-        # 2) Common imperative patterns.
-        patterns = [
-            r"(?:删除|删掉|去掉|移除)\s*(?:这|这个|这段|这句)?\s*([^\s，。！？；：,.!?\"'“”‘’《》]{1,32})",
-            r"把\s*([^\s，。！？；：,.!?\"'“”‘’《》]{1,32})\s*(?:删掉|删除|去掉|移除)",
-        ]
-        for pat in patterns:
-            m = re.search(pat, instruction)
-            if m:
-                terms.append(m.group(1).strip())
-
-        if not terms:
+    def _run_deepseek(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+        if not self.deepseek_api_key:
             return None
 
-        result = selected_text
-        changed = False
-        for term in terms:
-            t = term.strip().strip("\"'“”‘’《》")
-            # Trim trailing quantity markers in commands like "删除结论两个字".
-            t = re.sub(r"(这)?(一|二|两|三|四|五)?个?(字|词)$", "", t)
-            t = t.strip()
-            if not t:
-                continue
-            if t in result:
-                result = result.replace(t, "", 1)
-                changed = True
-                break
-
-        if not changed:
+        payload = {
+            "model": self.deepseek_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.2,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.deepseek_api_key}",
+        }
+        url = f"{self.deepseek_base_url}/chat/completions"
+        data = self._post_json(url, payload, headers, timeout=self.model_timeout)
+        if not data:
             return None
 
-        result = re.sub(r"\s{2,}", " ", result)
-        result = re.sub(r"\s+([,.!?;:，。！？；：])", r"\1", result)
-        result = re.sub(r"([（(])\s+", r"\1", result)
-        result = re.sub(r"\s+([）)])", r"\1", result)
-        return result.strip()
+        try:
+            choices = data.get("choices") or []
+            if not choices:
+                return None
+            message = choices[0].get("message") or {}
+            content = (message.get("content") or "").strip()
+            return content or None
+        except Exception:
+            return None
+
+    def _call_llm(self, system_prompt: str, user_prompt: str) -> Tuple[Optional[str], str]:
+        # Priority 1: Claude CLI (headless haiku)
+        claude_prompt = f"{system_prompt}\n\n{user_prompt}"
+        out = self._run_claude(claude_prompt)
+        if out:
+            return out, "claude"
+
+        # Priority 2: optional DeepSeek fallback
+        if self.enable_deepseek_fallback and self.deepseek_api_key:
+            out = self._run_deepseek(system_prompt, user_prompt)
+            if out:
+                return out, "deepseek"
+
+        return None, "unavailable"
 
     def edit_selected(
         self,
@@ -156,46 +167,36 @@ class TextProcessor:
         custom_prompt = (custom_prompt or "").strip()
 
         if not selected_text:
-            return "", "fallback"
+            return "", "fallback_empty_input"
 
-        if self.claude_bin:
-            if command == "custom" and custom_prompt:
-                prompt = (
-                    "You are a text editor assistant.\n"
-                    "Apply the custom instruction to the selected text.\n"
-                    "Return only final edited text.\n\n"
-                    f"Language hint: {language}\n"
-                    f"Selected text:\n{selected_text}\n\n"
-                    f"Voice instruction:\n{instruction or '(none)'}\n\n"
-                    f"Custom prompt:\n{custom_prompt}\n"
-                )
-            else:
-                task = {
-                    "rewrite": "Rewrite the text while preserving meaning.",
-                    "summarize": "Summarize the text concisely.",
-                    "polish": "Polish the text for clarity and fluency.",
-                }.get(command, "Rewrite the text while preserving meaning.")
-                prompt = (
-                    "You are a text editor assistant.\n"
-                    f"{task}\n"
-                    "Return only final edited text.\n\n"
-                    f"Language hint: {language}\n"
-                    f"Selected text:\n{selected_text}\n\n"
-                    f"Voice instruction:\n{instruction or '(none)'}\n"
-                )
+        if command == "custom" and custom_prompt:
+            task = "Apply the custom prompt to edit the selected text."
+        else:
+            task = {
+                "rewrite": "Rewrite the text while preserving meaning.",
+                "summarize": "Summarize the text concisely.",
+                "polish": "Polish the text for clarity and fluency.",
+            }.get(command, "Rewrite the text while preserving meaning.")
 
-            out = self._run_claude(prompt, timeout=120)
-            if out:
-                return out, "claude"
+        system_prompt = (
+            "You are a text editor assistant. "
+            "Follow the task and voice instruction exactly. "
+            "Return only the final edited text without explanation."
+        )
+        user_prompt = (
+            f"Language hint: {language}\n"
+            f"Task: {task}\n"
+            f"Selected text:\n{selected_text}\n\n"
+            f"Voice instruction:\n{instruction or '(none)'}\n"
+            + (f"\nCustom prompt:\n{custom_prompt}\n" if custom_prompt else "")
+        )
 
-        if command == "summarize":
-            return self._summarize_fallback(selected_text), "fallback"
-        if command == "polish":
-            return self._polish_fallback(selected_text), "fallback"
-        if command == "custom":
-            # Without external model, fallback to safe rewrite.
-            return self._rewrite_fallback(selected_text, instruction), "fallback"
-        return self._rewrite_fallback(selected_text, instruction), "fallback"
+        out, provider = self._call_llm(system_prompt, user_prompt)
+        if out:
+            return out.strip(), provider
+
+        # No rule-based rewrite here by request; keep original text.
+        return selected_text, "fallback_original_text"
 
     def ask_selected(
         self,
@@ -208,32 +209,24 @@ class TextProcessor:
         question = (question or "").strip()
 
         if not selected_text:
-            return "", "fallback"
+            return "", "fallback_empty_input"
         if not question:
-            return self._summarize_fallback(selected_text), "fallback"
+            return "Question is empty.", "fallback_empty_question"
 
-        if self.claude_bin:
-            prompt = (
-                "You are a Q&A assistant.\n"
-                "Answer based on the provided selected text.\n"
-                "If context is insufficient, say so explicitly.\n"
-                "Keep answer concise.\n\n"
-                f"Language hint: {language}\n"
-                f"Selected text:\n{selected_text}\n\n"
-                f"Question:\n{question}\n"
-            )
-            out = self._run_claude(prompt, timeout=120)
-            if out:
-                return out, "claude"
-
-        summary = self._summarize_fallback(selected_text)
-        if any(k in question.lower() for k in ["summary", "summarize"]) or any(
-            k in question for k in ["总结", "概括", "摘要"]
-        ):
-            return summary, "fallback"
-
-        answer = (
-            "当前为本地回退问答模式，未调用外部模型。"
-            f"基于选中文本可得的要点：{summary}"
+        system_prompt = (
+            "You are a Q&A assistant. "
+            "Answer only from the provided selected text. "
+            "If context is insufficient, say that clearly. "
+            "Keep the answer concise."
         )
-        return answer, "fallback"
+        user_prompt = (
+            f"Language hint: {language}\n"
+            f"Selected text:\n{selected_text}\n\n"
+            f"Question:\n{question}\n"
+        )
+
+        out, provider = self._call_llm(system_prompt, user_prompt)
+        if out:
+            return out.strip(), provider
+
+        return "Model call failed. Please retry.", "fallback_model_failed"

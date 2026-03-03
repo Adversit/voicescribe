@@ -336,7 +336,12 @@ function startRecording() {
 
     // Show overlay window and send state when ready
     if (overlayWindow) {
-        overlayWindow.show();
+        // Do not steal focus from the target app, otherwise selection-copy may fail later.
+        if (typeof (overlayWindow as any).showInactive === 'function') {
+            (overlayWindow as any).showInactive();
+        } else {
+            overlayWindow.show();
+        }
         // Add small delay to ensure React has mounted.
         setTimeout(() => broadcastRecordingState(), 50);
     }
@@ -421,17 +426,20 @@ async function getSelectedTextFromActiveApp(): Promise<{ success: boolean; text:
     const sentinel = `__VOICESCRIBE_SELECTION_SENTINEL_${Date.now()}__`;
     try {
         clipboard.writeText(sentinel);
-        await sleep(60);
-        const copied = await sendCtrlKey('c');
-        if (!copied) {
-            return { success: false, text: '', error: 'Failed to trigger copy shortcut (Ctrl+C)' };
+        await sleep(80);
+        // Retry once to improve reliability for apps with delayed clipboard updates.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const copied = await sendCtrlKey('c');
+            if (!copied) {
+                continue;
+            }
+            await sleep(attempt === 0 ? 160 : 260);
+            const selectedText = clipboard.readText();
+            if (selectedText && selectedText !== sentinel) {
+                return { success: true, text: selectedText };
+            }
         }
-        await sleep(140);
-        const selectedText = clipboard.readText();
-        if (!selectedText || selectedText === sentinel) {
-            return { success: false, text: '', error: 'No selected text detected' };
-        }
-        return { success: true, text: selectedText };
+        return { success: false, text: '', error: 'No selected text detected' };
     } finally {
         clipboard.writeText(originalClipboard);
     }
@@ -548,6 +556,9 @@ async function transcriptionCompleteAsync(text: string, result?: backend.Transcr
     let shouldAutoOutput = true;
 
     if (settings.mode === 'edit_selected') {
+        // Hide overlay early to reduce focus interference with selection workflows.
+        if (overlayWindow) overlayWindow.hide();
+        await sleep(80);
         shouldAutoOutput = false;
         const processed = await runEditSelectedWorkflow(text, settings);
         finalText = processed.text;
@@ -555,6 +566,8 @@ async function transcriptionCompleteAsync(text: string, result?: backend.Transcr
             clipboard.writeText(finalText);
         }
     } else if (settings.mode === 'ask_selected') {
+        if (overlayWindow) overlayWindow.hide();
+        await sleep(80);
         shouldAutoOutput = false;
         const qa = await runAskSelectedWorkflow(text, settings);
         finalText = qa.answer;

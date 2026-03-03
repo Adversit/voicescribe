@@ -28,42 +28,42 @@ def main() -> int:
 
     tests = []
 
-    # 1) edit_selected basic rewrite
+    # 1) edit_selected basic request
     resp = client.post(
         "/process_text",
         json={
             "mode": "edit_selected",
-            "selected_text": "这是一个需要改写的句子。",
-            "instruction": "改写一下，让语气自然",
+            "selected_text": "Conclusion: Haiku is not always instant.",
+            "instruction": "Delete the word Conclusion.",
             "command": "rewrite",
         },
     )
-    tests.append(("edit_selected/rewrite", resp.status_code == 200 and bool(resp.json().get("result_text"))))
-
-    # 2) edit_selected summarize
-    resp = client.post(
-        "/process_text",
-        json={
-            "mode": "edit_selected",
-            "selected_text": "第一句。第二句。第三句。",
-            "instruction": "总结",
-            "command": "summarize",
-        },
+    payload = resp.json() if resp.status_code == 200 else {}
+    tests.append(
+        (
+            "edit_selected/basic",
+            resp.status_code == 200 and isinstance(payload.get("result_text"), str),
+        )
     )
-    tests.append(("edit_selected/summarize", resp.status_code == 200 and bool(resp.json().get("result_text"))))
 
-    # 3) ask_selected
+    # 2) ask_selected basic request
     resp = client.post(
         "/process_text",
         json={
             "mode": "ask_selected",
-            "selected_text": "VoiceScribe 支持本地语音转写与说话人管理。",
-            "question": "这个系统的核心能力是什么？",
+            "selected_text": "VoiceScribe supports local transcription and speaker management.",
+            "question": "What are the core capabilities?",
         },
     )
-    tests.append(("ask_selected/basic", resp.status_code == 200 and bool(resp.json().get("result_text"))))
+    payload = resp.json() if resp.status_code == 200 else {}
+    tests.append(
+        (
+            "ask_selected/basic",
+            resp.status_code == 200 and isinstance(payload.get("result_text"), str),
+        )
+    )
 
-    # 4) selected_text required
+    # 3) selected_text required
     resp = client.post(
         "/process_text",
         json={

@@ -866,6 +866,11 @@ async def process_text(payload: ProcessTextRequest) -> ProcessTextResult:
         raise HTTPException(500, f"process_text failed: {e}")
 
     latency_ms = int((time.perf_counter() - started) * 1000)
+    print(
+        "[process_text] "
+        f"mode={mode} provider={provider} latency_ms={latency_ms} "
+        f"selected_len={len(payload.selected_text)} result_len={len(result_text or '')}"
+    )
     return ProcessTextResult(
         result_text=result_text,
         mode=mode,
