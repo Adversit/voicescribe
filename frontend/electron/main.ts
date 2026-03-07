@@ -597,8 +597,9 @@ async function transcriptionCompleteAsync(text: string, result?: backend.Transcr
         editCommand: settings.editCommand,
         outputFormat: settings.outputFormat,
         enableStreaming: settings.enableStreaming,
+        enableDiarization: settings.enableDiarization,
     });
-    let finalText = text;
+    let finalText = result?.text || text;
     let shouldAutoOutput = true;
 
     if (settings.mode === 'edit_selected') {

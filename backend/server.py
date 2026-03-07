@@ -34,6 +34,7 @@ import importlib.util
 import shutil
 import json
 import wave
+import re
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -713,6 +714,90 @@ def mock_transcribe(audio_path: str, language: str = "zh") -> dict:
     }
 
 
+def apply_unified_speaker_system(
+    result: dict,
+    *,
+    engine: str,
+    enable_diarization: bool,
+    audio_path: str,
+    source: str,
+) -> dict:
+    """Apply one shared speaker pipeline for both /transcribe and /stream."""
+    global diarizer, engines
+
+    if not enable_diarization:
+        return result
+
+    diarization_done = False
+
+    # Path A: FunASR already returned speaker labels, then map to registered names.
+    if DIARIZATION_AVAILABLE and engine == "funasr" and engines.get("funasr", {}).get("diarization", False):
+        try:
+            diarization_list = [
+                {
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "speaker": seg.get("speaker"),
+                }
+                for seg in result.get("segments", [])
+                if seg.get("speaker") is not None
+            ]
+            if diarization_list:
+                diarization_done = True
+                if diarizer is None:
+                    diarizer = SpeakerDiarizer()
+                if diarizer.speakers and diarizer.sv_model is None:
+                    diarizer.load(load_diarization=False)
+                result = diarizer.assign_speakers(result, diarization_list, audio_path=audio_path)
+        except Exception as e:
+            print(f"[Speaker] {source} name mapping failed: {e}")
+
+    # Path B: external diarization fallback.
+    if DIARIZATION_AVAILABLE and not diarization_done:
+        try:
+            if diarizer is None:
+                diarizer = SpeakerDiarizer()
+                diarizer.load()
+            speakers = diarizer.diarize(audio_path)
+            result = diarizer.assign_speakers(result, speakers, audio_path=audio_path)
+        except Exception as e:
+            print(f"[Speaker] {source} diarization failed: {e}")
+
+    return result
+
+
+def enforce_diarization_output_policy(result: dict, enable_diarization: bool) -> dict:
+    """
+    Strict diarization policy:
+    - enable_diarization=False: never expose speaker labels in output.
+    - enable_diarization=True: keep original output untouched.
+    """
+    if enable_diarization:
+        return result
+
+    if not isinstance(result, dict):
+        return result
+
+    had_speaker = False
+    segments = result.get("segments")
+    if isinstance(segments, list):
+        cleaned_segments = []
+        for seg in segments:
+            if isinstance(seg, dict):
+                if "speaker" in seg:
+                    had_speaker = True
+                seg = {k: v for k, v in seg.items() if k != "speaker"}
+            cleaned_segments.append(seg)
+        result["segments"] = cleaned_segments
+
+    # Defensive cleanup: if speaker mapping ever prefixed text like "[Name] ...",
+    # remove that prefix when diarization is disabled.
+    if had_speaker and isinstance(result.get("text"), str):
+        result["text"] = re.sub(r"^\[[^\]]+\]\s*", "", result["text"])
+
+    return result
+
+
 @app.post("/transcribe")
 async def transcribe(
     audio: UploadFile = File(...),
@@ -778,38 +863,15 @@ async def transcribe(
             print(f"[Transcribe] Engine={engine}, hotwords={hotwords or '(none)'}")
             result = eng.transcribe(tmp_path, language=language)
         
-        # Speaker diarization if enabled (FunASR 内置 spk_model 时可跳过)
-        diarization_done = False
-        if engine == "funasr" and enable_diarization:
-            if engines.get("funasr", {}).get("diarization", False):
-                # 如果 FunASR 已给出 speaker 标签，尝试将标签映射为已注册说话人姓名
-                try:
-                    diarization_list = [
-                        {
-                            "start": seg["start"],
-                            "end": seg["end"],
-                            "speaker": seg.get("speaker"),
-                        }
-                        for seg in result.get("segments", [])
-                        if seg.get("speaker") is not None
-                    ]
-                    if diarization_list:
-                        diarization_done = True
-                        if diarizer is None:
-                            diarizer = SpeakerDiarizer()
-                        if diarizer.speakers and diarizer.sv_model is None:
-                            diarizer.load(load_diarization=False)
-                        result = diarizer.assign_speakers(result, diarization_list, audio_path=tmp_path)
-                except Exception as e:
-                    print(f"[Speaker] Name mapping failed: {e}")
-
-        if enable_diarization and DIARIZATION_AVAILABLE and not diarization_done:
-            if diarizer is None:
-                diarizer = SpeakerDiarizer()
-                diarizer.load()
-
-            speakers = diarizer.diarize(tmp_path)
-            result = diarizer.assign_speakers(result, speakers, audio_path=tmp_path)
+        # Unified speaker pipeline shared with stream mode.
+        result = apply_unified_speaker_system(
+            result,
+            engine=engine,
+            enable_diarization=enable_diarization,
+            audio_path=tmp_path,
+            source="transcribe",
+        )
+        result = enforce_diarization_output_policy(result, enable_diarization)
 
         # AI 文本优化
         if enable_ai_refine and AI_REFINE_AVAILABLE:
@@ -884,7 +946,7 @@ async def process_text(payload: ProcessTextRequest) -> ProcessTextResult:
 @app.websocket("/stream")
 async def stream_transcribe(websocket: WebSocket):
     """WebSocket streaming ASR:
-    - text: {"action":"start","engine","model","language","hotwords","enable_ai_refine"}
+    - text: {"action":"start","engine","model","language","hotwords","enable_ai_refine","enable_diarization"}
     - binary: PCM16 mono 16k chunks
     - text: {"action":"end"}
     """
@@ -900,8 +962,15 @@ async def stream_transcribe(websocket: WebSocket):
             wf.writeframes(pcm_bytes)
         return tmp_path
 
-    async def transcribe_pcm(pcm_bytes: bytes, engine: str, model: str, language: str, hotwords: str) -> dict:
-        global engines
+    async def transcribe_pcm(
+        pcm_bytes: bytes,
+        engine: str,
+        model: str,
+        language: str,
+        hotwords: str,
+        enable_diarization: bool = False,
+    ) -> dict:
+        global engines, diarizer
         if not pcm_bytes:
             return {"text": "", "segments": [], "duration": 0}
 
@@ -915,7 +984,10 @@ async def stream_transcribe(websocket: WebSocket):
             raise RuntimeError("Parakeet engine not available")
 
         if engine not in engines or engines[engine]["model"] != model:
-            await load_engine(engine, model)
+            await load_engine(engine, model, enable_diarization=enable_diarization if engine == "funasr" else None)
+        elif engine == "funasr" and enable_diarization:
+            if not engines.get("funasr", {}).get("diarization", False):
+                await load_engine(engine, model, enable_diarization=True)
         eng = engines[engine]["engine"]
 
         wav_path = pcm16_to_wav_file(pcm_bytes)
@@ -924,6 +996,17 @@ async def stream_transcribe(websocket: WebSocket):
                 result = eng.transcribe(wav_path, language=language, hotwords=hotwords)
             else:
                 result = eng.transcribe(wav_path, language=language)
+
+            # Unified speaker pipeline shared with /transcribe.
+            result = apply_unified_speaker_system(
+                result,
+                engine=engine,
+                enable_diarization=enable_diarization,
+                audio_path=wav_path,
+                source="stream",
+            )
+            result = enforce_diarization_output_policy(result, enable_diarization)
+
             return result
         finally:
             try:
@@ -937,6 +1020,7 @@ async def stream_transcribe(websocket: WebSocket):
         "language": "zh",
         "hotwords": "",
         "enable_ai_refine": False,
+        "enable_diarization": False,
     }
     # Streaming policy: process one partial every 30s chunk (16kHz, 16-bit mono).
     chunk_duration = 30
@@ -970,6 +1054,17 @@ async def stream_transcribe(websocket: WebSocket):
                     cfg["language"] = payload.get("language", cfg["language"])
                     cfg["hotwords"] = payload.get("hotwords", cfg["hotwords"])
                     cfg["enable_ai_refine"] = bool(payload.get("enable_ai_refine", cfg["enable_ai_refine"]))
+                    cfg["enable_diarization"] = bool(
+                        payload.get(
+                            "enable_diarization",
+                            payload.get("enableDiarization", cfg["enable_diarization"]),
+                        )
+                    )
+                    print(
+                        "[Stream] start "
+                        f"engine={cfg['engine']} model={cfg['model']} "
+                        f"enable_diarization={cfg['enable_diarization']} enable_ai_refine={cfg['enable_ai_refine']}"
+                    )
                     await websocket.send_json({"type": "started", **cfg})
                     continue
 
@@ -984,12 +1079,18 @@ async def stream_transcribe(websocket: WebSocket):
                         cfg["model"],
                         cfg["language"],
                         cfg["hotwords"],
+                        cfg["enable_diarization"],
                     )
                     # AI refine runs once after the whole recording is converted to text.
                     if cfg["enable_ai_refine"] and AI_REFINE_AVAILABLE:
                         refiner = AIRefiner()
                         hotwords_list = [w.strip() for w in cfg["hotwords"].split(",") if w.strip()]
                         final_result["text"] = refiner.refine(final_result.get("text", ""), hotwords_list)
+                    speaker_labeled = sum(1 for s in final_result.get("segments", []) if s.get("speaker"))
+                    print(
+                        "[Stream] final "
+                        f"segments={len(final_result.get('segments', []))} speaker_labeled={speaker_labeled}"
+                    )
                     await websocket.send_json({
                         "type": "final",
                         "text": final_result.get("text", ""),
@@ -1022,6 +1123,7 @@ async def stream_transcribe(websocket: WebSocket):
                     cfg["model"],
                     cfg["language"],
                     cfg["hotwords"],
+                    False,
                 )
                 await websocket.send_json({
                     "type": "partial",

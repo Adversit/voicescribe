@@ -4,6 +4,7 @@ export interface StreamStartOptions {
     language: string;
     hotwords?: string;
     enableAiRefine?: boolean;
+    enableDiarization?: boolean;
 }
 
 export interface StreamResult {
@@ -49,6 +50,7 @@ export class StreamTranscriber {
                         language: options.language,
                         hotwords: options.hotwords || "",
                         enable_ai_refine: !!options.enableAiRefine,
+                        enable_diarization: !!options.enableDiarization,
                     })
                 );
                 resolve();

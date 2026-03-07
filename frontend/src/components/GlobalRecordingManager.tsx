@@ -57,6 +57,7 @@ export function GlobalRecordingManager() {
                             language: settings.language,
                             hotwords: (settings.vocabulary || []).join(","),
                             enableAiRefine: settings.enableAiRefine,
+                            enableDiarization: settings.enableDiarization,
                         });
                         recorder.setOnPcmChunk((chunk) => stream?.sendChunk(chunk));
                     } catch (e) {
