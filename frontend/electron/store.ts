@@ -33,6 +33,14 @@ export interface AppSettings {
 
     // Vocabulary
     vocabulary: string[];
+
+    // Meeting settings
+    meetingOutputFormat: 'text_only' | 'with_speakers' | 'with_summary' | 'full';
+    llmProvider: 'claude_cli' | 'anthropic_api' | 'custom';
+    llmModel: string;
+    customApiUrl: string;
+    customApiKey: string;
+    summaryInterval: number;
 }
 
 const defaults: AppSettings = {
@@ -52,6 +60,12 @@ const defaults: AppSettings = {
     launchAtLogin: false,
     enableStreaming: false,
     vocabulary: [],
+    meetingOutputFormat: 'with_speakers',
+    llmProvider: 'claude_cli',
+    llmModel: 'haiku',
+    customApiUrl: '',
+    customApiKey: '',
+    summaryInterval: 120,
 };
 
 // Get config file path
