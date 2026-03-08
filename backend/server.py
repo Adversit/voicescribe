@@ -660,7 +660,7 @@ async def transcribe(
             if enable_ai_refine and AI_REFINE_AVAILABLE:
                 refiner = AIRefiner()
                 hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
-                result["text"] = refiner.refine(result["text"], hotwords_list)
+                result["text"] = refiner.refine_sync(result["text"], hotwords_list)
             return TranscribeResult(
                 text=result["text"],
                 segments=result.get("segments", []),
@@ -736,7 +736,7 @@ async def transcribe(
             hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
             print(f"[AI Refine] Hotwords: {hotwords_list}")
             print(f"[AI Refine] Original: {result['text'][:100]}...")
-            result["text"] = refiner.refine(result["text"], hotwords_list)
+            result["text"] = refiner.refine_sync(result["text"], hotwords_list)
             print(f"[AI Refine] Refined: {result['text'][:100]}...")
 
         return TranscribeResult(
@@ -859,7 +859,7 @@ async def stream_transcribe(websocket: WebSocket):
                     if cfg["enable_ai_refine"] and AI_REFINE_AVAILABLE:
                         refiner = AIRefiner()
                         hotwords_list = [w.strip() for w in cfg["hotwords"].split(",") if w.strip()]
-                        final_result["text"] = refiner.refine(final_result.get("text", ""), hotwords_list)
+                        final_result["text"] = refiner.refine_sync(final_result.get("text", ""), hotwords_list)
                     await websocket.send_json({
                         "type": "final",
                         "text": final_result.get("text", ""),

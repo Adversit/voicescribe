@@ -1,107 +1,133 @@
+"""AI-powered text refinement with multi-provider LLM support.
+
+Supports:
+- claude CLI (haiku) - default, no API key needed
+- Anthropic SDK - for direct API calls (reserved)
+- Custom API - for local/domestic models (reserved)
 """
-AI 文本优化模块 - 使用 Claude Code 无头模式
-"""
-import subprocess
-from pathlib import Path
 
-DEFAULT_PROMPT = """你是一个语音转文字的后处理专家。请对以下语音转录文本进行优化：
+import asyncio
+import logging
+from typing import Optional
 
-1. 删除语气词（呃、嗯、啊、额、那个、就是、然后、对吧、这个、所以说）
-2. 修正明显的错别字和语法错误
-3. 保持原意不变，不要添加或删减实质内容
-4. 保留原有的标点符号风格
-
-{hotwords_section}
-
-请直接输出优化后的文本，不要添加任何解释、前缀或额外内容。"""
-
-
-HOTWORD_REPLACEMENT_PROMPT = """语音识别经常把专有名词误识别为发音相似的常见词。
-
-**热词列表：** {hotwords}
-
-**原文：** {text}
-
-**任务：** 检查原文，如果某个词与热词发音相似但被误识别为常见词，将其替换为热词。
-
-**判断标准：**
-1. 发音相似（中英文谐音都算）
-2. 上下文合理（技术讨论中更可能是专有名词）
-
-直接输出修正后的文本，不要解释。如果没有需要修正的，原样输出。"""
+logger = logging.getLogger(__name__)
 
 
 class AIRefiner:
-    def __init__(self):
-        self.config_dir = Path.home() / ".voicescribe"
-        self.prompt_file = self.config_dir / "refine_prompt.txt"
-        self._ensure_config_dir()
+    def __init__(
+        self,
+        provider: str = "claude_cli",
+        model: str = "haiku",
+        custom_api_url: str = "",
+        custom_api_key: str = "",
+        timeout: int = 30,
+    ):
+        self.provider = provider
+        self.model = model
+        self.custom_api_url = custom_api_url
+        self.custom_api_key = custom_api_key
+        self.timeout = timeout
 
-    def _ensure_config_dir(self):
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-        # 如果没有自定义 prompt，创建默认模板
-        if not self.prompt_file.exists():
-            self.prompt_file.write_text(DEFAULT_PROMPT, encoding="utf-8")
+    def should_refine(self, text: str, hotwords: list[str]) -> bool:
+        """Determine if text should be refined. Triggers when hotwords exist."""
+        return len(hotwords) > 0 and len(text.strip()) > 0
 
-    def _load_prompt_template(self) -> str:
-        if self.prompt_file.exists():
-            return self.prompt_file.read_text(encoding="utf-8")
-        return DEFAULT_PROMPT
+    async def refine(self, text: str, hotwords: list[str]) -> str:
+        """Refine transcribed text using LLM to correct hotword errors.
 
-    def _build_prompt(self, hotwords: list = None) -> str:
-        template = self._load_prompt_template()
+        Args:
+            text: Transcribed text to refine.
+            hotwords: List of correct terms to match against.
 
-        if hotwords and len(hotwords) > 0:
-            hotwords_section = "以下是需要特别注意的专有名词（热词），请确保正确识别：\n"
-            hotwords_section += "\n".join(f"- {word}" for word in hotwords if word.strip())
-        else:
-            hotwords_section = ""
-
-        return template.replace("{hotwords_section}", hotwords_section)
-
-    def refine(self, text: str, hotwords: list = None, timeout: int = 30) -> str:
-        if not text or not text.strip():
+        Returns:
+            Refined text, or original text if refinement fails.
+        """
+        if not self.should_refine(text, hotwords):
             return text
 
-        # 智能判断：只有当检测到可能的英文专有名词误识别时才调用 AI
-        if hotwords and len(hotwords) > 0:
-            if self._needs_hotword_correction(text, hotwords):
-                print("[AIRefiner] 检测到英文，启用 AI 修正")
-                return self._replace_hotwords(text, hotwords, timeout)
-            else:
-                print("[AIRefiner] 无英文，跳过 AI 修正")
-                return text
-
-        # 没有热词时，直接返回原文
-        return text
-
-    def _needs_hotword_correction(self, text: str, hotwords: list) -> bool:
-        """
-        智能检测是否需要热词修正
-        逻辑：文本中有英文词（可能是误识别）→ 调用 AI
-        """
-        import re
-        return bool(re.search(r'[a-zA-Z]{2,}', text))
-
-    def _replace_hotwords(self, text: str, hotwords: list, timeout: int = 30) -> str:
-        """专门针对热词的替换处理"""
-        hotwords_str = ", ".join(hotwords)
-        prompt = HOTWORD_REPLACEMENT_PROMPT.format(hotwords=hotwords_str, text=text)
+        prompt = self._build_hotword_prompt(text, hotwords)
 
         try:
-            result = subprocess.run(
-                ["claude", "--model", "haiku", "--print", prompt],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                replaced = result.stdout.strip()
-                print(f"[AIRefiner] Hotword replacement: {text[:50]}... -> {replaced[:50]}...")
-                return replaced
-            else:
-                return text
+            result = await self._call_llm(prompt)
+            if result and len(result.strip()) > 0:
+                return result.strip()
         except Exception as e:
-            print(f"[AIRefiner] Hotword replacement error: {e}")
+            logger.warning(f"[AIRefiner] Refinement failed: {e}")
+
+        return text
+
+    def refine_sync(self, text: str, hotwords: list[str]) -> str:
+        """Synchronous wrapper for refine(), for backward compatibility."""
+        if not self.should_refine(text, hotwords):
             return text
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Already in async context, can't use run_until_complete
+                return text
+            return loop.run_until_complete(self.refine(text, hotwords))
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(self.refine(text, hotwords))
+            finally:
+                loop.close()
+
+    def _build_hotword_prompt(self, text: str, hotwords: list[str]) -> str:
+        hotword_str = ", ".join(hotwords)
+        return (
+            f"请检查以下语音转写文本，将可能的识别错误修正为正确的专业术语。\n"
+            f"热词列表：{hotword_str}\n"
+            f"转写文本：{text}\n\n"
+            f"仅修正与热词相关的明显错误，保持其他内容不变。"
+            f"直接输出修正后的文本，不要添加任何解释。"
+        )
+
+    async def _call_llm(self, prompt: str) -> str:
+        """Route to the configured LLM provider."""
+        if self.provider == "claude_cli":
+            return await self._call_claude_cli(prompt)
+        elif self.provider == "anthropic_api":
+            return await self._call_anthropic_api(prompt)
+        elif self.provider == "custom":
+            return await self._call_custom_api(prompt)
+        else:
+            raise ValueError(f"Unknown LLM provider: {self.provider}")
+
+    async def _call_claude_cli(self, prompt: str) -> str:
+        """Call claude CLI in headless mode."""
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "--model", self.model, "--print", "-p", prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self.timeout
+            )
+            output = stdout.decode("utf-8", errors="replace").strip()
+            if proc.returncode != 0:
+                logger.warning(
+                    f"[AIRefiner] claude CLI returned {proc.returncode}: "
+                    f"{stderr.decode('utf-8', errors='replace')}"
+                )
+            return output
+        except asyncio.TimeoutError:
+            proc.kill()
+            logger.warning("[AIRefiner] claude CLI timed out")
+            return ""
+
+    async def _call_anthropic_api(self, prompt: str) -> str:
+        """Call Anthropic API directly. Reserved for future use."""
+        raise NotImplementedError(
+            "Anthropic API provider not yet implemented. "
+            "Install anthropic SDK and configure API key."
+        )
+
+    async def _call_custom_api(self, prompt: str) -> str:
+        """Call custom API endpoint. Reserved for local/domestic models."""
+        raise NotImplementedError(
+            "Custom API provider not yet implemented. "
+            "Configure custom_api_url and custom_api_key."
+        )
