@@ -33,6 +33,9 @@ import importlib.util
 import shutil
 import json
 import wave
+import logging
+
+import numpy as np
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -322,7 +325,8 @@ async def root():
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
             "ai_refine": AI_REFINE_AVAILABLE,
-        }
+        },
+        "meeting": True,
     }
 
 
@@ -910,6 +914,161 @@ async def stream_transcribe(websocket: WebSocket):
             await websocket.close()
         except Exception:
             pass
+
+
+logger = logging.getLogger(__name__)
+
+
+class _MockASREngine:
+    """Mock ASR engine for testing without real models."""
+
+    def transcribe_array(self, audio, sample_rate=16000, **kwargs):
+        duration = len(audio) / sample_rate
+        return {
+            "text": f"[模拟转写 {duration:.1f}s]",
+            "segments": [],
+            "duration": 0.01,
+            "language": "zh",
+            "engine": "mock",
+        }
+
+
+@app.websocket("/meeting")
+async def meeting_ws(websocket: WebSocket):
+    """WebSocket endpoint for meeting recording with speaker diarization.
+
+    Protocol:
+    Client sends: {"action": "start", "engine": "firered", "speakers_enabled": true}
+    Client sends: binary PCM16 mono 16kHz audio data
+    Client sends: {"action": "end"}
+
+    Server sends: {"type": "utterance", "speaker": "...", "text": "...", ...}
+    Server sends: {"type": "speaker_active", "speaker": "...", ...}
+    Server sends: {"type": "summary", "content": "...", ...}
+    Server sends: {"type": "session_end", ...}
+    """
+    from meeting.session import MeetingSession, SessionConfig
+
+    await websocket.accept()
+    session = None
+
+    try:
+        while True:
+            data = await websocket.receive()
+
+            if "text" in data:
+                msg = json.loads(data["text"])
+                action = msg.get("action")
+
+                if action == "start":
+                    config = SessionConfig(
+                        engine=msg.get("engine", "firered"),
+                        model=msg.get("model", "firered-aed-l"),
+                        speakers_enabled=msg.get("speakers_enabled", True),
+                        hotwords=msg.get("hotwords", ""),
+                        enable_ai_refine=msg.get("enable_ai_refine", True),
+                        summary_interval=msg.get("summary_interval", 120),
+                        llm_provider=msg.get("llm_provider", "claude_cli"),
+                        llm_model=msg.get("llm_model", "haiku"),
+                    )
+                    session = MeetingSession(config)
+
+                    # Set ASR engine
+                    engine_name = config.engine
+                    if engine_name in engines and engines[engine_name].get("engine"):
+                        session.set_asr_engine(engines[engine_name]["engine"])
+                    elif MOCK_MODE:
+                        session.set_asr_engine(_MockASREngine())
+                    else:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"Engine '{engine_name}' not loaded"
+                        })
+                        continue
+
+                    # Load registered speakers
+                    if config.speakers_enabled and diarizer:
+                        try:
+                            speakers_data = []
+                            for spk in diarizer.list_speakers():
+                                emb = diarizer.load_speaker_embedding(spk["id"])
+                                if emb is not None:
+                                    speakers_data.append({
+                                        "id": spk["id"],
+                                        "name": spk["name"],
+                                        "embedding": emb,
+                                    })
+                            session.load_registered_speakers(speakers_data)
+                        except Exception as e:
+                            logger.warning(f"[Meeting] Failed to load speakers: {e}")
+
+                    await websocket.send_json({
+                        "type": "started",
+                        "session_id": session.session_id,
+                        "engine": config.engine,
+                        "speakers_enabled": config.speakers_enabled,
+                    })
+
+                elif action == "end":
+                    if session:
+                        session_data = session.get_session_data()
+                        await websocket.send_json({
+                            "type": "session_end",
+                            "total_utterances": len(session.utterances),
+                            "duration": session_data["duration"],
+                            "session_data": session_data,
+                        })
+                        session.cleanup()
+                        session = None
+                    break
+
+            elif "bytes" in data:
+                # Binary PCM audio data
+                if session is None:
+                    continue
+
+                audio_bytes = data["bytes"]
+                audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(
+                    np.float32
+                ) / 32768.0
+
+                # Feed audio to VAD in 512-sample chunks
+                chunk_size = 512
+                for i in range(0, len(audio), chunk_size):
+                    chunk = audio[i:i + chunk_size]
+                    if len(chunk) < chunk_size:
+                        chunk = np.pad(chunk, (0, chunk_size - len(chunk)))
+
+                    segment = session.vad.process_chunk(chunk)
+
+                    if segment is not None:
+                        # VAD detected end of utterance
+                        try:
+                            utterance = await session.process_audio_segment(
+                                segment
+                            )
+                            await websocket.send_json(utterance.to_dict())
+
+                            # Notify active speaker
+                            await websocket.send_json({
+                                "type": "speaker_active",
+                                "speaker": utterance.speaker,
+                                "speaker_id": utterance.speaker_id,
+                            })
+                        except Exception as e:
+                            logger.error(f"[Meeting] Processing error: {e}")
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": str(e),
+                            })
+
+    except WebSocketDisconnect:
+        if session:
+            session.cleanup()
+    except Exception as e:
+        logger.error(f"[Meeting] WebSocket error: {e}")
+        if session:
+            session.cleanup()
 
 
 @app.post("/speakers/register")
