@@ -2,15 +2,16 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Settings, Cpu, BookOpen, Users, Keyboard, History } from "lucide-react";
+import { Settings, Cpu, BookOpen, Users, Keyboard, History, Mic } from "lucide-react";
 import { GeneralSettings } from "./GeneralSettings";
 import { EngineSettings } from "./EngineSettings";
 import { VocabularySettings } from "./VocabularySettings";
 import { SpeakerSettings } from "./SpeakerSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { HistorySettings } from "./HistorySettings";
+import { MeetingRecorder } from "../MeetingRecorder";
 
-type SettingsTab = "general" | "engine" | "vocabulary" | "speaker" | "hotkey" | "history";
+type SettingsTab = "recording" | "general" | "engine" | "vocabulary" | "speaker" | "hotkey" | "history";
 
 interface NavItem {
     id: SettingsTab;
@@ -19,6 +20,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+    { id: "recording", label: "录制", icon: Mic },
     { id: "general", label: "通用", icon: Settings },
     { id: "engine", label: "引擎", icon: Cpu },
     { id: "vocabulary", label: "词汇", icon: BookOpen },
@@ -28,10 +30,12 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function SettingsPanel() {
-    const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+    const [activeTab, setActiveTab] = useState<SettingsTab>("recording");
 
     const renderContent = () => {
         switch (activeTab) {
+            case "recording":
+                return <MeetingRecorder />;
             case "general":
                 return <GeneralSettings />;
             case "engine":
