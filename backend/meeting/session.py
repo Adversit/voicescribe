@@ -68,6 +68,8 @@ class MeetingSession:
         # Lazy-init components to avoid importing torch at module level
         self._vad = None
         self._speaker_tracker = None
+        self._refiner = None
+        self._summarizer = None
         self.asr_engine = None  # Loaded externally and set
 
         logger.info(
@@ -90,6 +92,38 @@ class MeetingSession:
                 max_speakers=self.config.max_speakers
             )
         return self._speaker_tracker
+
+    @property
+    def refiner(self):
+        if self._refiner is None:
+            from postprocess.ai_refiner import AIRefiner
+            self._refiner = AIRefiner(
+                provider=self.config.llm_provider,
+                model=self.config.llm_model,
+            )
+        return self._refiner
+
+    @property
+    def summarizer(self):
+        if self._summarizer is None:
+            from meeting.summarizer import MeetingSummarizer
+            self._summarizer = MeetingSummarizer(
+                refiner=self.refiner,
+                interval=self.config.summary_interval,
+            )
+        return self._summarizer
+
+    async def refine_utterance(self, utterance: 'Utterance') -> Optional[str]:
+        """Refine an utterance with AI if hotwords are configured."""
+        hotwords = [h.strip() for h in self.config.hotwords.split(",") if h.strip()]
+        if not hotwords:
+            return None
+
+        refined = await self.refiner.refine(utterance.text, hotwords)
+        if refined != utterance.text:
+            utterance.refined_text = refined
+            return refined
+        return None
 
     def set_asr_engine(self, engine):
         """Set the ASR engine (loaded externally)."""

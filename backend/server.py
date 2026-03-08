@@ -949,8 +949,19 @@ async def meeting_ws(websocket: WebSocket):
     """
     from meeting.session import MeetingSession, SessionConfig
 
+    async def _summary_loop(sess, ws):
+        """Periodically generate summaries."""
+        while True:
+            await asyncio.sleep(sess.config.summary_interval)
+            if sess.summarizer.should_summarize():
+                result = await sess.summarizer.generate_summary()
+                if result:
+                    sess.running_summary = result.content
+                    await ws.send_json(result.to_dict())
+
     await websocket.accept()
     session = None
+    summary_task = None
 
     try:
         while True:
@@ -1009,7 +1020,15 @@ async def meeting_ws(websocket: WebSocket):
                         "speakers_enabled": config.speakers_enabled,
                     })
 
+                    # Start background summary loop
+                    summary_task = asyncio.create_task(
+                        _summary_loop(session, websocket)
+                    )
+
                 elif action == "end":
+                    if summary_task:
+                        summary_task.cancel()
+                        summary_task = None
                     if session:
                         session_data = session.get_session_data()
                         await websocket.send_json({
@@ -1055,6 +1074,19 @@ async def meeting_ws(websocket: WebSocket):
                                 "speaker": utterance.speaker,
                                 "speaker_id": utterance.speaker_id,
                             })
+
+                            # Feed to summarizer
+                            session.summarizer.add_utterance(utterance)
+
+                            # Refine asynchronously
+                            if session.config.enable_ai_refine:
+                                refined = await session.refine_utterance(utterance)
+                                if refined:
+                                    await websocket.send_json({
+                                        "type": "utterance_refined",
+                                        "utterance_id": utterance.id,
+                                        "text": refined,
+                                    })
                         except Exception as e:
                             logger.error(f"[Meeting] Processing error: {e}")
                             await websocket.send_json({
@@ -1063,10 +1095,14 @@ async def meeting_ws(websocket: WebSocket):
                             })
 
     except WebSocketDisconnect:
+        if summary_task:
+            summary_task.cancel()
         if session:
             session.cleanup()
     except Exception as e:
         logger.error(f"[Meeting] WebSocket error: {e}")
+        if summary_task:
+            summary_task.cancel()
         if session:
             session.cleanup()
 
