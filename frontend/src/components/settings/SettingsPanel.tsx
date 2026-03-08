@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Settings, Cpu, BookOpen, Users, Keyboard, History, Mic } from "lucide-react";
+import { Settings, Cpu, BookOpen, Users, Keyboard, History, Mic, FileOutput, Bot } from "lucide-react";
 import { GeneralSettings } from "./GeneralSettings";
 import { EngineSettings } from "./EngineSettings";
 import { VocabularySettings } from "./VocabularySettings";
 import { SpeakerSettings } from "./SpeakerSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { HistorySettings } from "./HistorySettings";
+import { OutputSettings } from "./OutputSettings";
+import { LLMSettings } from "./LLMSettings";
 import { MeetingRecorder } from "../MeetingRecorder";
 
-type SettingsTab = "recording" | "general" | "engine" | "vocabulary" | "speaker" | "hotkey" | "history";
+type SettingsTab = "recording" | "general" | "engine" | "vocabulary" | "speaker" | "hotkey" | "output" | "ai" | "history";
 
 interface NavItem {
     id: SettingsTab;
@@ -26,6 +28,8 @@ const NAV_ITEMS: NavItem[] = [
     { id: "vocabulary", label: "词汇", icon: BookOpen },
     { id: "speaker", label: "说话人", icon: Users },
     { id: "hotkey", label: "快捷键", icon: Keyboard },
+    { id: "output", label: "输出", icon: FileOutput },
+    { id: "ai", label: "AI", icon: Bot },
     { id: "history", label: "历史记录", icon: History },
 ];
 
@@ -46,6 +50,10 @@ export function SettingsPanel() {
                 return <SpeakerSettings />;
             case "hotkey":
                 return <HotkeySettings />;
+            case "output":
+                return <OutputSettings />;
+            case "ai":
+                return <LLMSettings />;
             case "history":
                 return <HistorySettings />;
         }
