@@ -13,3 +13,6 @@ soundfile>=0.12.1
 # Utilities
 python-dotenv>=1.0.0
 huggingface-hub>=0.24.0
+
+# Meeting recording (core)
+silero-vad==5.1.2
