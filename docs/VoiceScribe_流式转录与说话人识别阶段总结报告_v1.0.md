@@ -1,428 +1,295 @@
 # VoiceScribe 流式转录与说话人识别阶段总结报告
-> **版本**: v1.0  
-> **日期**: 2026-03-13  
-> **阶段**: 阶段总结 / 现状评估  
-> **状态**: 已整理  
-> **范围**: 流式转录、说话人识别、会议摘要、模型下载与历史导出
+
+> **版本**: v1.1  
+> **日期**: 2026-03-15  
+> **阶段**: 流式转录 / 说话人识别阶段总结  
+> **状态**: 已更新  
+> **范围**: 流式转录、说话人识别、模型加载、历史记录与导出
 
 ---
 
 ## 一、项目定位
-**一句话**：面向中文会议和日常语音场景的本地优先语音转文字系统，支持流式转录、说话人识别、AI 文本优化与增量摘要。
+
+**一句话**：面向中文、本地部署、小团队会议与日常语音场景的桌面端转录工具，支持实时流式转录、说话人识别、摘要和历史导出。
 
 **当前核心价值**：
-- 本地录音，本地 ASR 引擎可切换
-- 支持流式实时显示，不必等整段录音结束
-- 支持已注册说话人命名，而不只是匿名 Speaker 1/2/3
-- 支持增量摘要，而不是每次整场重算
-- 支持历史记录、复制、导出
+- 本地优先，模型优先使用项目级缓存目录 `models/`
+- 支持文件上传转录和流式转录两条链路
+- 支持说话人注册、实名映射、匿名分群和会议摘要
+- 支持历史记录、筛选、复制与多格式导出
 
-**当前定位边界**：
-- 更偏桌面端会议助手和实时记录工具
-- 不是纯云端 SaaS
-- 不是“全自动高精度商用会议纪要系统”的最终形态，尤其在多人抢话、重叠说话、超短发言场景下仍有优化空间
+**当前边界**：
+- 目标不是“同一时刻多人同时说话时的词级精确归属”
+- 当前优先解决“一个 VAD 段内先后出现不同说话人”的识别与拆分
+- 重叠说话目前只做到检测、标记和近似切分，未做到最终精确归属
 
 ---
 
-## 二、阶段目标总览
+## 二、开发路线总览
 
 ```
 第一阶段                  第二阶段                     第三阶段
-基础可用                  体验稳定                     精度提升
+基础可用                  结构升级                     精度提升
 
-流式录音链路              下载/导入模型完善             词级对齐
-ASR 引擎切换              说话人平滑                   overlap-aware diarization
-说话人注册                导出/复制格式统一             短句策略 + 稳定命名
-会议摘要                  错误恢复与状态可视化          更强中文 ASR / Speaker 方案
-历史记录                  配置开关细化                 企业级会议场景适配
+流式转录链路打通          多 speaker labels            时间轴级 diarization
+项目级模型加载            overlap 标记                 overlap-aware pipeline
+pyannote + CAM++          speaker_spans                同时说话精确归属
+说话人注册                VAD 内切段重转写             词级对齐 / 分离增强
+历史记录与导出            防裂变稳定策略               更强 ASR / speaker 方案
 ```
 
 **当前已完成主线**：
-- 流式录音 → WebSocket → VAD → ASR → Speaker → 摘要 → 历史记录
-- 引擎页支持 ASR 模型与说话人模型显示、下载、删除
-- 说话人模型支持 `CAM++ / ERes2NetV2 / ERes2Net-large`
-- 新增模型注册：`Qwen3-ASR`、`FireRedASR2`（当前仅注册下载，不含推理适配）
+- 流式链路统一为 `ASR -> pyannote clustering -> CAM++ mapping`
+- 引擎页加载模型时，会按设置联动 preload speaker backends
+- 一个 utterance 已支持 `speakers`、`speaker_spans`、`overlap_detected`
+- 一个 VAD 段内若识别到多个先后 speaker 子段，会按 span 切音频并分别重转写
+- 已加入“防裂变”策略，减少单人说话被误裂成多个 speaker
 
 ---
 
-## 三、当前范围定义
+## 三、当前阶段范围定义
 
-### 3.1 Must Have（当前已具备）
+### 3.1 Must Have（当前已落地）
 
 | 模块 | 当前能力 |
 |------|----------|
-| 本地录音 | Electron 前端采集 PCM，支持普通录音与流式录音 |
-| 流式传输 | WebSocket 持续发送音频块到后端 |
-| 实时转录 | VAD 分段后调用 ASR 引擎实时返回 utterance |
-| 说话人识别 | 支持离线分配与流式匹配，支持已注册说话人命名 |
-| AI 文本优化 | 支持按句异步优化转录文本 |
-| 增量摘要 | 支持周期性摘要、决策提取、待办提取 |
-| 历史记录 | 支持查看、复制、导出、删除 |
-| 模型管理 | 支持模型下载、删除、状态显示、路径统一 |
+| 流式音频采集 | Electron 前端采集 16kHz PCM，经 WebSocket 发送到后端 |
+| 流式转录 | Silero VAD 分段后调用 ASR 返回 utterance |
+| 流式说话人识别 | `pyannote` 负责分群，`CAM++` 负责实名映射 |
+| 说话人注册 | 使用 `SpeakerDiarizer` + 声纹模型注册说话人，默认走 CAM++ |
+| 多 speaker 表达 | utterance 支持 `speakers`、`speaker_spans`、`active_speakers` |
+| 段内切分重转写 | 对一个 VAD 内多个先后 speaker 子段做切段重转写 |
+| 历史与导出 | 支持带 speaker 标签、摘要、完整记录导出 |
+| 模型管理 | 支持引擎模型与 speaker backends 的加载、重载、状态查看 |
 
-### 3.2 Reserve（已预留但未完整落地）
+### 3.2 Reserve（已规划未完成）
 
 | 模块 | 预留内容 | 当前状态 |
 |------|----------|----------|
-| Qwen3-ASR 推理 | 已注册模型与下载路径 | 未接入推理，加载返回 501 |
-| FireRedASR2 推理 | 已注册模型与下载路径 | 未接入推理，加载返回 501 |
-| 流式 AI 摘要独立开关 | 可与 `enableAiRefine` 解耦 | 未单独做 UI 开关 |
-| 说话人识别高级稳定策略 | speaker smoothing / short-utterance policy | 未落地 |
-| 词级时间戳对齐 | 词级 speaker 贴标 | 未落地 |
+| 同时说话精确归属 | 同一时间点多人同时发言的文本拆分 | 未实现 |
+| overlap-aware diarization | 真正的重叠感知时间轴 pipeline | 未实现 |
+| 词级 speaker 对齐 | 词级时间戳与 speaker 归属 | 未实现 |
+| 更强 speaker 平滑 | 更系统的 smoothing / hysteresis | 已有启发式，未完整化 |
+| 更强 ASR 接入 | Qwen3-ASR / FireRedASR2 推理适配 | 仅完成下载与路径管理 |
 
 ---
 
-## 四、功能实现详解
+## 四、功能需求详解
 
 ### 4.1 流式录音与传输
 
-#### 4.1.1 前端录音配置
-| 项目 | 当前实现 |
-|------|----------|
-| 采样方式 | WebAudio 原始 PCM |
-| 目标采样率 | `16000 Hz` |
-| 声道 | `mono` |
-| 位深 | `16-bit PCM` |
-| 浏览器输入采样率 | 通常为 `48000 Hz`，前端再下采样到 `16000 Hz` |
-| 回声消除 | 默认开启 |
-| 降噪 | 默认开启 |
+前端录音链路：
+- 使用 WebAudio 采集 PCM
+- 下采样为 `16kHz / mono / PCM16`
+- 通过 `WS /stream` 持续发送音频块
 
-#### 4.1.2 流式发送间隔
-- 前端 `ScriptProcessorNode` 的 buffer size 为 `4096`
-- 若输入采样率为 `48000 Hz`，则每次回调约为：
-  `4096 / 48000 = 0.0853s`
-- 即前端约每 `85ms` 产生一批 PCM 数据并通过 WebSocket 发送
+后端流式链路：
+- 收到二进制音频后按 `512 sample` 小块送入 VAD
+- VAD 结束一段后交给 `MeetingSession.process_audio_segment()`
+- 由会话层统一完成 ASR、speaker、摘要和历史落盘
 
-#### 4.1.3 服务端 VAD 粒度
-- 服务端收到 PCM 后，会再切成 `512 sample` 小块送入 VAD
-- 在 `16kHz` 下：
-  `512 / 16000 = 0.032s`
-- 即 VAD 的判断粒度约为 `32ms`
+### 4.2 ASR 引擎
 
-#### 4.1.4 当前 VAD 参数
-| 参数 | 当前值 | 含义 |
-|------|--------|------|
-| `threshold` | `0.5` | 语音判定阈值 |
-| `min_speech_ms` | `300` | 最短有效语音时长 |
-| `hangover_ms` | `700` | 静音收口时长 |
-| `pre_roll_ms` | `200` | 预卷入时长 |
-| `max_segment_s` | `30` | 单段最长时长 |
+当前可用推理引擎：
+- `funasr`
+- `whisper`
+- `whispercpp`
+- `parakeet`
+- `firered`
 
-#### 4.1.5 当前表现
-- 实时性已经可用
-- 比传统“录完再识别”更适合会议与直播式场景
-- 但短句、插话、连续追话时，分段仍可能偏粗或跨 speaker
+当前仅完成模型管理、未完成推理适配：
+- `Qwen3-ASR`
+- `FireRedASR2`
 
-### 4.2 ASR 引擎现状
+补充说明：
+- FunASR 已改为优先使用项目级 `models/` 本地目录，不再优先访问远程
+- 引擎界面的“加载模型”会在流式或说话人识别启用时同步触发 speaker backend preload
 
-#### 4.2.1 当前已接入可推理引擎
-| 引擎 | 状态 | 说明 |
-|------|------|------|
-| `FunASR` | 已接入 | 支持 `seaco-paraformer / paraformer / streaming / sensevoice-small` |
-| `FireRedASR` | 已接入 | 当前已做短音频保护 |
-| `Whisper / Whisper.cpp / Parakeet` | 已接入 | 可选 |
+### 4.3 说话人识别
 
-#### 4.2.2 当前已注册但未接推理引擎
-| 引擎 | 模型 | 状态 |
-|------|------|------|
-| `Qwen3-ASR` | `0.6B / 1.7B` | 仅注册下载与路径管理 |
-| `FireRedASR2` | `AED / LLM` | 仅注册下载与路径管理 |
+当前流式链路采用两层模型：
 
-#### 4.2.3 FireRed 已处理问题
-- 对超短音频已补自动补零
-- 若底层仍因卷积核尺寸问题失败，返回空文本而不是直接 500
+1. 分群层：`pyannote/embedding`
+- 负责匿名 speaker clustering
+- 优先从项目级 `models/huggingface/hub/...` 加载
 
-### 4.3 说话人识别现状
+2. 映射层：`CAM++`（FunASR）
+- 负责和已注册说话人做实名匹配
+- 若 CAM++ 不可用，才退回 `pyannote` fallback
 
-#### 4.3.1 模型策略
-**流式 speaker embedding 优先级**：
-1. `FunASR CAM++`
-2. `pyannote/embedding` 兜底（需要 `HF_TOKEN`）
+说话人注册链路：
+- `/speakers/register` 使用 `SpeakerDiarizer`
+- 当前注册与离线识别默认仍走声纹模型链路，默认模型是 `CAM++`
 
-#### 4.3.2 当前支持的说话人模型
-| 模型 | 用途 | 状态 |
-|------|------|------|
-| `cam++` | 默认中文说话人识别 | 已接入 |
-| `eres2netv2` | 更强中文 speaker embedding 备选 | 已接入 |
-| `eres2net-large` | 更大 speaker 模型备选 | 已接入 |
+当前关键阈值：
+- 流式 tracker `match_threshold = 0.6`
+- 离线 diarizer `identify_speaker()` 默认阈值 `0.7`
 
-#### 4.3.3 流式匹配参数
-| 参数 | 当前值 | 含义 |
-|------|--------|------|
-| `match_threshold` | `0.6` | 已注册说话人命名阈值 |
-| cluster 相似度阈值 | `0.5` | 当前分段归到已有 cluster 的阈值 |
-| `max_speakers` | `8` | 默认最大 speaker 数 |
+### 4.4 多 speaker 表达与 VAD 内拆分
 
-#### 4.3.4 当前识别链路
-1. VAD 产出一句语音段
-2. 提取 speaker embedding
-3. 与已注册说话人 embedding 做 cosine similarity 匹配
-4. 若当前直接匹配不稳定，则尝试继承已有 cluster 的注册身份
-5. 返回 `speaker / speaker_id / confidence`
+当前已经支持：
+- 一个 utterance 带多个候选 speaker labels
+- `overlap_detected` / `overlap_score`
+- `speaker_spans`
+- 对“一个 VAD 段内先后出现多个 speaker”按 span 切段并重新 ASR
 
-#### 4.3.5 已修复问题
-- `reset()` 误清空已注册 speaker 缓存，导致识别几次后退化
-- 直接匹配失败时未继承历史 cluster 身份
-- 离线 speaker 分配曾使用“句段中点归属”，现改为“重叠时长最大归属”
-- 跨 speaker 句段支持启发式拆分
-- 旧版 `speakers.json` 编码不兼容导致注册崩溃，现已兼容 `utf-8 / utf-8-sig / gb18030 / gbk`
+这一步解决的是：
+- A 先说，B 后说，但被 VAD 合并进同一段音频
 
-#### 4.3.6 当前不足
-- 还没有真正的 `speaker smoothing`
-- 还没有“短句不强制命名”
-- 还没有词级时间戳和词级 speaker 对齐
-- 对明显重叠发言仍然只能启发式近似处理
+这一步还没有解决的是：
+- A 和 B 同时说话，且要精确知道各自说了哪些词
 
-### 4.4 AI 文本优化与会议摘要
+### 4.5 防裂变稳定策略
 
-#### 4.4.1 当前摘要策略
-摘要并不是每次把全文重新喂给 LLM，而是：
-- 本轮新增 utterances
-- 最近 2 轮摘要
-- 当前累计的 `decisions / action_items`
+为减少“一个人说话被识别成多个 speaker”，当前已加入：
+- 已注册 speaker 优先复用已命中的 cluster
+- 子窗判断时优先保持稳定注册人
+- 连续子窗优先延续前一个 speaker
+- 新建匿名 cluster 的门槛提高
 
-#### 4.4.2 当前摘要间隔
-| 配置项 | 当前值 |
-|--------|--------|
-| 默认摘要间隔 | `120 秒` |
-| UI 可选项 | `60 / 120 / 180 / 300 秒` |
+目标是：
+- 证据不足时更保守
+- 尽量维持一个说话人的连续性
+- 减少 `Speaker 3 / Speaker 4 / Speaker 5` 式裂变
 
-#### 4.4.3 当前摘要输出
-- `running_summary`
-- `decisions`
-- `action_items`
+### 4.6 历史记录与导出
 
-#### 4.4.4 当前语义
-- 每轮只总结新增内容
-- 前端显示的是累计后的 `running_summary`
-- 历史记录会保存摘要、决策、待办
+当前支持：
+- 流式 utterances 实时显示
+- 活跃 speaker 显示
+- 历史记录持久化
+- speaker 过滤
+- `text_only / with_speakers / with_summary / full` 导出
 
-#### 4.4.5 当前不足
-- UI 还没有独立“流式 AI 摘要开关”
-- 摘要与 `enableAiRefine` 逻辑仍耦合较多
-- Claude CLI 没额度时，摘要体验会直接受影响
-
-### 4.5 历史记录、复制与下载
-
-#### 4.5.1 当前导出格式
-系统已支持：
-- `text_only`
-- `with_speakers`
-- `with_summary`
-- `full`
-
-#### 4.5.2 已修复问题
-- 下载菜单原来依赖 hover，鼠标移开按钮就消失
-- 现已改成点击展开菜单
-- 流式记录复制和导出已统一走格式化逻辑
-
-#### 4.5.3 当前 `full` 格式包含
-- 说话人
-- 时间戳
-- AI 摘要
-- 决策
-- 待办
+导出内容已经支持多 speaker 标签与 `speaker_spans` 相关信息展示。
 
 ---
 
-## 五、关键模块与流程设计
+## 五、业务模块与流程设计
 
-### 5.1 流式主流程
+### 5.1 当前流式主流程
 
 ```
 Electron 录音
-  -> WebAudio PCM
-  -> 下采样到 16k / mono / PCM16
-  -> WebSocket 发送
-  -> 服务端切 512 sample 小块
-  -> Silero VAD 分段
-  -> Speaker embedding + cluster/registered match
+  -> PCM16 / 16kHz
+  -> WS /stream
+  -> Silero VAD
   -> ASR 转写
-  -> 异步 AI refine
-  -> 周期性增量摘要
-  -> 前端实时显示 + 写入历史
+  -> pyannote 分群
+  -> CAM++ 实名映射
+  -> speaker_spans 分析
+  -> 必要时按 span 切段重转写
+  -> utterance / speaker_active / summary / session_end
 ```
 
-### 5.2 说话人识别流程
+### 5.2 WebSocket 事件模型
 
-```
-注册录音
-  -> 生成说话人 embedding
-  -> 保存在 speakers.json + 音频样本
+客户端发送：
+- `start`
+- 二进制 PCM 音频
+- `end`
 
-流式会话
-  -> 加载已注册说话人
-  -> 每段语音提 embedding
-  -> 与注册向量匹配
-  -> 若匹配弱但 cluster 已绑定身份，则继承身份
-  -> 输出 speaker 标签
-```
+服务端发送：
+- `started`
+- `utterance`
+- `utterance_refined`
+- `speaker_active`
+- `summary`
+- `session_end`
+- `error`
 
-### 5.3 摘要流程
+### 5.3 utterance 数据结构
 
-```
-新增 utterance
-  -> 进入 pending_utterances
-  -> 到达 summary_interval
-  -> 构建 prompt:
-       本轮新增内容
-       + 最近两轮摘要
-       + 当前 decisions/action_items
-  -> 输出本轮摘要
-  -> 累加到 running_summary
-```
+当前流式 utterance 已包含：
+- `speaker`
+- `speaker_id`
+- `speakers`
+- `text`
+- `start` / `end`
+- `confidence`
+- `overlap_detected`
+- `overlap_score`
+- `speaker_spans`
 
----
+这意味着当前系统已经能表达：
+- 主 speaker
+- 候选 speaker
+- 段内多个 speaker 子段
+- 疑似重叠
 
-## 六、已解决问题记录
+### 5.4 模型加载策略
 
-### 6.1 流式导出问题
-| 问题 | 处理结果 |
-|------|----------|
-| 下载菜单 hover 丢失 | 已改成点击展开 |
-| 复制/下载只保留纯文字 | 已改成按 `meetingOutputFormat` 导出完整内容 |
-
-### 6.2 模型下载问题
-| 问题 | 处理结果 |
-|------|----------|
-| HuggingFace 大文件下载频繁超时 | 已拉长下载超时配置 |
-| 模型目录存在但其实未完整下载 | 已增加 `.incomplete` 与大权重文件检查 |
-| 删除 HuggingFace 模型不彻底 | 已改为删除整个 cache root 与 `.locks` |
-
-### 6.3 ASR / Speaker 问题
-| 问题 | 处理结果 |
-|------|----------|
-| FireRed 超短音频报 500 | 已做补零与异常兜底 |
-| 注册几次后说话人识别失效 | 已修复 tracker reset 与 cluster 继承 |
-| 说话人 JSON 编码导致注册失败 | 已兼容旧编码并自动转 UTF-8 |
+当前统一原则：
+- 优先使用项目级 `models/`
+- 引擎页加载模型时，按功能开关联动 speaker backend preload
+- `enableStreaming = true` 时优先 preload cluster backend
+- `enableDiarization = true` 时 preload mapping backend
 
 ---
 
-## 七、当前风险与不足
+## 六、已完成工作与阶段结论
 
-### 7.1 体验风险
-- 流式 AI 摘要没有独立开关
-- 下载状态仍偏工程化，用户不易分辨“断点续传中”和“已失败”
-- 部分旧页面仍存在中文编码异常痕迹
+### 6.1 本阶段完成项
 
-### 7.2 精度风险
-- 抢话、短句、重叠发言仍会影响说话人识别
-- 当前流式 speaker 识别本质仍是“段级”而不是“词级”
-- 极短发言虽然不再导致 500，但仍可能识别为空
+- 将流式 speaker 处理链路调整为 `ASR -> pyannote -> CAM++`
+- 明确项目级模型目录优先级，并验证 `pyannote` 从项目级 snapshot 加载
+- 将引擎页“加载模型”和 speaker backend preload 打通
+- 为 utterance 增加多 speaker labels、overlap 标记和 `speaker_spans`
+- 对一个 VAD 段内的多个先后 speaker 子段进行切段重转写
+- 加入通用防裂变策略，降低单人被误裂成多 speaker 的概率
 
-### 7.3 模型侧风险
-- `Qwen3-ASR / FireRedASR2` 目前只有模型管理，没有推理适配
-- 国内网络直连 HuggingFace 下载大模型稳定性较差
+### 6.2 当前阶段结论
 
----
+当前系统已经不再是“整段音频只能给一个 speaker”的旧结构，而是：
+- 能表达多个 speaker labels
+- 能表达段内 speaker 时间子段
+- 能对一个 VAD 内多个先后 speaker 做拆分重转写
 
-## 八、后续优化建议
-
-### 8.1 说话人识别优化
-#### 第一优先级
-| 方向 | 说明 |
-|------|------|
-| Speaker smoothing | 避免单次误匹配导致 speaker 来回跳 |
-| 短句不强制命名 | 对“嗯、啊、对”这类短句只跟踪 cluster，不强命名 |
-| Active speaker hysteresis | 新 speaker 必须连续命中 2-3 次才切换 |
-
-#### 第二优先级
-| 方向 | 说明 |
-|------|------|
-| overlap-aware diarization | 对重叠说话做更稳的切分 |
-| 词级时间戳 + speaker 对齐 | 从句级贴标升级到词级贴标 |
-| 注册样本质量控制 | 注册时限制最短时长、静音比例、清晰度 |
-
-#### 第三优先级
-| 方向 | 说明 |
-|------|------|
-| 注册 speaker 多样本融合 | 同一说话人录 2-3 段做平均 embedding |
-| 在线自适应更新 | 会话内对已注册 speaker embedding 做轻量更新 |
-| 说话人置信度回传 | 前端可视化展示 speaker 可信度 |
-
-### 8.2 流式摘要优化
-| 方向 | 说明 |
-|------|------|
-| 独立摘要开关 | 将摘要与文本优化解耦 |
-| 摘要卡片分段显示 | 按轮次展示而不是只拼累计摘要 |
-| 摘要失败回退策略 | LLM 不可用时不中断转录主流程 |
-
-### 8.3 模型下载优化
-| 方向 | 说明 |
-|------|------|
-| 本地目录导入 | 用户手动下载模型后直接导入注册 |
-| 自定义 HF 镜像/代理 | 减少国内弱网下载问题 |
-| 明确状态标签 | 显示“未完成 / 续传中 / 完整可用 / 失败” |
-
-### 8.4 ASR 优化
-| 方向 | 说明 |
-|------|------|
-| 接入 Qwen3-ASR 推理 | 提升中文、多方言和复杂场景能力 |
-| 接入 FireRedASR2 推理 | 提升中文精度上限 |
-| 引擎自动路由 | 短句、长句、多说话人场景切换不同 ASR |
+这已经满足当前阶段目标：
+- 在一个 VAD 内识别不同说话人
+- 尽量把文本拆回对应 speaker
 
 ---
 
-## 九、建议的近期实施顺序
+## 七、已知问题与风险
 
-### 9.1 P0
-- 说话人 `speaker smoothing`
-- 短句不强制命名
-- AI 摘要独立开关
-- 模型状态细化显示
+### 7.1 当前仍存在的问题
 
-### 9.2 P1
-- 模型本地导入
-- 下载镜像/代理配置
-- 流式输出格式配置预览
+- 同一时间点多人同时说话时，文本仍无法精确拆分到各自 speaker
+- 说话人识别仍会受短句、插话、音量波动和噪声影响
+- 当前 overlap 检测仍以启发式为主，不是真正的时间轴模型
+- `Qwen3-ASR`、`FireRedASR2` 仍未接入实际推理
 
-### 9.3 P2
-- Qwen3-ASR 推理接入
-- FireRedASR2 推理接入
-- 词级时间戳与 speaker 对齐
+### 7.2 工程风险
+
+- speaker 阈值与平滑策略仍需继续回归调优
+- VAD 边界会直接影响 span 切分和 speaker 判断
+- 流式 speaker 结果与 ASR 文本对齐仍是当前系统的主要技术边界
 
 ---
 
-## 十、验收建议
+## 八、下一阶段计划
 
-### 10.1 流式转录
-- [ ] 普通说话场景下 1 秒内能看到实时句段输出
-- [ ] 结束录音后能收到完整 `session_end`
-- [ ] 历史记录可查看完整 utterance 列表
+### 8.1 P0
 
-### 10.2 说话人识别
-- [ ] 已注册 speaker 在连续说话时能稳定命名
-- [ ] 短句不再高频错误切换身份
-- [ ] 切换是否启用说话人识别、切换 speaker model 后可自动重载
+- 增强后端日志，明确输出“加载了哪个模型、哪个阶段处理了什么”
+- 继续优化 speaker 防裂变策略与回归样本
+- 提升 `speaker_spans` 的稳定性和可解释性
 
-### 10.3 摘要
-- [ ] 摘要按设定间隔生成
-- [ ] 不重复重写全文
-- [ ] 决策与待办可跨轮累计
+### 8.2 P1
 
-### 10.4 导出
-- [ ] 复制与下载菜单可稳定操作
-- [ ] `full` 格式导出包含说话人、时间戳、摘要、决策、待办
-- [ ] TXT 与 MD 均与当前会议输出格式一致
+- 评估更强的时间轴级 diarization 方案
+- 提升 overlap 检测质量
+- 进一步区分“先后说话”和“同时说话”
+
+### 8.3 P2
+
+- 同一时间点多人同时说话的精确归属
+- 词级 speaker 对齐
+- 更强 ASR / separation / overlap-aware pipeline
 
 ---
 
-## 十一、结论
-
-当前 VoiceScribe 已具备“可用的流式会议转录系统”雏形，主链路已经打通：
-- 录音采集稳定
-- 实时转录可用
-- 说话人识别已具备注册与命名能力
-- 增量摘要策略已从“重写全文”修正为“新增总结 + 短期上下文”
-- 历史复制与导出已能保留结构化内容
-
-下一阶段最值得投入的方向不是继续堆更多模型，而是先把下面三件事做稳：
-1. 说话人识别稳定策略
-2. 模型下载与导入体验
-3. 流式摘要与导出开关的产品化
-
----
-
-**文档版本**: v1.0  
-**更新日期**: 2026-03-13  
-**状态**: 已整理，可继续补充为正式阶段报告
+**报告版本**: v1.1  
+**更新日期**: 2026-03-15  
+**说明**: 本文已按当前代码实现重写，旧版中涉及 `diart` 主链路、单 speaker utterance、未接线流式前端等描述均已失效。

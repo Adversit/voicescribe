@@ -28,10 +28,13 @@ class TestMeetingIntegration:
         audio = np.random.randn(16000 * 3).astype(np.float32)
         segment = SpeechSegment(audio=audio, start_time=0.0, end_time=3.0)
 
-        utterance = asyncio.run(session.process_audio_segment(segment))
+        utterances = asyncio.run(session.process_audio_segment(segment))
 
+        assert len(utterances) == 1
+        utterance = utterances[0]
         assert utterance.text.startswith("transcribed")
         assert utterance.speaker == "Speaker"
+        assert utterance.speakers[0]["speaker"] == "Speaker"
         assert len(session.utterances) == 1
 
     def test_session_data_output(self):

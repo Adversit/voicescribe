@@ -10,7 +10,15 @@ interface SpeakerFilterProps {
 }
 
 export function SpeakerFilter({ utterances, selectedSpeaker, onSelect }: SpeakerFilterProps) {
-  const speakers = Array.from(new Set(utterances.map((u) => u.speaker)));
+  const speakers = Array.from(
+    new Set(
+      utterances.flatMap((u) =>
+        u.speakers && u.speakers.length > 0
+          ? u.speakers.map((item) => item.speaker)
+          : [u.speaker]
+      )
+    )
+  );
 
   if (speakers.length <= 1) return null;
 

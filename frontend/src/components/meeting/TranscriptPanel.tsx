@@ -19,6 +19,28 @@ interface TranscriptPanelProps {
   activeSpeaker: string | null;
 }
 
+function getUtteranceSpeakerLabel(utterance: Utterance): string {
+  if (utterance.speakers && utterance.speakers.length > 0) {
+    return utterance.speakers.map((item) => item.speaker).join(" / ");
+  }
+  return utterance.speaker;
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function getSpanSummary(utterance: Utterance): string | null {
+  if (!utterance.speakerSpans || utterance.speakerSpans.length <= 1) {
+    return null;
+  }
+  return utterance.speakerSpans
+    .map((span) => `${formatTime(span.start)}-${formatTime(span.end)} ${span.speaker}`)
+    .join(" | ");
+}
+
 export function TranscriptPanel({ utterances, activeSpeaker }: TranscriptPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
@@ -30,12 +52,6 @@ export function TranscriptPanel({ utterances, activeSpeaker }: TranscriptPanelPr
       speakerColorMap.current.set(speaker, SPEAKER_COLORS[idx]);
     }
     return speakerColorMap.current.get(speaker)!;
-  }
-
-  function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
   useEffect(() => {
@@ -67,13 +83,27 @@ export function TranscriptPanel({ utterances, activeSpeaker }: TranscriptPanelPr
       {utterances.map((u) => (
         <div key={u.id} className="group">
           <div className="flex items-baseline gap-2 mb-0.5">
-            <span className={`font-medium text-sm ${getSpeakerColor(u.speaker)}`}>
-              {u.speaker}
+            <span
+              className={`font-medium text-sm ${getSpeakerColor(
+                u.speaker
+              )}${activeSpeaker === getUtteranceSpeakerLabel(u) ? " underline underline-offset-2" : ""}`}
+            >
+              {getUtteranceSpeakerLabel(u)}
             </span>
+            {u.overlapDetected && (
+              <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                重叠
+              </span>
+            )}
             <span className="text-xs text-muted-foreground">
               {formatTime(u.start)}
             </span>
           </div>
+          {getSpanSummary(u) && (
+            <p className="mb-1 pl-0.5 text-[11px] text-muted-foreground">
+              {getSpanSummary(u)}
+            </p>
+          )}
           <p className="text-sm text-foreground pl-0.5">{u.text}</p>
         </div>
       ))}

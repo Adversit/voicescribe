@@ -1,4 +1,5 @@
 import asyncio
+import numpy as np
 from unittest.mock import MagicMock
 
 from meeting.session import MeetingSession, SessionConfig, Utterance
@@ -31,8 +32,38 @@ class TestUtterance:
         payload = utterance.to_dict()
         assert payload["type"] == "utterance"
         assert payload["speaker"] == "Alice"
+        assert payload["speakers"] == []
+        assert payload["overlap_detected"] is False
+        assert payload["overlap_score"] == 0.0
+        assert payload["speaker_spans"] == []
         assert payload["text"] == "hello world"
         assert payload["start"] == 1.0
+
+    def test_speaker_display_joins_multiple_labels(self):
+        utterance = Utterance(
+            id="utt_001",
+            speaker="Alice",
+            speaker_id="spk_001",
+            text="hello world",
+            start=1.0,
+            end=3.5,
+            confidence=0.85,
+            speakers=[
+                {
+                    "speaker": "Alice",
+                    "speaker_id": "spk_001",
+                    "confidence": 0.85,
+                    "role": "primary",
+                },
+                {
+                    "speaker": "Bob",
+                    "speaker_id": "spk_002",
+                    "confidence": 0.81,
+                    "role": "secondary",
+                },
+            ],
+        )
+        assert utterance.speaker_display == "Alice / Bob"
 
 
 class TestMeetingSession:
@@ -109,13 +140,37 @@ class TestMeetingSession:
                 return {"text": "transcript"}
 
         class MockTracker:
-            def process_segment(self, audio, start_time, end_time):
+            def process_segment(self, audio, start_time, end_time, transcript_text=None):
                 call_order.append("speaker")
+                assert transcript_text == "transcript"
                 info = MagicMock()
                 info.display_name = "Alice"
                 info.registered_id = "spk_001"
+                info.speaker_id = "spk_001"
                 info.label = "Speaker_0"
                 info.confidence = 0.88
+                info.overlap_detected = True
+                info.overlap_score = 0.72
+                info.get_speaker_labels.return_value = [
+                    {
+                        "speaker": "Alice",
+                        "speaker_id": "spk_001",
+                        "confidence": 0.88,
+                        "role": "primary",
+                    }
+                ]
+                info.get_speaker_spans.return_value = [
+                    {
+                        "start": 0.0,
+                        "end": 0.5,
+                        "speaker": "Alice",
+                        "speaker_id": "spk_001",
+                        "confidence": 0.88,
+                        "speakers": info.get_speaker_labels.return_value,
+                        "overlap_detected": True,
+                        "overlap_score": 0.72,
+                    }
+                ]
                 return info
 
             def reset(self):
@@ -129,8 +184,153 @@ class TestMeetingSession:
         session.set_asr_engine(MockAsr())
         session._speaker_tracker = MockTracker()
 
-        utterance = asyncio.run(session.process_audio_segment(segment))
+        utterances = asyncio.run(session.process_audio_segment(segment))
 
         assert call_order == ["asr", "speaker"]
+        assert len(utterances) == 1
+        utterance = utterances[0]
         assert utterance.speaker == "Alice"
+        assert utterance.speakers[0]["speaker"] == "Alice"
+        assert utterance.overlap_detected is True
+        assert utterance.overlap_score == 0.72
+        assert utterance.speaker_spans[0]["speaker"] == "Alice"
         assert utterance.text == "transcript"
+
+    def test_process_audio_segment_splits_non_overlapping_speaker_spans(self):
+        session = MeetingSession(SessionConfig())
+        transcribed_lengths: list[float] = []
+
+        class MockAsr:
+            def transcribe_array(self, audio, sample_rate=16000, **kwargs):
+                duration = len(audio) / sample_rate
+                transcribed_lengths.append(round(duration, 2))
+                return {"text": f"text {duration:.1f}s"}
+
+        class MockTracker:
+            def process_segment(self, audio, start_time, end_time, transcript_text=None):
+                info = MagicMock()
+                info.display_name = "Alice"
+                info.registered_id = "spk_001"
+                info.speaker_id = "spk_001"
+                info.label = "Speaker_0"
+                info.confidence = 0.88
+                info.overlap_detected = False
+                info.overlap_score = 0.0
+                info.get_speaker_labels.return_value = [
+                    {
+                        "speaker": "Alice",
+                        "speaker_id": "spk_001",
+                        "confidence": 0.88,
+                        "role": "primary",
+                    }
+                ]
+                info.get_speaker_spans.return_value = [
+                    {
+                        "start": 0.0,
+                        "end": 1.0,
+                        "speaker": "Alice",
+                        "speaker_id": "spk_001",
+                        "confidence": 0.88,
+                        "speakers": [
+                            {
+                                "speaker": "Alice",
+                                "speaker_id": "spk_001",
+                                "confidence": 0.88,
+                                "role": "primary",
+                            }
+                        ],
+                        "overlap_detected": False,
+                        "overlap_score": 0.0,
+                    },
+                    {
+                        "start": 1.0,
+                        "end": 2.0,
+                        "speaker": "Bob",
+                        "speaker_id": "spk_002",
+                        "confidence": 0.83,
+                        "speakers": [
+                            {
+                                "speaker": "Bob",
+                                "speaker_id": "spk_002",
+                                "confidence": 0.83,
+                                "role": "primary",
+                            }
+                        ],
+                        "overlap_detected": False,
+                        "overlap_score": 0.0,
+                    },
+                ]
+                return info
+
+            def reset(self):
+                return None
+
+        segment = MagicMock()
+        segment.audio = np.ones(16000 * 2, dtype=np.float32)
+        segment.start_time = 0.0
+        segment.end_time = 2.0
+
+        session.set_asr_engine(MockAsr())
+        session._speaker_tracker = MockTracker()
+
+        utterances = asyncio.run(session.process_audio_segment(segment))
+
+        assert len(utterances) == 2
+        assert [item.speaker for item in utterances] == ["Alice", "Bob"]
+        assert len(session.utterances) == 2
+        assert transcribed_lengths == [2.0, 1.0, 1.0]
+
+    def test_process_audio_segment_drops_short_anonymous_noise(self):
+        session = MeetingSession(SessionConfig())
+
+        class MockAsr:
+            def transcribe_array(self, audio, sample_rate=16000, **kwargs):
+                return {"text": "嗯"}
+
+        class MockTracker:
+            def process_segment(self, audio, start_time, end_time, transcript_text=None):
+                info = MagicMock()
+                info.display_name = "Speaker 2"
+                info.registered_id = None
+                info.speaker_id = "Speaker_1"
+                info.label = "Speaker_1"
+                info.confidence = 0.22
+                info.overlap_detected = False
+                info.overlap_score = 0.0
+                info.get_speaker_labels.return_value = [
+                    {
+                        "speaker": "Speaker 2",
+                        "speaker_id": "Speaker_1",
+                        "confidence": 0.22,
+                        "role": "primary",
+                    }
+                ]
+                info.get_speaker_spans.return_value = [
+                    {
+                        "start": 0.0,
+                        "end": 0.8,
+                        "speaker": "Speaker 2",
+                        "speaker_id": "Speaker_1",
+                        "confidence": 0.22,
+                        "speakers": info.get_speaker_labels.return_value,
+                        "overlap_detected": False,
+                        "overlap_score": 0.0,
+                    }
+                ]
+                return info
+
+            def reset(self):
+                return None
+
+        segment = MagicMock()
+        segment.audio = np.ones(int(16000 * 0.8), dtype=np.float32)
+        segment.start_time = 0.0
+        segment.end_time = 0.8
+
+        session.set_asr_engine(MockAsr())
+        session._speaker_tracker = MockTracker()
+
+        utterances = asyncio.run(session.process_audio_segment(segment))
+
+        assert utterances == []
+        assert session.utterances == []

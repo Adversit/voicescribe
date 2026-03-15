@@ -3,6 +3,24 @@ import { persist } from "zustand/middleware";
 
 // --- Shared types ---
 
+export interface SpeakerLabel {
+  speaker: string;
+  speakerId: string;
+  confidence: number;
+  role: "primary" | "secondary";
+}
+
+export interface SpeakerSpan {
+  start: number;
+  end: number;
+  speaker: string;
+  speakerId: string;
+  confidence: number;
+  speakers: SpeakerLabel[];
+  overlapDetected?: boolean;
+  overlapScore?: number;
+}
+
 export interface Utterance {
   id: string;
   speaker: string;
@@ -11,6 +29,10 @@ export interface Utterance {
   start: number;
   end: number;
   confidence: number;
+  speakers?: SpeakerLabel[];
+  overlapDetected?: boolean;
+  overlapScore?: number;
+  speakerSpans?: SpeakerSpan[];
 }
 
 export interface Summary {
@@ -68,6 +90,7 @@ interface RecordingState {
   currentUtterances: Utterance[];
   currentSummary: Summary | null;
   activeSpeaker: string | null;
+  activeSpeakers: SpeakerLabel[];
   recordingStartTime: number | null;
 
   // ---- Persisted ----
@@ -80,6 +103,7 @@ interface RecordingState {
   updateUtterance: (id: string, text: string) => void;
   setSummary: (summary: Summary) => void;
   setActiveSpeaker: (speaker: string | null) => void;
+  setActiveSpeakers: (speakers: SpeakerLabel[]) => void;
 
   // ---- Actions: history ----
   addToHistory: (record: Omit<RecordingRecord, "id" | "timestamp">) => void;
@@ -102,6 +126,7 @@ export const useRecordingStore = create<RecordingState>()(
       currentUtterances: [],
       currentSummary: null,
       activeSpeaker: null,
+      activeSpeakers: [],
       recordingStartTime: null,
 
       // Persisted
@@ -117,6 +142,7 @@ export const useRecordingStore = create<RecordingState>()(
           currentUtterances: [],
           currentSummary: null,
           activeSpeaker: null,
+          activeSpeakers: [],
           recordingStartTime: Date.now(),
         }),
 
@@ -148,6 +174,7 @@ export const useRecordingStore = create<RecordingState>()(
           currentUtterances: [],
           currentSummary: null,
           activeSpeaker: null,
+          activeSpeakers: [],
           recordingStartTime: null,
         });
       },
@@ -156,6 +183,16 @@ export const useRecordingStore = create<RecordingState>()(
         set((s) => ({
           currentUtterances: [...s.currentUtterances, utterance],
           activeSpeaker: utterance.speaker,
+          activeSpeakers:
+            utterance.speakers ||
+            [
+              {
+                speaker: utterance.speaker,
+                speakerId: utterance.speakerId,
+                confidence: utterance.confidence,
+                role: "primary",
+              },
+            ],
         })),
 
       updateUtterance: (id, text) =>
@@ -168,6 +205,12 @@ export const useRecordingStore = create<RecordingState>()(
       setSummary: (summary) => set({ currentSummary: summary }),
 
       setActiveSpeaker: (speaker) => set({ activeSpeaker: speaker }),
+
+      setActiveSpeakers: (speakers) =>
+        set({
+          activeSpeakers: speakers,
+          activeSpeaker: speakers[0]?.speaker || null,
+        }),
 
       // --- History actions ---
 

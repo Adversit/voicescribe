@@ -1,4 +1,4 @@
-import type { Utterance, Summary } from "../store/recording-store";
+import type { SpeakerLabel, Utterance, Summary } from "../store/recording-store";
 
 export interface StreamWSOptions {
   engine: string;
@@ -22,10 +22,92 @@ export interface StreamWSCallbacks {
   onStarted: (info: StreamStartedInfo) => void;
   onUtterance: (utterance: Utterance) => void;
   onUtteranceRefined: (id: string, text: string) => void;
-  onSpeakerActive: (speaker: string, speakerId: string) => void;
+  onSpeakerActive: (speakers: SpeakerLabel[]) => void;
   onSummary: (summary: Summary) => void;
   onSessionEnd: (data: SessionEndData) => void;
   onError: (message: string) => void;
+}
+
+function normalizeSpeakerLabels(
+  speakers: Array<{
+    speaker?: string;
+    speaker_id?: string;
+    speakerId?: string;
+    confidence?: number;
+    role?: "primary" | "secondary";
+  }> | null | undefined,
+  fallbackSpeaker?: string,
+  fallbackSpeakerId?: string,
+  fallbackConfidence?: number
+): SpeakerLabel[] {
+  if (speakers && speakers.length > 0) {
+    return speakers.map((item, index) => ({
+      speaker: item.speaker || fallbackSpeaker || `Speaker ${index + 1}`,
+      speakerId: item.speakerId || item.speaker_id || fallbackSpeakerId || "unknown",
+      confidence: item.confidence ?? fallbackConfidence ?? 0,
+      role: item.role || (index === 0 ? "primary" : "secondary"),
+    }));
+  }
+
+  if (!fallbackSpeaker) {
+    return [];
+  }
+
+  return [
+    {
+      speaker: fallbackSpeaker,
+      speakerId: fallbackSpeakerId || "unknown",
+      confidence: fallbackConfidence ?? 0,
+      role: "primary",
+    },
+  ];
+}
+
+function normalizeSpeakerSpans(
+  spans: Array<{
+    start?: number;
+    end?: number;
+    speaker?: string;
+    speaker_id?: string;
+    speakerId?: string;
+    confidence?: number;
+    speakers?: Array<{
+      speaker?: string;
+      speaker_id?: string;
+      speakerId?: string;
+      confidence?: number;
+      role?: "primary" | "secondary";
+    }>;
+    overlap_detected?: boolean;
+    overlapDetected?: boolean;
+    overlap_score?: number;
+    overlapScore?: number;
+  }> | null | undefined
+) {
+  if (!spans || spans.length === 0) {
+    return [];
+  }
+
+  return spans.map((span) => ({
+    start: span.start ?? 0,
+    end: span.end ?? 0,
+    speaker: span.speaker || "Speaker",
+    speakerId: span.speakerId || span.speaker_id || "unknown",
+    confidence: span.confidence ?? 0,
+    speakers: normalizeSpeakerLabels(
+      span.speakers,
+      span.speaker,
+      span.speakerId || span.speaker_id,
+      span.confidence
+    ),
+    overlapDetected: Boolean(span.overlapDetected ?? span.overlap_detected),
+    overlapScore:
+      typeof span.overlapScore === "number"
+        ? span.overlapScore
+        : typeof span.overlap_score === "number"
+          ? span.overlap_score
+          : 0,
+  }));
 }
 
 export interface SessionEndData {
@@ -95,6 +177,16 @@ export class StreamWebSocket {
               start: msg.start,
               end: msg.end,
               confidence: msg.confidence,
+              speakers: normalizeSpeakerLabels(
+                msg.speakers,
+                msg.speaker,
+                msg.speaker_id,
+                msg.confidence
+              ),
+              overlapDetected: Boolean(msg.overlap_detected),
+              overlapScore:
+                typeof msg.overlap_score === "number" ? msg.overlap_score : 0,
+              speakerSpans: normalizeSpeakerSpans(msg.speaker_spans),
             });
             break;
 
@@ -103,7 +195,13 @@ export class StreamWebSocket {
             break;
 
           case "speaker_active":
-            this.callbacks.onSpeakerActive(msg.speaker, msg.speaker_id);
+            this.callbacks.onSpeakerActive(
+              normalizeSpeakerLabels(
+                msg.active_speakers,
+                msg.speaker,
+                msg.speaker_id
+              )
+            );
             break;
 
           case "summary":

@@ -102,10 +102,28 @@ export function HistorySettings() {
         return `${mins}:${secs.toString().padStart(2, "0")}`;
     };
 
+    const utteranceSpeakerLabels = (utterance: NonNullable<RecordingRecord["utterances"]>[number]) =>
+        utterance.speakers && utterance.speakers.length > 0
+            ? utterance.speakers.map((item) => item.speaker)
+            : [utterance.speaker];
+
+    const utteranceSpeakerDisplay = (utterance: NonNullable<RecordingRecord["utterances"]>[number]) =>
+        utteranceSpeakerLabels(utterance).join(" / ");
+
+    const utteranceSpanDisplay = (utterance: NonNullable<RecordingRecord["utterances"]>[number]) =>
+        utterance.speakerSpans && utterance.speakerSpans.length > 1
+            ? utterance.speakerSpans
+                  .map(
+                      (span) =>
+                          `${formatTime(span.start)}-${formatTime(span.end)} ${span.speaker}`
+                  )
+                  .join(" | ")
+            : null;
+
     if (detailRecord) {
         const filteredUtterances = selectedSpeaker
             ? (detailRecord.utterances || []).filter(
-                  (utterance) => utterance.speaker === selectedSpeaker
+                  (utterance) => utteranceSpeakerLabels(utterance).includes(selectedSpeaker)
               )
             : detailRecord.utterances || [];
 
@@ -203,13 +221,23 @@ export function HistorySettings() {
                                         utterance.speaker
                                     )}`}
                                 >
-                                    {utterance.speaker}
+                                    {utteranceSpeakerDisplay(utterance)}
                                 </span>
+                                {utterance.overlapDetected && (
+                                    <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                                        重叠
+                                    </span>
+                                )}
                                 <span className="text-xs text-muted-foreground">
                                     {formatTime(utterance.start)}
                                 </span>
                             </div>
                             <p className="text-sm pl-0.5">{utterance.text}</p>
+                            {utteranceSpanDisplay(utterance) && (
+                                <p className="mt-1 pl-0.5 text-[11px] text-muted-foreground">
+                                    {utteranceSpanDisplay(utterance)}
+                                </p>
+                            )}
                         </div>
                     ))}
                 </div>

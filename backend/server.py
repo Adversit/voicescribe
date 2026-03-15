@@ -63,6 +63,24 @@ from diarization.speaker_models import (
     speaker_model_relative_dirs,
 )
 
+
+def _configure_app_logging() -> None:
+    """Ensure backend application logs are visible alongside uvicorn logs."""
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(levelname)s:%(name)s:%(message)s",
+        )
+    elif root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
+
+    for logger_name in ("meeting", "diarization", "engines", "server"):
+        logging.getLogger(logger_name).setLevel(logging.INFO)
+
+
+_configure_app_logging()
+
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
@@ -1158,29 +1176,28 @@ async def stream_ws(websocket: WebSocket):
 
     async def _process_stream_segment(sess, segment):
         """Run ASR + speaker flow for one VAD segment and emit websocket events."""
-        utterance = await sess.process_audio_segment(segment)
-        await websocket.send_json(utterance.to_dict())
+        utterances = await sess.process_audio_segment(segment)
+        for utterance in utterances:
+            await websocket.send_json(utterance.to_dict())
 
-        # Notify active speaker
-        await websocket.send_json({
-            "type": "speaker_active",
-            "speaker": utterance.speaker,
-            "speaker_id": utterance.speaker_id,
-        })
+            await websocket.send_json({
+                "type": "speaker_active",
+                "speaker": utterance.speaker,
+                "speaker_id": utterance.speaker_id,
+                "active_speakers": utterance.speakers,
+            })
 
-        # Feed to summarizer
-        if sess.config.enable_ai_summary:
-            sess.summarizer.add_utterance(utterance)
+            if sess.config.enable_ai_summary:
+                sess.summarizer.add_utterance(utterance)
 
-        # Refine asynchronously
-        if sess.config.enable_ai_refine:
-            refined = await sess.refine_utterance(utterance)
-            if refined:
-                await websocket.send_json({
-                    "type": "utterance_refined",
-                    "utterance_id": utterance.id,
-                    "text": refined,
-                })
+            if sess.config.enable_ai_refine:
+                refined = await sess.refine_utterance(utterance)
+                if refined:
+                    await websocket.send_json({
+                        "type": "utterance_refined",
+                        "utterance_id": utterance.id,
+                        "text": refined,
+                    })
 
     await websocket.accept()
     session = None

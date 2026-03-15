@@ -1,4 +1,4 @@
-import type { RecordingRecord } from "../store/recording-store";
+import type { RecordingRecord, Utterance } from "../store/recording-store";
 
 export type MeetingOutputFormat =
   | "text_only"
@@ -18,6 +18,27 @@ function shouldIncludeSpeakers(format: MeetingOutputFormat): boolean {
 
 function shouldIncludeSummary(format: MeetingOutputFormat): boolean {
   return format === "with_summary" || format === "full";
+}
+
+function formatSpeakerLabel(utterance: Utterance): string {
+  const overlapSuffix = utterance.overlapDetected ? " [疑似重叠]" : "";
+  if (utterance.speakers && utterance.speakers.length > 0) {
+    return `${utterance.speakers.map((item) => item.speaker).join(" / ")}${overlapSuffix}`;
+  }
+  return `${utterance.speaker}${overlapSuffix}`;
+}
+
+function appendSpeakerSpans(lines: string[], utterance: Utterance): void {
+  if (!utterance.speakerSpans || utterance.speakerSpans.length <= 1) {
+    return;
+  }
+  utterance.speakerSpans.forEach((span) => {
+    lines.push(
+      `  - ${formatClock(span.start)}-${formatClock(span.end)} ${span.speaker}${
+        span.overlapDetected ? " [重叠]" : ""
+      }`
+    );
+  });
 }
 
 export function exportRecordingAsText(
@@ -61,7 +82,8 @@ export function exportRecordingAsText(
     record.utterances.forEach((utterance) => {
       const start = formatClock(utterance.start);
       const end = formatClock(utterance.end);
-      lines.push(`[${start} - ${end}] ${utterance.speaker}`);
+      lines.push(`[${start} - ${end}] ${formatSpeakerLabel(utterance)}`);
+      appendSpeakerSpans(lines, utterance);
       lines.push(utterance.text);
       lines.push("");
     });
@@ -129,7 +151,8 @@ export function exportRecordingAsMarkdown(
     record.utterances.forEach((utterance) => {
       const start = formatClock(utterance.start);
       const end = formatClock(utterance.end);
-      lines.push(`**${utterance.speaker}** [${start} - ${end}]`);
+      lines.push(`**${formatSpeakerLabel(utterance)}** [${start} - ${end}]`);
+      appendSpeakerSpans(lines, utterance);
       lines.push(utterance.text);
       lines.push("");
     });

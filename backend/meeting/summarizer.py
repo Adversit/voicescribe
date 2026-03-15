@@ -92,7 +92,7 @@ class MeetingSummarizer:
         lines = []
         for utterance in utterances:
             text = utterance.refined_text or utterance.text
-            lines.append(f"[{utterance.speaker}] {text}")
+            lines.append(f"[{utterance.speaker_display}] {text}")
         return "\n".join(lines)
 
     def _format_state(

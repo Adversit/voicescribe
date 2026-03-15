@@ -49,8 +49,8 @@ export function GlobalRecordingManager() {
                         onUtteranceRefined: (id, text) => {
                             useRecordingStore.getState().updateUtterance(id, text);
                         },
-                        onSpeakerActive: (speaker) => {
-                            useRecordingStore.getState().setActiveSpeaker(speaker);
+                        onSpeakerActive: (speakers) => {
+                            useRecordingStore.getState().setActiveSpeakers(speakers);
                         },
                         onSummary: (summary) => {
                             useRecordingStore.getState().setSummary(summary);
@@ -190,6 +190,7 @@ export function GlobalRecordingManager() {
                 currentUtterances: [],
                 currentSummary: null,
                 activeSpeaker: null,
+                activeSpeakers: [],
                 recordingStartTime: null,
             });
         }
