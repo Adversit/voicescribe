@@ -1,9 +1,9 @@
 "use client";
 
-import type { MeetingSummary } from "../../store/meeting-store";
+import type { Summary } from "../../store/recording-store";
 
 interface SummaryCardProps {
-  summary: MeetingSummary | null;
+  summary: Summary | null;
   isRecording: boolean;
 }
 

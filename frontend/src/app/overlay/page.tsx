@@ -49,9 +49,16 @@ export default function OverlayPage() {
                     setIsRecording(true);
                     setIsTranscribing(false);
                     setIsCancelled(false);
+                    // Only reset duration when startTime actually changes (new session),
+                    // not on every audio level broadcast
                     if (s.startTime) {
-                        setStartTime(s.startTime);
-                        setDuration(0);
+                        setStartTime((prev) => {
+                            if (prev !== s.startTime) {
+                                setDuration(0);
+                                return s.startTime!;
+                            }
+                            return prev;
+                        });
                     }
                     setAudioLevel(typeof s.audioLevel === "number" ? s.audioLevel : 0.5);
                 } else if (s.isTranscribing) {

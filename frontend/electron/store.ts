@@ -22,9 +22,11 @@ export interface AppSettings {
     // Engine settings
     engine: string;
     model: string;
+    speakerModel: 'cam++' | 'eres2netv2' | 'eres2net-large';
     language: string;
     enableDiarization: boolean;
     enableAiRefine: boolean;
+    enableAiSummary: boolean;
 
     // General settings
     outputFormat: 'clipboard' | 'directInput' | 'both';
@@ -51,11 +53,13 @@ const defaults: AppSettings = {
         useCommand: false,
         selectedKey: 'R',
     },
-    engine: 'funasr',
-    model: 'seaco-paraformer',
+    engine: 'firered',
+    model: 'firered-aed-l',
+    speakerModel: 'cam++',
     language: 'zh',
     enableDiarization: false,
     enableAiRefine: false,
+    enableAiSummary: false,
     outputFormat: 'clipboard',
     launchAtLogin: false,
     enableStreaming: false,

@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export interface MeetingUtterance {
+// --- Shared types ---
+
+export interface Utterance {
   id: string;
   speaker: string;
   speakerId: string;
@@ -11,54 +13,89 @@ export interface MeetingUtterance {
   confidence: number;
 }
 
-export interface MeetingSummary {
+export interface Summary {
   content: string;
   decisions: string[];
   actionItems: Array<{ assignee: string; task: string }>;
   updatedAt: string;
 }
 
-export interface MeetingRecord {
+export interface Segment {
+  start: number;
+  end: number;
+  text: string;
+  speaker?: string;
+}
+
+// --- Unified recording record ---
+
+export interface RecordingRecord {
   id: string;
   timestamp: number;
   duration: number;
   engine: string;
-  utterances: MeetingUtterance[];
-  summary: MeetingSummary | null;
-  plainText: string;
+  model: string;
+  language: string;
+  text: string;
+  segments: Segment[];
+  utterances?: Utterance[];
+  summary?: Summary | null;
+  isStreaming: boolean;
 }
 
-interface MeetingState {
-  // Active session
+// --- Settings section (preserved from app-store) ---
+
+export type SettingsSection =
+  | "live-transcript"
+  | "general"
+  | "engine"
+  | "vocabulary"
+  | "speaker"
+  | "hotkey"
+  | "history";
+
+// --- Store interface ---
+
+interface RecordingState {
+  // UI
+  selectedSection: SettingsSection;
+  setSelectedSection: (section: SettingsSection) => void;
+
+  // ---- Runtime state (not persisted) ----
   isRecording: boolean;
   sessionId: string | null;
   currentEngine: string | null;
-  currentUtterances: MeetingUtterance[];
-  currentSummary: MeetingSummary | null;
+  currentUtterances: Utterance[];
+  currentSummary: Summary | null;
   activeSpeaker: string | null;
   recordingStartTime: number | null;
 
-  // History
-  meetingHistory: MeetingRecord[];
+  // ---- Persisted ----
+  history: RecordingRecord[];
 
-  // Actions - active session
+  // ---- Actions: active session (streaming) ----
   startSession: (sessionId: string, engine?: string) => void;
   endSession: () => void;
-  addUtterance: (utterance: MeetingUtterance) => void;
+  addUtterance: (utterance: Utterance) => void;
   updateUtterance: (id: string, text: string) => void;
-  setSummary: (summary: MeetingSummary) => void;
+  setSummary: (summary: Summary) => void;
   setActiveSpeaker: (speaker: string | null) => void;
 
-  // Actions - history
-  addMeetingRecord: (record: MeetingRecord) => void;
-  deleteMeetingRecord: (id: string) => void;
-  clearMeetingHistory: () => void;
+  // ---- Actions: history ----
+  addToHistory: (record: Omit<RecordingRecord, "id" | "timestamp">) => void;
+  deleteRecord: (id: string) => void;
+  updateRecord: (id: string, updates: Partial<RecordingRecord>) => void;
+  clearHistory: () => void;
 }
 
-export const useMeetingStore = create<MeetingState>()(
+export const useRecordingStore = create<RecordingState>()(
   persist(
     (set, get) => ({
-      // Active session state (not persisted)
+      // UI
+      selectedSection: "live-transcript",
+      setSelectedSection: (section) => set({ selectedSection: section }),
+
+      // Runtime state
       isRecording: false,
       sessionId: null,
       currentEngine: null,
@@ -67,8 +104,10 @@ export const useMeetingStore = create<MeetingState>()(
       activeSpeaker: null,
       recordingStartTime: null,
 
-      // History (persisted)
-      meetingHistory: [],
+      // Persisted
+      history: [],
+
+      // --- Active session actions ---
 
       startSession: (sessionId, engine) =>
         set({
@@ -84,17 +123,22 @@ export const useMeetingStore = create<MeetingState>()(
       endSession: () => {
         const state = get();
         if (state.currentUtterances.length > 0) {
-          const record: MeetingRecord = {
+          const record: RecordingRecord = {
             id: state.sessionId || crypto.randomUUID(),
             timestamp: state.recordingStartTime || Date.now(),
-            duration: (Date.now() - (state.recordingStartTime || Date.now())) / 1000,
+            duration:
+              (Date.now() - (state.recordingStartTime || Date.now())) / 1000,
             engine: state.currentEngine || "unknown",
+            model: "",
+            language: "",
+            text: state.currentUtterances.map((u) => u.text).join("\n"),
+            segments: [],
             utterances: state.currentUtterances,
             summary: state.currentSummary,
-            plainText: state.currentUtterances.map((u) => u.text).join("\n"),
+            isStreaming: true,
           };
           set((s) => ({
-            meetingHistory: [record, ...s.meetingHistory],
+            history: [record, ...s.history],
           }));
         }
         set({
@@ -125,22 +169,38 @@ export const useMeetingStore = create<MeetingState>()(
 
       setActiveSpeaker: (speaker) => set({ activeSpeaker: speaker }),
 
-      addMeetingRecord: (record) =>
+      // --- History actions ---
+
+      addToHistory: (record) =>
         set((s) => ({
-          meetingHistory: [record, ...s.meetingHistory],
+          history: [
+            {
+              ...record,
+              id: crypto.randomUUID(),
+              timestamp: Date.now(),
+            },
+            ...s.history,
+          ],
         })),
 
-      deleteMeetingRecord: (id) =>
+      deleteRecord: (id) =>
         set((s) => ({
-          meetingHistory: s.meetingHistory.filter((r) => r.id !== id),
+          history: s.history.filter((r) => r.id !== id),
         })),
 
-      clearMeetingHistory: () => set({ meetingHistory: [] }),
+      updateRecord: (id, updates) =>
+        set((s) => ({
+          history: s.history.map((r) =>
+            r.id === id ? { ...r, ...updates } : r
+          ),
+        })),
+
+      clearHistory: () => set({ history: [] }),
     }),
     {
-      name: "voicescribe-meetings",
+      name: "voicescribe-recordings",
       partialize: (state) => ({
-        meetingHistory: state.meetingHistory,
+        history: state.history,
       }),
     }
   )

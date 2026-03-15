@@ -2,18 +2,16 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Settings, Cpu, BookOpen, Users, Keyboard, History, Mic, FileOutput, Bot } from "lucide-react";
+import { Settings, Cpu, BookOpen, Users, Keyboard, History, Radio } from "lucide-react";
 import { GeneralSettings } from "./GeneralSettings";
 import { EngineSettings } from "./EngineSettings";
 import { VocabularySettings } from "./VocabularySettings";
 import { SpeakerSettings } from "./SpeakerSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { HistorySettings } from "./HistorySettings";
-import { OutputSettings } from "./OutputSettings";
-import { LLMSettings } from "./LLMSettings";
-import { MeetingRecorder } from "../MeetingRecorder";
+import { LiveTranscriptPanel } from "../LiveTranscriptPanel";
 
-type SettingsTab = "recording" | "general" | "engine" | "vocabulary" | "speaker" | "hotkey" | "output" | "ai" | "history";
+type SettingsTab = "live-transcript" | "general" | "engine" | "vocabulary" | "speaker" | "hotkey" | "history";
 
 interface NavItem {
     id: SettingsTab;
@@ -22,24 +20,22 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { id: "recording", label: "录制", icon: Mic },
+    { id: "live-transcript", label: "实时转录", icon: Radio },
     { id: "general", label: "通用", icon: Settings },
     { id: "engine", label: "引擎", icon: Cpu },
     { id: "vocabulary", label: "词汇", icon: BookOpen },
     { id: "speaker", label: "说话人", icon: Users },
     { id: "hotkey", label: "快捷键", icon: Keyboard },
-    { id: "output", label: "输出", icon: FileOutput },
-    { id: "ai", label: "AI", icon: Bot },
     { id: "history", label: "历史记录", icon: History },
 ];
 
 export function SettingsPanel() {
-    const [activeTab, setActiveTab] = useState<SettingsTab>("recording");
+    const [activeTab, setActiveTab] = useState<SettingsTab>("live-transcript");
 
     const renderContent = () => {
         switch (activeTab) {
-            case "recording":
-                return <MeetingRecorder />;
+            case "live-transcript":
+                return <LiveTranscriptPanel />;
             case "general":
                 return <GeneralSettings />;
             case "engine":
@@ -50,10 +46,6 @@ export function SettingsPanel() {
                 return <SpeakerSettings />;
             case "hotkey":
                 return <HotkeySettings />;
-            case "output":
-                return <OutputSettings />;
-            case "ai":
-                return <LLMSettings />;
             case "history":
                 return <HistorySettings />;
         }

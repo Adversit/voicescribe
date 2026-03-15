@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { SettingsSection, useAppStore } from "@/store/app-store";
+import { SettingsSection, useRecordingStore } from "@/store/recording-store";
 import { Cpu, Keyboard, MessageSquare, Settings, Users, History } from "lucide-react";
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
@@ -16,7 +16,7 @@ const items: { section: SettingsSection; label: string; icon: React.ElementType 
 ];
 
 export function Sidebar({ className }: SidebarProps) {
-    const { selectedSection, setSelectedSection } = useAppStore();
+    const { selectedSection, setSelectedSection } = useRecordingStore();
 
     return (
         <div className={cn("pb-12 w-64 border-r bg-muted/20", className)}>

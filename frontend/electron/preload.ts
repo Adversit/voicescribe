@@ -104,7 +104,7 @@ export interface ElectronAPI {
         update: (config: unknown) => Promise<{ success: boolean; hotkey: string }>;
     };
     backend: {
-        checkHealth: () => Promise<{ healthy: boolean; status?: string; engines?: Record<string, boolean> }>;
+        checkHealth: () => Promise<{ healthy: boolean; status?: string; engines?: Record<string, boolean>; speaker_model?: string }>;
         getEngines: () => Promise<Array<{ name: string; models: string[]; loaded_model: string | null; available: boolean }>>;
         loadEngine: (engine: string, model: string) => Promise<{ status: string; error?: string }>;
         getSpeakers: () => Promise<Array<{ speaker_id: string; name: string }>>;
@@ -119,13 +119,21 @@ export interface ElectronAPI {
             hotkey: { useControl: boolean; useOption: boolean; useShift: boolean; useCommand: boolean; selectedKey: string };
             engine: string;
             model: string;
+            speakerModel: 'cam++' | 'eres2netv2' | 'eres2net-large';
             language: string;
             enableDiarization: boolean;
             enableAiRefine: boolean;
+            enableAiSummary: boolean;
             outputFormat: 'clipboard' | 'directInput' | 'both';
             launchAtLogin: boolean;
             enableStreaming: boolean;
             vocabulary: string[];
+            meetingOutputFormat: 'text_only' | 'with_speakers' | 'with_summary' | 'full';
+            llmProvider: 'claude_cli' | 'anthropic_api' | 'custom';
+            llmModel: string;
+            customApiUrl: string;
+            customApiKey: string;
+            summaryInterval: number;
         }>;
         update: (partial: Record<string, unknown>) => Promise<{ success: boolean }>;
     };

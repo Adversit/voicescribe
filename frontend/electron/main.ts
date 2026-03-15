@@ -532,8 +532,36 @@ function setupIpcHandlers() {
     });
 
     // Update settings
-    ipcMain.handle('update-settings', (_event, partial: Partial<AppSettings>) => {
+    ipcMain.handle('update-settings', async (_event, partial: Partial<AppSettings>) => {
+        const before = getSettings();
         updateSettings(partial);
+        const after = getSettings();
+
+        const diarizationChanged = Object.prototype.hasOwnProperty.call(partial, 'enableDiarization')
+            && partial.enableDiarization !== before.enableDiarization;
+        const streamingChanged = Object.prototype.hasOwnProperty.call(partial, 'enableStreaming')
+            && partial.enableStreaming !== before.enableStreaming;
+        const speakerModelChanged = Object.prototype.hasOwnProperty.call(partial, 'speakerModel')
+            && partial.speakerModel !== before.speakerModel;
+
+        if (diarizationChanged || streamingChanged || speakerModelChanged) {
+            try {
+                const preload = Boolean(after.enableDiarization || after.enableStreaming);
+                const reloadResult = await backend.reloadSpeakerModels(
+                    Boolean(after.enableStreaming),
+                    Boolean(after.enableDiarization),
+                    after.speakerModel,
+                );
+                console.log(
+                    `[Settings] Speaker models reloaded: preload=${preload}, ` +
+                    `model=${reloadResult.speaker_model || after.speakerModel}, ` +
+                    `backend=${reloadResult.stream_tracker?.backend || 'none'}`
+                );
+            } catch (error) {
+                console.warn(`[Settings] Failed to reload speaker models: ${String(error)}`);
+            }
+        }
+
         return { success: true };
     });
 
@@ -549,7 +577,20 @@ function setupIpcHandlers() {
     // Load engine
     ipcMain.handle('load-engine', async (_event, engine: string, model: string) => {
         try {
-            return await backend.loadEngine(engine, model);
+            const result = await backend.loadEngine(engine, model);
+            const settings = getSettings();
+            if (settings.enableStreaming || settings.enableDiarization) {
+                try {
+                    await backend.reloadSpeakerModels(
+                        Boolean(settings.enableStreaming),
+                        Boolean(settings.enableDiarization),
+                        settings.speakerModel,
+                    );
+                } catch (error) {
+                    console.warn(`[LoadEngine] Failed to preload speaker backends: ${String(error)}`);
+                }
+            }
+            return result;
         } catch (error) {
             return { status: 'error', error: String(error) };
         }
@@ -683,6 +724,7 @@ app.on('ready', async () => {
     // Start backend process (skip if VOICESCRIBE_SKIP_BACKEND is set)
     if (!process.env.VOICESCRIBE_SKIP_BACKEND) {
         await startBackendProcess();
+        await syncSpeakerModelSettings();
     } else {
         console.log('Skipping backend startup (VOICESCRIBE_SKIP_BACKEND is set)');
     }
@@ -800,6 +842,24 @@ async function waitForBackend(maxAttempts = 30): Promise<boolean> {
     }
     console.warn('Backend did not become ready in time');
     return false;
+}
+
+async function syncSpeakerModelSettings(): Promise<void> {
+    try {
+        const settings = getSettings();
+        const preload = Boolean(settings.enableDiarization || settings.enableStreaming);
+        const result = await backend.reloadSpeakerModels(
+            Boolean(settings.enableStreaming),
+            Boolean(settings.enableDiarization),
+            settings.speakerModel,
+        );
+        console.log(
+            `[Startup] Speaker model synced: model=${result.speaker_model || settings.speakerModel}, ` +
+            `backend=${result.stream_tracker?.backend || 'none'}, preload=${preload}`
+        );
+    } catch (error) {
+        console.warn(`[Startup] Failed to sync speaker model settings: ${String(error)}`);
+    }
 }
 
 function stopBackendProcess(): void {

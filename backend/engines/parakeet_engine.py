@@ -87,6 +87,27 @@ class ParakeetEngine:
             "language": language,
         }
     
+    def transcribe_array(
+        self,
+        audio: "np.ndarray",
+        sample_rate: int = 16000,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Transcribe from numpy array by writing temp file."""
+        import os
+        import tempfile
+        import numpy as np
+        import soundfile as sf
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp_path = f.name
+            sf.write(tmp_path, audio, sample_rate, subtype="PCM_16")
+
+        try:
+            return self.transcribe(tmp_path, **kwargs)
+        finally:
+            os.unlink(tmp_path)
+
     def unload(self):
         """卸载模型释放内存"""
         self.model = None

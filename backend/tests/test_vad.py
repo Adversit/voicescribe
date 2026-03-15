@@ -7,9 +7,9 @@ class TestVADConfig:
     def test_default_config(self):
         cfg = VADConfig()
         assert cfg.threshold == 0.5
-        assert cfg.hangover_ms == 300
-        assert cfg.min_speech_ms == 250
-        assert cfg.pre_roll_ms == 100
+        assert cfg.hangover_ms == 700
+        assert cfg.min_speech_ms == 300
+        assert cfg.pre_roll_ms == 200
         assert cfg.max_segment_s == 30.0
         assert cfg.sample_rate == 16000
 
@@ -39,4 +39,31 @@ class TestSileroVADSegmenter:
         seg = SileroVADSegmenter(VADConfig())
         seg.is_speaking = True
         seg.reset()
+        assert seg.is_speaking is False
+
+    def test_flush_returns_segment_when_speaking(self):
+        cfg = VADConfig(sample_rate=16000, min_speech_ms=100)
+        seg = SileroVADSegmenter(cfg)
+        seg.is_speaking = True
+        seg._speech_start_time = 0.0
+        seg._speech_buffer = [np.ones(1600, dtype=np.float32)]  # 100ms
+        seg._total_samples = 1600
+
+        out = seg.flush()
+        assert out is not None
+        assert isinstance(out, SpeechSegment)
+        assert out.end_time > out.start_time
+        assert len(out.audio) == 1600
+        assert seg.is_speaking is False
+
+    def test_flush_discards_short_segment(self):
+        cfg = VADConfig(sample_rate=16000, min_speech_ms=300)
+        seg = SileroVADSegmenter(cfg)
+        seg.is_speaking = True
+        seg._speech_start_time = 0.0
+        seg._speech_buffer = [np.ones(800, dtype=np.float32)]  # 50ms
+        seg._total_samples = 800
+
+        out = seg.flush()
+        assert out is None
         assert seg.is_speaking is False

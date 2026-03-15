@@ -1,16 +1,14 @@
 """Meeting session orchestrator.
 
 Manages the lifecycle of a meeting recording session:
-VAD segmentation -> speaker identification -> ASR transcription.
+VAD segmentation -> ASR transcription -> speaker clustering -> speaker mapping.
 """
 
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +21,7 @@ class SessionConfig:
     speakers_enabled: bool = True
     hotwords: str = ""
     enable_ai_refine: bool = True
+    enable_ai_summary: bool = True
     summary_interval: int = 120  # seconds
     max_speakers: int = 8
     llm_provider: str = "claude_cli"
@@ -65,38 +64,43 @@ class MeetingSession:
         self.running_summary: str = ""
         self._utterance_counter = 0
 
-        # Lazy-init components to avoid importing torch at module level
         self._vad = None
         self._speaker_tracker = None
         self._refiner = None
         self._summarizer = None
-        self.asr_engine = None  # Loaded externally and set
+        self.asr_engine = None
 
         logger.info(
-            f"[MeetingSession] Created session {self.session_id} "
-            f"engine={config.engine} speakers={config.speakers_enabled}"
+            "[MeetingSession] Created session %s engine=%s speakers=%s",
+            self.session_id,
+            config.engine,
+            config.speakers_enabled,
         )
 
     @property
     def vad(self):
         if self._vad is None:
             from meeting.vad import SileroVADSegmenter, VADConfig
+
             self._vad = SileroVADSegmenter(VADConfig())
         return self._vad
 
     @property
     def speaker_tracker(self):
         if self._speaker_tracker is None and self.config.speakers_enabled:
-            from meeting.speaker_tracker import DiartSpeakerTracker
-            self._speaker_tracker = DiartSpeakerTracker(
+            from meeting.speaker_tracker import get_speaker_tracker
+
+            self._speaker_tracker = get_speaker_tracker(
                 max_speakers=self.config.max_speakers
             )
+            self._speaker_tracker.reset()
         return self._speaker_tracker
 
     @property
     def refiner(self):
         if self._refiner is None:
             from postprocess.ai_refiner import AIRefiner
+
             self._refiner = AIRefiner(
                 provider=self.config.llm_provider,
                 model=self.config.llm_model,
@@ -107,18 +111,16 @@ class MeetingSession:
     def summarizer(self):
         if self._summarizer is None:
             from meeting.summarizer import MeetingSummarizer
+
             self._summarizer = MeetingSummarizer(
                 refiner=self.refiner,
                 interval=self.config.summary_interval,
             )
         return self._summarizer
 
-    async def refine_utterance(self, utterance: 'Utterance') -> Optional[str]:
-        """Refine an utterance with AI if hotwords are configured."""
-        hotwords = [h.strip() for h in self.config.hotwords.split(",") if h.strip()]
-        if not hotwords:
-            return None
-
+    async def refine_utterance(self, utterance: Utterance) -> Optional[str]:
+        """Refine an utterance with AI."""
+        hotwords = [item.strip() for item in self.config.hotwords.split(",") if item.strip()]
         refined = await self.refiner.refine(utterance.text, hotwords)
         if refined != utterance.text:
             utterance.refined_text = refined
@@ -130,44 +132,19 @@ class MeetingSession:
         self.asr_engine = engine
 
     def load_registered_speakers(self, speakers: list[dict]):
-        """Load pre-registered speakers for matching.
-
-        Args:
-            speakers: List of {id, name, embedding} dicts from speaker.py
-        """
+        """Load pre-registered speakers for mapping."""
         if not self.speaker_tracker:
             return
 
-        for spk in speakers:
+        for speaker in speakers:
             self.speaker_tracker.register_known_speaker(
-                name=spk["name"],
-                speaker_id=spk["id"],
-                embedding=spk["embedding"],
+                name=speaker["name"],
+                speaker_id=speaker["id"],
+                embedding=speaker["embedding"],
             )
 
     async def process_audio_segment(self, segment) -> Utterance:
-        """Process a VAD-segmented audio chunk through ASR + speaker ID.
-
-        Args:
-            segment: SpeechSegment from VAD.
-
-        Returns:
-            Utterance with speaker and text.
-        """
-        # Speaker identification
-        if self.speaker_tracker:
-            speaker_info = self.speaker_tracker.process_segment(
-                segment.audio, segment.start_time, segment.end_time
-            )
-            speaker_name = speaker_info.display_name
-            speaker_id = speaker_info.registered_id or speaker_info.label
-            confidence = speaker_info.confidence
-        else:
-            speaker_name = "说话人"
-            speaker_id = "unknown"
-            confidence = 0.0
-
-        # ASR transcription
+        """Process one VAD segment through ASR and the streaming speaker pipeline."""
         if self.asr_engine is None:
             raise RuntimeError("ASR engine not set")
 
@@ -176,6 +153,18 @@ class MeetingSession:
             sample_rate=16000,
             hotwords=self.config.hotwords,
         )
+
+        if self.speaker_tracker:
+            speaker_info = self.speaker_tracker.process_segment(
+                segment.audio, segment.start_time, segment.end_time
+            )
+            speaker_name = speaker_info.display_name
+            speaker_id = speaker_info.registered_id or speaker_info.label
+            confidence = speaker_info.confidence
+        else:
+            speaker_name = "Speaker"
+            speaker_id = "unknown"
+            confidence = 0.0
 
         self._utterance_counter += 1
         utterance = Utterance(
@@ -197,7 +186,7 @@ class MeetingSession:
 
     def get_plain_text(self) -> str:
         """Get all utterances as plain text."""
-        return "\n".join(u.refined_text or u.text for u in self.utterances)
+        return "\n".join(item.refined_text or item.text for item in self.utterances)
 
     def get_formatted_text(
         self,
@@ -207,42 +196,47 @@ class MeetingSession:
         """Get formatted text based on output preferences."""
         lines = []
 
-        for u in self.utterances:
-            text = u.refined_text or u.text
+        for utterance in self.utterances:
+            text = utterance.refined_text or utterance.text
             if include_speakers:
-                lines.append(f"[{u.speaker}] {text}")
+                lines.append(f"[{utterance.speaker}] {text}")
             else:
                 lines.append(text)
 
         result = "\n".join(lines)
 
         if include_summary and self.running_summary:
-            result += f"\n\n---\n摘要：{self.running_summary}"
+            result += f"\n\n---\n{self.running_summary}"
 
         return result
 
     def get_recent_transcript(self, since_utterance: int = 0) -> str:
         """Get transcript since a given utterance index, for summarization."""
         recent = self.utterances[since_utterance:]
-        lines = []
-        for u in recent:
-            text = u.refined_text or u.text
-            lines.append(f"[{u.speaker}] {text}")
-        return "\n".join(lines)
+        return "\n".join(f"[{item.speaker}] {item.refined_text or item.text}" for item in recent)
 
     def get_session_data(self) -> dict:
         """Get complete session data for history storage."""
+        summary_payload = None
+        if self.running_summary:
+            decisions: list[str] = []
+            action_items: list[dict] = []
+            if self._summarizer is not None:
+                decisions = list(self._summarizer.decisions)
+                action_items = list(self._summarizer.action_items)
+            summary_payload = {
+                "content": self.running_summary,
+                "decisions": decisions,
+                "action_items": action_items,
+            }
+
         return {
             "session_id": self.session_id,
             "timestamp": self.start_time,
             "duration": time.time() - self.start_time,
             "engine": self.config.engine,
-            "utterances": [u.to_dict() for u in self.utterances],
-            "summary": {
-                "content": self.running_summary,
-                "decisions": [],
-                "action_items": [],
-            } if self.running_summary else None,
+            "utterances": [item.to_dict() for item in self.utterances],
+            "summary": summary_payload,
             "plain_text": self.get_plain_text(),
         }
 
@@ -252,4 +246,4 @@ class MeetingSession:
             self._vad.reset()
         if self._speaker_tracker is not None:
             self._speaker_tracker.reset()
-        logger.info(f"[MeetingSession] Session {self.session_id} cleaned up")
+        logger.info("[MeetingSession] Session %s cleaned up", self.session_id)

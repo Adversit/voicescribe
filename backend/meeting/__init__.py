@@ -1,1 +1,1 @@
-"""Meeting recording pipeline: VAD + speaker diarization + ASR."""
+"""Meeting recording pipeline: VAD + ASR + pyannote clustering + CAM++ mapping."""

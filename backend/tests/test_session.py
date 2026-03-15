@@ -1,6 +1,7 @@
-import pytest
+import asyncio
 from unittest.mock import MagicMock
-from meeting.session import MeetingSession, Utterance, SessionConfig
+
+from meeting.session import MeetingSession, SessionConfig, Utterance
 
 
 class TestSessionConfig:
@@ -18,20 +19,20 @@ class TestSessionConfig:
 
 class TestUtterance:
     def test_to_dict(self):
-        u = Utterance(
+        utterance = Utterance(
             id="utt_001",
-            speaker="张三",
+            speaker="Alice",
             speaker_id="spk_001",
-            text="测试文本",
+            text="hello world",
             start=1.0,
             end=3.5,
             confidence=0.85,
         )
-        d = u.to_dict()
-        assert d["type"] == "utterance"
-        assert d["speaker"] == "张三"
-        assert d["text"] == "测试文本"
-        assert d["start"] == 1.0
+        payload = utterance.to_dict()
+        assert payload["type"] == "utterance"
+        assert payload["speaker"] == "Alice"
+        assert payload["text"] == "hello world"
+        assert payload["start"] == 1.0
 
 
 class TestMeetingSession:
@@ -43,36 +44,93 @@ class TestMeetingSession:
 
     def test_add_utterance(self):
         session = MeetingSession(SessionConfig(speakers_enabled=False))
-        u = Utterance(
+        utterance = Utterance(
             id="utt_001",
-            speaker="张三",
+            speaker="Alice",
             speaker_id="spk_001",
-            text="你好",
+            text="hello",
             start=0.0,
             end=1.0,
             confidence=0.9,
         )
-        session.add_utterance(u)
+        session.add_utterance(utterance)
         assert len(session.utterances) == 1
-        assert session.utterances[0].text == "你好"
+        assert session.utterances[0].text == "hello"
 
     def test_get_plain_text(self):
         session = MeetingSession(SessionConfig(speakers_enabled=False))
-        session.add_utterance(Utterance(
-            id="1", speaker="张三", speaker_id="s1",
-            text="你好", start=0.0, end=1.0, confidence=0.9
-        ))
-        session.add_utterance(Utterance(
-            id="2", speaker="李四", speaker_id="s2",
-            text="你好啊", start=1.5, end=2.5, confidence=0.9
-        ))
-        assert session.get_plain_text() == "你好\n你好啊"
+        session.add_utterance(
+            Utterance(
+                id="1",
+                speaker="Alice",
+                speaker_id="s1",
+                text="hello",
+                start=0.0,
+                end=1.0,
+                confidence=0.9,
+            )
+        )
+        session.add_utterance(
+            Utterance(
+                id="2",
+                speaker="Bob",
+                speaker_id="s2",
+                text="world",
+                start=1.5,
+                end=2.5,
+                confidence=0.9,
+            )
+        )
+        assert session.get_plain_text() == "hello\nworld"
 
     def test_get_formatted_text_with_speakers(self):
         session = MeetingSession(SessionConfig(speakers_enabled=False))
-        session.add_utterance(Utterance(
-            id="1", speaker="张三", speaker_id="s1",
-            text="你好", start=0.0, end=1.0, confidence=0.9
-        ))
+        session.add_utterance(
+            Utterance(
+                id="1",
+                speaker="Alice",
+                speaker_id="s1",
+                text="hello",
+                start=0.0,
+                end=1.0,
+                confidence=0.9,
+            )
+        )
         text = session.get_formatted_text(include_speakers=True)
-        assert "[张三]" in text
+        assert "[Alice]" in text
+
+    def test_process_audio_segment_runs_asr_before_speaker_pipeline(self):
+        session = MeetingSession(SessionConfig())
+        call_order: list[str] = []
+
+        class MockAsr:
+            def transcribe_array(self, audio, sample_rate=16000, **kwargs):
+                call_order.append("asr")
+                return {"text": "transcript"}
+
+        class MockTracker:
+            def process_segment(self, audio, start_time, end_time):
+                call_order.append("speaker")
+                info = MagicMock()
+                info.display_name = "Alice"
+                info.registered_id = "spk_001"
+                info.label = "Speaker_0"
+                info.confidence = 0.88
+                return info
+
+            def reset(self):
+                return None
+
+        segment = MagicMock()
+        segment.audio = MagicMock()
+        segment.start_time = 0.0
+        segment.end_time = 1.0
+
+        session.set_asr_engine(MockAsr())
+        session._speaker_tracker = MockTracker()
+
+        utterance = asyncio.run(session.process_audio_segment(segment))
+
+        assert call_order == ["asr", "speaker"]
+        assert utterance.speaker == "Alice"
+        assert utterance.text == "transcript"

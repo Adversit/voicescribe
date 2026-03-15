@@ -1,10 +1,10 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { MeetingUtterance } from "../../store/meeting-store";
+import type { Utterance } from "../../store/recording-store";
 
 interface SpeakerFilterProps {
-  utterances: MeetingUtterance[];
+  utterances: Utterance[];
   selectedSpeaker: string | null;
   onSelect: (speaker: string | null) => void;
 }

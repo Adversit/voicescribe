@@ -15,9 +15,15 @@ export interface HealthResponse {
     status: string;
     service: string;
     mode: string;
+    speaker_model?: string;
     engines: {
         whisper: boolean;
+        whispercpp: boolean;
         funasr: boolean;
+        parakeet: boolean;
+        firered: boolean;
+        qwen3asr: boolean;
+        firered2: boolean;
         diarization: boolean;
         ai_refine: boolean;
     };
@@ -209,6 +215,37 @@ export async function registerSpeaker(
  */
 export async function deleteSpeaker(speakerId: string): Promise<{ status: string }> {
     return request<{ status: string }>('DELETE', `/speakers/${speakerId}`);
+}
+
+/**
+ * Reload speaker recognition model backends.
+ */
+export async function reloadSpeakerModels(
+    enableStreaming: boolean,
+    enableDiarization: boolean,
+    speakerModel?: string
+): Promise<{
+    status: string;
+    preload: boolean;
+    speaker_model?: string;
+    speaker_plan?: {
+        preload_cluster: boolean;
+        preload_mapping: boolean;
+        speaker_model: string;
+    } | null;
+    stream_tracker?: { backend: string | null; available: boolean };
+    stream_tracker_error?: string | null;
+    diarizer_status?: string;
+    diarizer_error?: string | null;
+}> {
+    const preload = Boolean(enableStreaming || enableDiarization);
+    const speakerPart = speakerModel
+        ? `&speaker_model=${encodeURIComponent(speakerModel)}`
+        : '';
+    return request(
+        'POST',
+        `/speakers/reload-models?preload=${preload ? 'true' : 'false'}&enable_streaming=${enableStreaming ? 'true' : 'false'}&enable_diarization=${enableDiarization ? 'true' : 'false'}${speakerPart}`
+    );
 }
 
 /**

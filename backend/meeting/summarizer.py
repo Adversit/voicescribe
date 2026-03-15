@@ -1,8 +1,4 @@
-"""Incremental meeting summarization using rolling window + LLM.
-
-Accumulates utterances and periodically generates updated summaries
-by feeding running_summary + new_transcript to an LLM.
-"""
+"""Incremental meeting summarization with short-term summary context."""
 
 import json
 import logging
@@ -31,10 +27,19 @@ class SummaryResult:
 
 
 class MeetingSummarizer:
-    def __init__(self, refiner: AIRefiner, interval: int = 120):
+    def __init__(
+        self,
+        refiner: AIRefiner,
+        interval: int = 120,
+        max_context_summaries: int = 2,
+    ):
         self.refiner = refiner
         self.interval = interval
+        self.max_context_summaries = max_context_summaries
         self.running_summary = ""
+        self.recent_summaries: list[str] = []
+        self.decisions: list[str] = []
+        self.action_items: list[dict] = []
         self.pending_utterances: list[Utterance] = []
         self._last_summarized_index = 0
 
@@ -45,47 +50,150 @@ class MeetingSummarizer:
         return len(self.pending_utterances) > 0
 
     async def generate_summary(self) -> Optional[SummaryResult]:
-        """Generate an incremental summary from pending utterances."""
+        """Summarize only the newly added utterances with short context."""
         if not self.should_summarize():
             return None
 
         new_transcript = self._format_transcript(self.pending_utterances)
-        prompt = self._build_prompt(self.running_summary, new_transcript)
+        prompt = self._build_prompt(
+            new_transcript,
+            self.recent_summaries[-self.max_context_summaries :],
+            self.decisions,
+            self.action_items,
+        )
 
         try:
             raw = await self.refiner._call_llm(prompt)
-            result = self._parse_summary(raw)
-            self.running_summary = result.content
+            chunk_result = self._parse_summary(raw)
+            self._remember_chunk_summary(chunk_result.content)
+            self.running_summary = self._append_summary(
+                self.running_summary,
+                chunk_result.content,
+            )
+            self.decisions = self._merge_unique_strings(
+                self.decisions,
+                chunk_result.decisions,
+            )
+            self.action_items = self._merge_action_items(
+                self.action_items,
+                chunk_result.action_items,
+            )
             self.pending_utterances.clear()
-            return result
-        except Exception as e:
-            logger.error(f"[Summarizer] Failed: {e}")
+            return SummaryResult(
+                content=self.running_summary,
+                decisions=list(self.decisions),
+                action_items=list(self.action_items),
+            )
+        except Exception as exc:
+            logger.error(f"[Summarizer] Failed: {exc}")
             return None
 
     def _format_transcript(self, utterances: list[Utterance]) -> str:
         lines = []
-        for u in utterances:
-            text = u.refined_text or u.text
-            lines.append(f"[{u.speaker}] {text}")
+        for utterance in utterances:
+            text = utterance.refined_text or utterance.text
+            lines.append(f"[{utterance.speaker}] {text}")
         return "\n".join(lines)
 
-    def _build_prompt(self, running_summary: str, new_transcript: str) -> str:
+    def _format_state(
+        self,
+        decisions: list[str],
+        action_items: list[dict],
+    ) -> str:
+        state = {
+            "decisions": decisions,
+            "action_items": action_items,
+        }
+        return json.dumps(state, ensure_ascii=False)
+
+    def _build_prompt(
+        self,
+        new_transcript: str,
+        recent_summaries: list[str],
+        decisions: list[str],
+        action_items: list[dict],
+    ) -> str:
+        if recent_summaries:
+            context_text = "\n\n".join(
+                f"第{index + 1}条最近摘要：{summary}"
+                for index, summary in enumerate(recent_summaries)
+            )
+        else:
+            context_text = "无"
+
+        state_text = self._format_state(decisions, action_items)
+
         return (
-            f"你是一个会议记录助手。基于之前的摘要和新的讨论内容，更新摘要。\n\n"
-            f"之前的摘要：{running_summary or '（无）'}\n\n"
-            f"新内容：\n{new_transcript}\n\n"
-            f"请输出JSON格式：\n"
-            f'{{"summary": "更新后的摘要（3-5句话）", '
-            f'"decisions": ["决策1", ...], '
-            f'"action_items": [{{"assignee": "姓名", "task": "任务"}}]}}\n\n'
-            f"如果没有明确的决策或待办，对应数组留空。只输出JSON，不要其他内容。"
+            "你是一个会议记录助手。\n"
+            "请只根据本轮新增内容进行总结，但可以参考最近两轮摘要和当前决策/待办状态保持上下文连续。\n"
+            "不要重写整场会议，不要把旧内容重新展开。\n\n"
+            f"最近摘要上下文：\n{context_text}\n\n"
+            f"当前状态：\n{state_text}\n\n"
+            f"本轮新增内容：\n{new_transcript}\n\n"
+            "请输出 JSON：\n"
+            '{"summary": "本轮新增摘要（1-3句）", '
+            '"decisions": ["新增或更新后的决策"], '
+            '"action_items": [{"assignee": "姓名", "task": "任务"}]}\n\n'
+            "如果没有新增决策或待办，对应数组返回空数组。只输出 JSON。"
         )
 
+    def _remember_chunk_summary(self, chunk_summary: str):
+        normalized = chunk_summary.strip()
+        if not normalized:
+            return
+        self.recent_summaries.append(normalized)
+        if len(self.recent_summaries) > self.max_context_summaries:
+            self.recent_summaries = self.recent_summaries[-self.max_context_summaries :]
+
+    def _append_summary(self, running_summary: str, chunk_summary: str) -> str:
+        normalized = chunk_summary.strip()
+        if not normalized:
+            return running_summary
+        if not running_summary:
+            return normalized
+        return f"{running_summary}\n\n{normalized}"
+
+    def _merge_unique_strings(
+        self,
+        existing: list[str],
+        new_items: list[str],
+    ) -> list[str]:
+        merged = list(existing)
+        seen = {item.strip() for item in existing if item.strip()}
+        for item in new_items:
+            normalized = item.strip()
+            if normalized and normalized not in seen:
+                merged.append(normalized)
+                seen.add(normalized)
+        return merged
+
+    def _merge_action_items(
+        self,
+        existing: list[dict],
+        new_items: list[dict],
+    ) -> list[dict]:
+        merged = list(existing)
+        seen = {
+            (
+                str(item.get("assignee", "")).strip(),
+                str(item.get("task", "")).strip(),
+            )
+            for item in existing
+        }
+        for item in new_items:
+            assignee = str(item.get("assignee", "")).strip()
+            task = str(item.get("task", "")).strip()
+            if not assignee and not task:
+                continue
+            key = (assignee, task)
+            if key in seen:
+                continue
+            merged.append({"assignee": assignee, "task": task})
+            seen.add(key)
+        return merged
+
     def _parse_summary(self, raw: str) -> SummaryResult:
-        """Parse LLM output into SummaryResult."""
-        # Try JSON parsing first
         try:
-            # Find JSON in the response
             start = raw.find("{")
             end = raw.rfind("}") + 1
             if start >= 0 and end > start:
@@ -98,10 +206,12 @@ class MeetingSummarizer:
         except (json.JSONDecodeError, KeyError):
             pass
 
-        # Fallback: use raw text as summary
         return SummaryResult(content=raw.strip())
 
     def reset(self):
         self.running_summary = ""
+        self.recent_summaries.clear()
+        self.decisions.clear()
+        self.action_items.clear()
         self.pending_utterances.clear()
         self._last_summarized_index = 0

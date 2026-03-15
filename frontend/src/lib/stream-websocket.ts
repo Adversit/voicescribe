@@ -1,40 +1,58 @@
-import type { MeetingUtterance, MeetingSummary } from "../store/meeting-store";
+import type { Utterance, Summary } from "../store/recording-store";
 
-export interface MeetingWSOptions {
+export interface StreamWSOptions {
   engine: string;
   model?: string;
   speakersEnabled: boolean;
   hotwords?: string;
   enableAiRefine?: boolean;
+  enableAiSummary?: boolean;
   summaryInterval?: number;
   llmProvider?: string;
   llmModel?: string;
 }
 
-export interface MeetingWSCallbacks {
-  onStarted: (sessionId: string) => void;
-  onUtterance: (utterance: MeetingUtterance) => void;
+export interface StreamStartedInfo {
+  sessionId: string;
+  speakerBackend: string | null;
+  registeredSpeakers: number;
+}
+
+export interface StreamWSCallbacks {
+  onStarted: (info: StreamStartedInfo) => void;
+  onUtterance: (utterance: Utterance) => void;
   onUtteranceRefined: (id: string, text: string) => void;
   onSpeakerActive: (speaker: string, speakerId: string) => void;
-  onSummary: (summary: MeetingSummary) => void;
-  onSessionEnd: (data: { totalUtterances: number; duration: number; sessionData: unknown }) => void;
+  onSummary: (summary: Summary) => void;
+  onSessionEnd: (data: SessionEndData) => void;
   onError: (message: string) => void;
 }
 
-export class MeetingWebSocket {
+export interface SessionEndData {
+  totalUtterances: number;
+  duration: number;
+  sessionData: unknown;
+}
+
+export class StreamWebSocket {
   private ws: WebSocket | null = null;
-  private callbacks: MeetingWSCallbacks;
+  private callbacks: StreamWSCallbacks;
   private url: string;
+  private pendingFinish: {
+    resolve: (data: SessionEndData) => void;
+    reject: (err: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
 
   constructor(
     backendUrl: string = "ws://127.0.0.1:8765",
-    callbacks: MeetingWSCallbacks
+    callbacks: StreamWSCallbacks
   ) {
-    this.url = `${backendUrl}/meeting`;
+    this.url = `${backendUrl}/stream`;
     this.callbacks = callbacks;
   }
 
-  async connect(options: MeetingWSOptions): Promise<void> {
+  async connect(options: StreamWSOptions): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
 
@@ -47,6 +65,7 @@ export class MeetingWebSocket {
             speakers_enabled: options.speakersEnabled,
             hotwords: options.hotwords || "",
             enable_ai_refine: options.enableAiRefine ?? true,
+            enable_ai_summary: options.enableAiSummary ?? true,
             summary_interval: options.summaryInterval ?? 120,
             llm_provider: options.llmProvider ?? "claude_cli",
             llm_model: options.llmModel ?? "haiku",
@@ -59,7 +78,11 @@ export class MeetingWebSocket {
 
         switch (msg.type) {
           case "started":
-            this.callbacks.onStarted(msg.session_id);
+            this.callbacks.onStarted({
+              sessionId: msg.session_id,
+              speakerBackend: msg.speaker_backend ?? null,
+              registeredSpeakers: msg.registered_speakers ?? 0,
+            });
             resolve();
             break;
 
@@ -97,13 +120,21 @@ export class MeetingWebSocket {
             });
             break;
 
-          case "session_end":
-            this.callbacks.onSessionEnd({
+          case "session_end": {
+            const endData: SessionEndData = {
               totalUtterances: msg.total_utterances,
               duration: msg.duration,
               sessionData: msg.session_data,
-            });
+            };
+            // Resolve pending finish promise if waiting
+            if (this.pendingFinish) {
+              clearTimeout(this.pendingFinish.timeout);
+              this.pendingFinish.resolve(endData);
+              this.pendingFinish = null;
+            }
+            this.callbacks.onSessionEnd(endData);
             break;
+          }
 
           case "error":
             this.callbacks.onError(msg.message);
@@ -112,10 +143,16 @@ export class MeetingWebSocket {
       };
 
       this.ws.onerror = () => {
-        reject(new Error("Meeting WebSocket connection failed"));
+        reject(new Error("Stream WebSocket connection failed"));
       };
 
       this.ws.onclose = () => {
+        // If finish() is pending and ws closed without session_end, reject
+        if (this.pendingFinish) {
+          clearTimeout(this.pendingFinish.timeout);
+          this.pendingFinish.reject(new Error("WebSocket closed before session_end"));
+          this.pendingFinish = null;
+        }
         this.ws = null;
       };
     });
@@ -127,13 +164,28 @@ export class MeetingWebSocket {
     }
   }
 
-  async finish(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ action: "end" }));
+  async finish(timeoutMs = 10000): Promise<SessionEndData> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not connected");
     }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingFinish = null;
+        reject(new Error("Waiting for session_end timed out"));
+      }, timeoutMs);
+
+      this.pendingFinish = { resolve, reject, timeout };
+      this.ws!.send(JSON.stringify({ action: "end" }));
+    });
   }
 
   abort(): void {
+    if (this.pendingFinish) {
+      clearTimeout(this.pendingFinish.timeout);
+      this.pendingFinish.reject(new Error("Stream aborted"));
+      this.pendingFinish = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;

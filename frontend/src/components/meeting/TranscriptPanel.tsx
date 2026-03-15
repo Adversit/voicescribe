@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import type { MeetingUtterance } from "../../store/meeting-store";
+import type { Utterance } from "../../store/recording-store";
 
 const SPEAKER_COLORS = [
   "text-blue-400",
@@ -15,7 +15,7 @@ const SPEAKER_COLORS = [
 ];
 
 interface TranscriptPanelProps {
-  utterances: MeetingUtterance[];
+  utterances: Utterance[];
   activeSpeaker: string | null;
 }
 

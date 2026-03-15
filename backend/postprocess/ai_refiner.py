@@ -29,15 +29,18 @@ class AIRefiner:
         self.timeout = timeout
 
     def should_refine(self, text: str, hotwords: list[str]) -> bool:
-        """Determine if text should be refined. Triggers when hotwords exist."""
-        return len(hotwords) > 0 and len(text.strip()) > 0
+        """Determine if text should be refined."""
+        return len(text.strip()) > 0
 
     async def refine(self, text: str, hotwords: list[str]) -> str:
-        """Refine transcribed text using LLM to correct hotword errors.
+        """Refine transcribed text using LLM.
+
+        When hotwords are provided, corrects ASR errors for those terms.
+        When no hotwords, performs general text cleanup (filler words, typos).
 
         Args:
             text: Transcribed text to refine.
-            hotwords: List of correct terms to match against.
+            hotwords: List of correct terms to match against (can be empty).
 
         Returns:
             Refined text, or original text if refinement fails.
@@ -45,7 +48,10 @@ class AIRefiner:
         if not self.should_refine(text, hotwords):
             return text
 
-        prompt = self._build_hotword_prompt(text, hotwords)
+        if hotwords:
+            prompt = self._build_hotword_prompt(text, hotwords)
+        else:
+            prompt = self._build_cleanup_prompt(text)
 
         try:
             result = await self._call_llm(prompt)
@@ -73,6 +79,14 @@ class AIRefiner:
                 return loop.run_until_complete(self.refine(text, hotwords))
             finally:
                 loop.close()
+
+    def _build_cleanup_prompt(self, text: str) -> str:
+        return (
+            f"请优化以下语音转写文本：去除语气词（嗯、啊、那个等），修正明显错别字，"
+            f"保持原意不变。\n"
+            f"转写文本：{text}\n\n"
+            f"直接输出优化后的文本，不要添加任何解释。"
+        )
 
     def _build_hotword_prompt(self, text: str, hotwords: list[str]) -> str:
         hotword_str = ", ".join(hotwords)
