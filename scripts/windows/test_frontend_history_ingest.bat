@@ -1,0 +1,52 @@
+@echo off
+setlocal
+chcp 65001 >nul 2>&1
+
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_DIR=%%~fI"
+set "FRONTEND_DIR=%REPO_DIR%\frontend"
+set "REPORT_PATH=%REPO_DIR%\logs\system-tests\frontend-history-test-report.json"
+
+if "%~1"=="" (
+    echo [ERROR] Usage: scripts\windows\test_frontend_history_ingest.bat "D:\path\to\input.wav"
+    exit /b 1
+)
+set "WAV_PATH=%~f1"
+
+if not exist "%WAV_PATH%" (
+    echo [ERROR] WAV file not found: %WAV_PATH%
+    exit /b 1
+)
+
+echo ========================================
+echo VoiceScribe Frontend History Ingest Test
+echo ========================================
+echo [INFO] WAV: %WAV_PATH%
+echo [INFO] Report: %REPORT_PATH%
+echo [INFO] This test will drive Electron main process and wait for renderer history write.
+echo [INFO] Backend must already be running.
+echo [INFO] Next dev server must already be running at http://localhost:3000
+echo.
+
+cd /d "%FRONTEND_DIR%"
+call npm run build:electron
+if errorlevel 1 (
+    echo [ERROR] build:electron failed
+    exit /b 1
+)
+
+set "VOICESCRIBE_SKIP_BACKEND=1"
+set "ELECTRON_START_URL=http://localhost:3000"
+set "VOICESCRIBE_TEST_HISTORY_WAV_PATH=%WAV_PATH%"
+set "VOICESCRIBE_TEST_HISTORY_REPORT=%REPORT_PATH%"
+set "VOICESCRIBE_TEST_EXIT_ON_COMPLETE=1"
+
+call npx electron .
+
+if exist "%REPORT_PATH%" (
+    echo.
+    echo [INFO] History test report generated:
+    type "%REPORT_PATH%"
+) else (
+    echo [WARN] History test report was not generated: %REPORT_PATH%
+)

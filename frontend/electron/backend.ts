@@ -10,6 +10,9 @@ import * as path from 'path';
 import FormData from 'form-data';
 
 const BACKEND_URL = process.env.VOICESCRIBE_BACKEND_URL || 'http://127.0.0.1:8765';
+const DEFAULT_TRANSCRIBE_TIMEOUT_MS = Number(
+    process.env.VOICESCRIBE_TRANSCRIBE_TIMEOUT_MS || 3600000,
+);
 
 export interface HealthResponse {
     status: string;
@@ -56,6 +59,9 @@ export interface TranscribeOptions {
     enableDiarization?: boolean;
     hotwords?: string;
     enableAiRefine?: boolean;
+    recordingSessionId?: string;
+    transcribeRequestId?: string;
+    timeoutMs?: number;
 }
 
 export interface Speaker {
@@ -80,7 +86,8 @@ async function request<T>(
     method: string,
     endpoint: string,
     body?: Record<string, unknown> | FormData,
-    timeout: number = 60000
+    timeout: number = 60000,
+    extraHeaders?: Record<string, string>
 ): Promise<T> {
     return new Promise((resolve, reject) => {
         const url = new URL(endpoint, BACKEND_URL);
@@ -100,6 +107,9 @@ async function request<T>(
         } else if (body) {
             (options.headers as Record<string, string>)['Content-Type'] = 'application/json';
         }
+        if (extraHeaders) {
+            Object.assign(options.headers as Record<string, string>, extraHeaders);
+        }
 
         const req = lib.request(options, (res) => {
             let data = '';
@@ -112,7 +122,21 @@ async function request<T>(
                         resolve(data as unknown as T);
                     }
                 } else {
-                    reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+                    let message = `HTTP ${res.statusCode}: ${data}`;
+                    try {
+                        const parsed = JSON.parse(data) as { detail?: unknown };
+                        if (typeof parsed.detail === 'string') {
+                            message = parsed.detail;
+                        } else if (parsed.detail && typeof parsed.detail === 'object') {
+                            const detail = parsed.detail as Record<string, unknown>;
+                            if (typeof detail.message === 'string') {
+                                message = detail.message;
+                            }
+                        }
+                    } catch {
+                        // keep raw payload when response is not JSON
+                    }
+                    reject(new Error(message));
                 }
             });
         });
@@ -177,8 +201,21 @@ export async function transcribe(
     formData.append('enable_diarization', String(options.enableDiarization || false));
     formData.append('hotwords', options.hotwords || '');
     formData.append('enable_ai_refine', String(options.enableAiRefine || false));
+    const headers: Record<string, string> = {};
+    if (options.recordingSessionId) {
+        headers['X-Recording-Session-ID'] = options.recordingSessionId;
+    }
+    if (options.transcribeRequestId) {
+        headers['X-Transcribe-Request-ID'] = options.transcribeRequestId;
+    }
 
-    return request<TranscribeResult>('POST', '/transcribe', formData, 300000);
+    return request<TranscribeResult>(
+        'POST',
+        '/transcribe',
+        formData,
+        options.timeoutMs ?? DEFAULT_TRANSCRIBE_TIMEOUT_MS,
+        headers,
+    );
 }
 
 /**

@@ -1,4 +1,28 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
+import type { HotkeyConfig } from '../src/lib/hotkey-config';
+
+type RuntimeStatus = 'idle' | 'preparing' | 'ready' | 'error';
+
+type RuntimeModelStatus = {
+    asr: {
+        engine: string | null;
+        model: string | null;
+        status: RuntimeStatus;
+        error: string | null;
+    };
+    speakerMapping: {
+        enabled: boolean;
+        model: string | null;
+        status: RuntimeStatus;
+        error: string | null;
+    };
+    streamClustering: {
+        enabled: boolean;
+        backend: string | null;
+        status: RuntimeStatus;
+        error: string | null;
+    };
+};
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('electron', {
@@ -23,6 +47,9 @@ contextBridge.exposeInMainWorld('electron', {
         toggle: () => ipcRenderer.send('toggle-recording'),
         cancel: () => ipcRenderer.send('cancel-recording'),
         getState: () => ipcRenderer.invoke('get-recording-state'),
+        started: (payload?: { requestId?: string }) => ipcRenderer.send('recording-started', payload),
+        startFailed: (payload?: { requestId?: string; error?: string }) =>
+            ipcRenderer.send('recording-start-failed', payload),
         transcribeAudio: (audioBuffer: ArrayBuffer) => ipcRenderer.invoke('transcribe-audio', audioBuffer),
         complete: (text: string) => ipcRenderer.send('recording-complete', text),
         completeWithResult: (payload: { text: string; result?: unknown }) => ipcRenderer.send('recording-complete-result', payload),
@@ -51,6 +78,12 @@ contextBridge.exposeInMainWorld('electron', {
         downloadModel: (engine: string, model: string) => ipcRenderer.invoke('download-model', engine, model),
         deleteModel: (engine: string, model: string) => ipcRenderer.invoke('delete-model', engine, model),
     },
+    runtime: {
+        getModelStatus: () => ipcRenderer.invoke('get-runtime-model-status'),
+        ensureSpeakerMappingReady: () => ipcRenderer.invoke('ensure-speaker-mapping-ready'),
+        ensureStreamClusteringReady: () => ipcRenderer.invoke('ensure-stream-clustering-ready'),
+        ensureSessionRuntimeReady: () => ipcRenderer.invoke('ensure-session-runtime-ready'),
+    },
     // Settings
     settings: {
         get: () => ipcRenderer.invoke('get-settings'),
@@ -72,6 +105,10 @@ contextBridge.exposeInMainWorld('electron', {
             return () => ipcRenderer.removeListener('transcription-complete', subscription);
         },
     },
+    testing: {
+        runFrontendHistoryTest: (filePath: string) =>
+            ipcRenderer.invoke('run-frontend-history-test', filePath),
+    },
 });
 
 // Type declarations for window.electron
@@ -85,8 +122,10 @@ export interface ElectronAPI {
     recording: {
         toggle: () => void;
         cancel: () => void;
-        getState: () => Promise<{ isRecording: boolean; startTime: number | null; isTranscribing?: boolean; cancelled?: boolean; audioLevel?: number }>;
-        transcribeAudio: (audioBuffer: ArrayBuffer) => Promise<{ success: boolean; error?: string }>;
+        getState: () => Promise<{ isPreparing?: boolean; isRecording: boolean; startTime: number | null; isTranscribing?: boolean; cancelled?: boolean; audioLevel?: number }>;
+        started: (payload?: { requestId?: string }) => void;
+        startFailed: (payload?: { requestId?: string; error?: string }) => void;
+        transcribeAudio: (audioBuffer: ArrayBuffer) => Promise<{ success: boolean; error?: string; errorType?: string; userMessage?: string }>;
         complete: (text: string) => void;
         completeWithResult: (payload: { text: string; result?: unknown }) => void;
         error: (error: string) => void;
@@ -94,19 +133,13 @@ export interface ElectronAPI {
         onStateChange: (callback: (state: unknown) => void) => () => void;
     };
     hotkey: {
-        get: () => Promise<{
-            useControl: boolean;
-            useOption: boolean;
-            useShift: boolean;
-            useCommand: boolean;
-            selectedKey: string;
-        }>;
-        update: (config: unknown) => Promise<{ success: boolean; hotkey: string }>;
+        get: () => Promise<HotkeyConfig>;
+        update: (config: HotkeyConfig) => Promise<{ success: boolean; hotkey: string }>;
     };
     backend: {
         checkHealth: () => Promise<{ healthy: boolean; status?: string; engines?: Record<string, boolean>; speaker_model?: string }>;
         getEngines: () => Promise<Array<{ name: string; models: string[]; loaded_model: string | null; available: boolean }>>;
-        loadEngine: (engine: string, model: string) => Promise<{ status: string; error?: string }>;
+        loadEngine: (engine: string, model: string) => Promise<{ status: string; error?: string; runtime?: RuntimeModelStatus }>;
         getSpeakers: () => Promise<Array<{ speaker_id: string; name: string }>>;
         deleteSpeaker: (speakerId: string) => Promise<{ status: string; error?: string }>;
         registerSpeaker: (name: string, audioBuffer: ArrayBuffer) => Promise<{ status: string; speaker_id: string; name: string; error?: string }>;
@@ -114,9 +147,15 @@ export interface ElectronAPI {
         downloadModel: (engine: string, model: string) => Promise<{ status: string; error?: string }>;
         deleteModel: (engine: string, model: string) => Promise<{ status: string; error?: string }>;
     };
+    runtime: {
+        getModelStatus: () => Promise<RuntimeModelStatus>;
+        ensureSpeakerMappingReady: () => Promise<RuntimeModelStatus>;
+        ensureStreamClusteringReady: () => Promise<RuntimeModelStatus>;
+        ensureSessionRuntimeReady: () => Promise<RuntimeModelStatus>;
+    };
     settings: {
         get: () => Promise<{
-            hotkey: { useControl: boolean; useOption: boolean; useShift: boolean; useCommand: boolean; selectedKey: string };
+            hotkey: HotkeyConfig;
             engine: string;
             model: string;
             speakerModel: 'cam++' | 'eres2netv2' | 'eres2net-large';
@@ -127,6 +166,32 @@ export interface ElectronAPI {
             outputFormat: 'clipboard' | 'directInput' | 'both';
             launchAtLogin: boolean;
             enableStreaming: boolean;
+            vadThreshold: number;
+            vadMinSpeechMs: number;
+            vadHangoverMs: number;
+            vadPreRollMs: number;
+            vadMaxSegmentS: number;
+            speakerMatchThreshold: number;
+            activeRegisteredFloorMin: number;
+            activeRegisteredFloorOffset: number;
+            activeRegisteredKeepMargin: number;
+            stableRegisteredFloorOffset: number;
+            stableRegisteredKeepMargin: number;
+            registeredSwitchFloorMin: number;
+            registeredSwitchFloorOffset: number;
+            registeredSwitchMargin: number;
+            spanContinuityFloorMin: number;
+            spanContinuityFloorOffset: number;
+            spanContinuityKeepMargin: number;
+            spanTopFallbackOffset: number;
+            pyannoteWindowS: number;
+            pyannoteHopS: number;
+            pyannoteChangeSimilarity: number;
+            minMultiSpeakerSpanS: number;
+            noiseFilterEnabled: boolean;
+            noiseMaxDurationS: number;
+            noiseRmsThreshold: number;
+            noisePeakThreshold: number;
             vocabulary: string[];
             meetingOutputFormat: 'text_only' | 'with_speakers' | 'with_summary' | 'full';
             llmProvider: 'claude_cli' | 'anthropic_api' | 'custom';
@@ -135,7 +200,7 @@ export interface ElectronAPI {
             customApiKey: string;
             summaryInterval: number;
         }>;
-        update: (partial: Record<string, unknown>) => Promise<{ success: boolean }>;
+        update: (partial: Record<string, unknown>) => Promise<{ success: boolean; runtime?: RuntimeModelStatus }>;
     };
     window: {
         showMain: () => void;
@@ -145,6 +210,15 @@ export interface ElectronAPI {
     };
     transcription: {
         onComplete: (callback: (data: { text: string }) => void) => () => void;
+    };
+    testing: {
+        runFrontendHistoryTest: (filePath: string) => Promise<{
+            duration: number;
+            engine: string;
+            model: string;
+            segmentCount: number;
+            previewLines: string[];
+        }>;
     };
 }
 
