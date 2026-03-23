@@ -35,6 +35,8 @@ runtime/
 
 # Logs
 *.log
+logs/
+frontend/logs/
 
 # Cache
 .cache/
@@ -82,3 +84,9 @@ models/
 # OS
 Thumbs.db
 desktop.ini
+
+# Local test assets
+docs/*.wav
+docs/*.m4a
+artifacts/test-audio/*
+!artifacts/test-audio/.gitkeep

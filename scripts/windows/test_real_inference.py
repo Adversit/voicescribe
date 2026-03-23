@@ -20,7 +20,8 @@ DEFAULT_AUDIO = os.environ.get(
     "VOICESCRIBE_TEST_AUDIO",
     str(
         Path(__file__).resolve().parents[2]
-        / "docs"
+        / "artifacts"
+        / "test-audio"
         / "20260313135647-信通院云大所市场部预定的会议-纯音频-1.m4a"
     ),
 )
