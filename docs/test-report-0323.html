@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceScribe · 测试报告 2026-03-23</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #F6F5F1;
+      --surface:    #FFFFFF;
+      --border:     #E4E2DA;
+      --text:       #1C1C2A;
+      --muted:      #7A7A8C;
+      --pass:       #1A6B42;
+      --pass-bg:    #EBF6F0;
+      --pass-dot:   #2DA05E;
+      --warn:       #8B5800;
+      --warn-bg:    #FEF3DC;
+      --warn-dot:   #D9900A;
+      --block:      #7A3800;
+      --block-bg:   #FEF0E6;
+      --block-dot:  #E07430;
+      --pend:       #3A3A50;
+      --pend-bg:    #F0F0F6;
+      --pend-dot:   #9090B0;
+      --accent:     #C87D2A;
+      --navy:       #1C2B4A;
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0 0 80px;
+    }
+
+    /* ─── HEADER ─── */
+    .header {
+      background: var(--navy);
+      padding: 48px 64px 40px;
+      position: relative;
+      overflow: hidden;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      right: -60px; top: -60px;
+      width: 300px; height: 300px;
+      border-radius: 50%;
+      background: rgba(200,125,42,0.12);
+      pointer-events: none;
+    }
+    .header::after {
+      content: '';
+      position: absolute;
+      right: 80px; top: 80px;
+      width: 150px; height: 150px;
+      border-radius: 50%;
+      background: rgba(200,125,42,0.07);
+      pointer-events: none;
+    }
+    .header-eyebrow {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .header-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 48px;
+      font-weight: 300;
+      color: #FFFFFF;
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+    .header-title span { color: var(--accent); font-weight: 500; }
+    .header-sub {
+      font-size: 15px;
+      color: rgba(255,255,255,0.55);
+      font-weight: 300;
+    }
+    .header-meta {
+      margin-top: 28px;
+      display: flex;
+      gap: 32px;
+    }
+    .header-meta-item { display: flex; flex-direction: column; gap: 3px; }
+    .header-meta-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.35); }
+    .header-meta-value { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.85); }
+
+    /* ─── CONTENT WRAP ─── */
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    /* ─── SECTION TITLE ─── */
+    .section-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 28px;
+      font-weight: 400;
+      color: var(--navy);
+      margin: 56px 0 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-title small {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-left: 12px;
+    }
+
+    /* ─── SUMMARY CARDS ─── */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 40px;
+    }
+    .summary-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .summary-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 12px 12px 0 0;
+    }
+    .summary-card.pass::before  { background: var(--pass-dot); }
+    .summary-card.warn::before  { background: var(--warn-dot); }
+    .summary-card.pend::before  { background: var(--pend-dot); }
+    .summary-num {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 56px;
+      font-weight: 300;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .summary-card.pass .summary-num { color: var(--pass); }
+    .summary-card.warn .summary-num { color: var(--warn); }
+    .summary-card.pend .summary-num { color: var(--pend); }
+    .summary-label { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+    .summary-desc  { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+    /* ─── PROGRESS BAR ─── */
+    .progress-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-top: 16px;
+    }
+    .progress-header {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 14px;
+    }
+    .progress-label { font-size: 13px; font-weight: 500; color: var(--text); }
+    .progress-pct   { font-family: 'Cormorant Garamond', serif; font-size: 22px; color: var(--accent); }
+    .progress-bar-track {
+      height: 8px; background: #EDECE8; border-radius: 4px; overflow: hidden;
+      display: flex; gap: 2px;
+    }
+    .pb-pass  { height: 100%; background: var(--pass-dot);  border-radius: 4px; }
+    .pb-block { height: 100%; background: var(--block-dot); border-radius: 4px; }
+    .pb-pend  { height: 100%; background: var(--pend-dot);  border-radius: 4px; }
+    .progress-legend {
+      display: flex; gap: 20px; margin-top: 10px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .legend-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ─── LAYER CARDS ─── */
+    .layers-grid {
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .layer-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 48px 1fr auto;
+      gap: 0 20px;
+      align-items: start;
+    }
+    .layer-card.expanded { padding-bottom: 0; }
+    .layer-num {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 32px;
+      font-weight: 300;
+      line-height: 1;
+      color: var(--border);
+      padding-top: 2px;
+    }
+    .layer-body { min-width: 0; }
+    .layer-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .layer-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 0;
+    }
+    .layer-findings {
+      margin-top: 14px;
+      padding: 14px 16px;
+      background: var(--bg);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.7;
+      margin-bottom: 20px;
+    }
+    .layer-findings p { margin-bottom: 6px; }
+    .layer-findings p:last-child { margin-bottom: 0; }
+    .layer-findings .fi-item {
+      display: flex; gap: 8px; align-items: flex-start; padding: 3px 0;
+    }
+    .layer-findings .fi-icon { flex-shrink: 0; margin-top: 2px; }
+    .layer-stat {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      padding-top: 4px;
+      text-align: right;
+    }
+    .layer-stat strong {
+      display: block;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      font-weight: 400;
+    }
+
+    /* ─── STATUS BADGE ─── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border-radius: 20px;
+    }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+    .badge.pass    { background: var(--pass-bg);  color: var(--pass);  }
+    .badge.pass    .badge-dot { background: var(--pass-dot); }
+    .badge.blocked { background: var(--block-bg); color: var(--block); }
+    .badge.blocked .badge-dot { background: var(--block-dot); }
+    .badge.pending { background: var(--pend-bg);  color: var(--pend);  }
+    .badge.pending .badge-dot { background: var(--pend-dot); }
+    .badge.warn    { background: var(--warn-bg);  color: var(--warn);  }
+    .badge.warn    .badge-dot { background: var(--warn-dot); }
+
+    /* ─── REAL WORLD FINDINGS ─── */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .finding-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+    }
+    .finding-card.full { grid-column: 1 / -1; }
+    .finding-top {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .finding-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .finding-icon.green { background: var(--pass-bg); }
+    .finding-icon.amber { background: var(--warn-bg); }
+    .finding-title  { font-size: 14px; font-weight: 600; color: var(--text); }
+    .finding-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .finding-body   { font-size: 13px; color: #4A4A5E; line-height: 1.65; }
+    .finding-detail {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: var(--bg);
+      border-radius: 7px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* ─── ISSUES ─── */
+    .issues-list { display: flex; flex-direction: column; gap: 10px; }
+    .issue-row {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      display: flex; gap: 16px; align-items: flex-start;
+    }
+    .issue-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+    .issue-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .issue-body  { font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .issue-tag   {
+      display: inline-block;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 8px; border-radius: 4px;
+      margin-right: 6px; margin-top: 6px;
+    }
+    .tag-fixed   { background: var(--pass-bg);  color: var(--pass); }
+    .tag-ongoing { background: var(--warn-bg);  color: var(--warn); }
+
+    /* ─── NEXT STEPS ─── */
+    .next-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+    .next-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+    }
+    .next-num {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 36px; font-weight: 300; color: var(--border);
+      margin-bottom: 8px; line-height: 1;
+    }
+    .next-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .next-desc  { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+    /* ─── FOOTER ─── */
+    .footer {
+      margin-top: 64px;
+      padding: 24px 0;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* ─── DIVIDER ─── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-eyebrow">质量测试报告</div>
+  <div class="header-title">VoiceScribe<br><span>测试结果总览</span></div>
+  <div class="header-sub">本地语音转录桌面应用 · 面向业务验收</div>
+  <div class="header-meta">
+    <div class="header-meta-item">
+      <span class="header-meta-label">报告日期</span>
+      <span class="header-meta-value">2026-03-23</span>
+    </div>
+    <div class="header-meta-item">
+      <span class="header-meta-label">应用版本</span>
+      <span class="header-meta-value">v0.1.0</span>
+    </div>
+    <div class="header-meta-item">
+      <span class="header-meta-label">测试范围</span>
+      <span class="header-meta-value">6 个验收层级</span>
+    </div>
+    <div class="header-meta-item">
+      <span class="header-meta-label">当前阶段</span>
+      <span class="header-meta-value">基础功能验收</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- SUMMARY -->
+  <div class="section-title">测试总况<small>截至 2026-03-23</small></div>
+
+  <div class="summary-grid">
+    <div class="summary-card pass">
+      <div class="summary-num">3</div>
+      <div class="summary-label">通过</div>
+      <div class="summary-desc">核心服务、实时传输协议、异常处理均已验收通过</div>
+    </div>
+    <div class="summary-card warn">
+      <div class="summary-num">1</div>
+      <div class="summary-label">待完善</div>
+      <div class="summary-desc">真实语音识别质量：连接正常，识别准确性仍需进一步验证</div>
+    </div>
+    <div class="summary-card pend">
+      <div class="summary-num">2</div>
+      <div class="summary-label">待测试</div>
+      <div class="summary-desc">桌面完整流程和长时稳定性测试，等待前置条件完成后启动</div>
+    </div>
+  </div>
+
+  <div class="progress-block">
+    <div class="progress-header">
+      <span class="progress-label">整体验收进度</span>
+      <span class="progress-pct">3 / 6 层已通过</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="pb-pass"  style="width:50%"></div>
+      <div class="pb-block" style="width:16.7%"></div>
+      <div class="pb-pend"  style="width:33.3%"></div>
+    </div>
+    <div class="progress-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--pass-dot)"></div>已通过</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--block-dot)"></div>待完善</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--pend-dot)"></div>未测试</div>
+    </div>
+  </div>
+
+  <!-- LAYER DETAILS -->
+  <div class="section-title">分项测试详情<small>共 6 个验收层级</small></div>
+  <div class="layers-grid">
+
+    <!-- L1 -->
+    <div class="layer-card">
+      <div class="layer-num">1</div>
+      <div class="layer-body">
+        <div class="layer-name">
+          核心服务稳定性
+          <span class="badge pass"><span class="badge-dot"></span>通过</span>
+        </div>
+        <div class="layer-desc">验证应用的所有基础功能是否正常开放，包括：健康状态查询、引擎列表、模型信息、转录请求、说话人管理等</div>
+        <div class="layer-findings">
+          <div class="fi-item"><span class="fi-icon">✅</span><span>所有功能入口均可正常访问，无一失败</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>空文件、损坏文件、无声音频等边界输入，均返回了清晰的错误提示，不会导致程序崩溃</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>共执行 84 项检查，全部通过</span></div>
+        </div>
+      </div>
+      <div class="layer-stat"><strong>84</strong>项全通</div>
+    </div>
+
+    <!-- L2 -->
+    <div class="layer-card">
+      <div class="layer-num">2</div>
+      <div class="layer-body">
+        <div class="layer-name">
+          实时传输协议
+          <span class="badge pass"><span class="badge-dot"></span>通过</span>
+        </div>
+        <div class="layer-desc">验证实时语音流传输的连接建立、数据传输、正常结束与异常恢复等各环节是否可靠</div>
+        <div class="layer-findings">
+          <div class="fi-item"><span class="fi-icon">✅</span><span>开始、传输、结束整个流程流转正常，事件顺序符合预期</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>同时进行两路转录互不干扰</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>发送非法数据不会导致程序卡死或崩溃</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>修复了一个曾导致程序挂起的问题（VS-TEST-001），修复后 17 项全部通过</span></div>
+        </div>
+      </div>
+      <div class="layer-stat"><strong>17</strong>项全通</div>
+    </div>
+
+    <!-- L3 -->
+    <div class="layer-card">
+      <div class="layer-num">3</div>
+      <div class="layer-body">
+        <div class="layer-name">
+          特殊情况处理
+          <span class="badge pass"><span class="badge-dot"></span>通过</span>
+        </div>
+        <div class="layer-desc">验证各种特殊的音频输入（极短、极小、格式异常等）以及异常参数是否能被稳定处理，不崩溃、不挂死</div>
+        <div class="layer-findings">
+          <div class="fi-item"><span class="fi-icon">✅</span><span>空文件、非标准格式、静音片段均可正常处理并给出反馈</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>极短片段、超小数据块不再导致程序卡住（修复了 VS-TEST-002）</span></div>
+          <div class="fi-item"><span class="fi-icon">✅</span><span>共 18 项边界检查全部通过</span></div>
+        </div>
+      </div>
+      <div class="layer-stat"><strong>18</strong>项全通</div>
+    </div>
+
+    <!-- L5 -->
+    <div class="layer-card">
+      <div class="layer-num">5</div>
+      <div class="layer-body">
+        <div class="layer-name">
+          真实语音识别质量
+          <span class="badge blocked"><span class="badge-dot"></span>待完善</span>
+        </div>
+        <div class="layer-desc">在真实设备、真实语音样本下，验证识别文字是否准确、说话人是否判断正确、结果响应速度是否达标</div>
+        <div class="layer-findings">
+          <div class="fi-item"><span class="fi-icon">✅</span><span>已测试 12 种引擎与说话人模型组合，连接和返回结果均正常</span></div>
+          <div class="fi-item"><span class="fi-icon">⚠️</span><span>目前尚未建立"标准参考文本"，无法客观比对识别准确性是否达标</span></div>
+          <div class="fi-item"><span class="fi-icon">⏳</span><span>下一步：建立参考文本基准，再对识别结果做逐字比对验收</span></div>
+        </div>
+      </div>
+      <div class="layer-stat" style="color:var(--block)"><strong>待补</strong>准确性基准</div>
+    </div>
+
+    <!-- L6 -->
+    <div class="layer-card">
+      <div class="layer-num">6</div>
+      <div class="layer-body">
+        <div class="layer-name">
+          桌面应用完整流程
+          <span class="badge pending"><span class="badge-dot"></span>未开始</span>
+        </div>
+        <div class="layer-desc">在真实桌面环境中，测试从按下快捷键到看到转录结果的完整用户体验：快捷键、悬浮窗、历史记录、说话人标签、AI 摘要等</div>
+        <div class="layer-findings">
+          <div class="fi-item"><span class="fi-icon">📋</span><span>已规划 23 个配置验证场景（C-01 到 C-23）和 9 个主要业务场景</span></div>
+          <div class="fi-item"><span class="fi-icon">⏳</span><span>等待第 5 项（真实语音质量）验收通过后启动</span></div>
+        </div>
+      </div>
+      <div class="layer-stat" style="color:var(--pend)"><strong>待启动</strong></div>
+    </div>
+
+    <!-- L7 -->
+    <div class="layer-card">
+      <div class="layer-num">7</div>
+      <div class="layer-body">
+        <div class="layer-name">
+          长时间稳定性
+          <span class="badge pending"><span class="badge-dot"></span>未开始</span>
+        </div>
+        <div class="layer-desc">持续录音 2 小时以上，验证程序是否稳定运行、内存是否正常、说话人数量是否不会异常增长</div>
+        <div class="layer-findings">
+          <div class="fi-item"><span class="fi-icon">📋</span><span>已规划 5 个阶梯压力场景（S1 到 S5），从短时到全量 2 小时</span></div>
+          <div class="fi-item"><span class="fi-icon">⏳</span><span>等待前置层级全部通过后执行</span></div>
+        </div>
+      </div>
+      <div class="layer-stat" style="color:var(--pend)"><strong>待启动</strong></div>
+    </div>
+
+  </div>
+
+  <!-- REAL WORLD FINDINGS -->
+  <div class="section-title">真实使用补充验证<small>用户自测 · 2026-03-23</small></div>
+
+  <div class="findings-grid">
+    <div class="finding-card">
+      <div class="finding-top">
+        <div class="finding-icon green">🎙️</div>
+        <div>
+          <div class="finding-title">文件上传转录</div>
+          <div class="finding-status">✅ 功能可用</div>
+        </div>
+      </div>
+      <div class="finding-body">上传约 10 分钟的会议录音，可以完成完整转录，并成功将声音映射到已注册的真实说话人姓名。</div>
+      <div class="finding-detail">测试样本时长：约 643 秒（~10.7 分钟）</div>
+    </div>
+
+    <div class="finding-card">
+      <div class="finding-top">
+        <div class="finding-icon green">👥</div>
+        <div>
+          <div class="finding-title">实时转录 · 说话人展示</div>
+          <div class="finding-status">✅ 功能可用</div>
+        </div>
+      </div>
+      <div class="finding-body">实时录音约 3.7 分钟，说话人识别功能正常显示，已能识别出"连云波"、"江争达"等已注册说话人，以及新说话人占位。</div>
+      <div class="finding-detail">测试时间：2026-03-23 12:04 · 引擎：FunASR seaco-paraformer</div>
+    </div>
+
+    <div class="finding-card full">
+      <div class="finding-top">
+        <div class="finding-icon amber">📝</div>
+        <div>
+          <div class="finding-title">实时转录 · 文字识别质量</div>
+          <div class="finding-status">⚠️ 仍需优化</div>
+        </div>
+      </div>
+      <div class="finding-body">实时转录的文字结果中，存在明显的识别错误——部分词语被误识别，一些专业术语和人名出现失真。对于会议记录的使用场景，当前文字质量需要进一步提升才能满足正式使用需求。</div>
+      <div class="finding-detail">这是当前阶段已知的重点优化方向，不影响连接稳定性和说话人显示功能的可用性。</div>
+    </div>
+  </div>
+
+  <!-- KNOWN ISSUES -->
+  <div class="section-title">已知问题<small>全部在册，无遗漏</small></div>
+
+  <div class="issues-list">
+    <div class="issue-row">
+      <div class="issue-icon">✅</div>
+      <div>
+        <div class="issue-title">实时传输在特定情况下程序卡住</div>
+        <div class="issue-body">收到语音数据后，程序在等待返回结果时会无响应，导致本次录音无法完成。</div>
+        <span class="issue-tag tag-fixed">已修复</span><span style="font-size:12px;color:var(--muted)">本次测试已确认不再复现</span>
+      </div>
+    </div>
+
+    <div class="issue-row">
+      <div class="issue-icon">✅</div>
+      <div>
+        <div class="issue-title">发送极短或格式特殊的音频片段导致程序挂起</div>
+        <div class="issue-body">当传入极短（不足 20 毫秒）或字节数为奇数的音频片段时，程序会停止响应。</div>
+        <span class="issue-tag tag-fixed">已修复</span><span style="font-size:12px;color:var(--muted)">修复后 18 项边界测试全部通过</span>
+      </div>
+    </div>
+
+    <div class="issue-row">
+      <div class="issue-icon">⚠️</div>
+      <div>
+        <div class="issue-title">实时转录文字准确性尚未经过客观验收</div>
+        <div class="issue-body">连接和传输已正常，但目前没有"标准答案"可供比对，无法判断识别结果是否达到可用标准。结合用户实测，当前文字质量存在明显错误。</div>
+        <span class="issue-tag tag-ongoing">处理中</span><span style="font-size:12px;color:var(--muted)">需建立参考文本基准后重新验收</span>
+      </div>
+    </div>
+
+    <div class="issue-row">
+      <div class="issue-icon">⚠️</div>
+      <div>
+        <div class="issue-title">长时间录音 + 说话人实名映射尚未完整验证</div>
+        <div class="issue-body">超长录音文件的后端处理已有正向验证，但在正式系统中历史记录是否稳定落库、说话人是否稳定映射到真实姓名，仍需更多验证。</div>
+        <span class="issue-tag tag-ongoing">验证中</span><span style="font-size:12px;color:var(--muted)">需通过正式入口做更多样本测试</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEXT STEPS -->
+  <div class="section-title">下一步计划</div>
+
+  <div class="next-grid">
+    <div class="next-card">
+      <div class="next-num">01</div>
+      <div class="next-title">建立识别质量基准</div>
+      <div class="next-desc">准备一段有"标准答案"的参考录音，用于客观衡量识别准确率，完成第 5 层验收。</div>
+    </div>
+    <div class="next-card">
+      <div class="next-num">02</div>
+      <div class="next-title">启动桌面完整流程测试</div>
+      <div class="next-desc">在真实桌面环境中，按照 23 个配置场景和 9 个业务场景，逐项验收用户体验。</div>
+    </div>
+    <div class="next-card">
+      <div class="next-num">03</div>
+      <div class="next-title">执行 2 小时长时稳定性测试</div>
+      <div class="next-desc">验证长时间录音场景下程序不崩溃、不丢失内容、说话人识别保持稳定。</div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<div class="wrap">
+  <div class="footer">
+    VoiceScribe 测试报告 · 2026-03-23 · 本报告面向非技术人员，所有技术细节已做适当翻译。
+  </div>
+</div>
+
+</body>
+</html>
