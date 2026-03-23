@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import wave
+import logging
+import os
 from typing import Any, Dict
 
 from diarization.speaker_models import (
+    normalize_speaker_model_name,
     resolve_local_model_path,
     resolve_speaker_model_for_load,
 )
@@ -24,18 +28,35 @@ class FunASREngine:
         "fsmn-vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "ct-punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
     }
+    MODEL_REVISIONS = {
+        "asr": "v2.0.4",
+        "vad": "v2.0.4",
+        "punc": "v2.0.4",
+        "spk": "v2.0.2",
+    }
 
     def __init__(self):
         self.model = None
         self.model_name = None
         self.enable_diarization = False
+        self.speaker_model_name = "cam++"
+        self.logger = logging.getLogger("engines.funasr_engine")
+
+    @staticmethod
+    def _debug_logs_enabled() -> bool:
+        return os.environ.get("VOICESCRIBE_DEBUG_LOGS") == "1"
 
     def _resolve_resource(self, resource: str) -> str:
         """Resolve a FunASR resource ID to a local cache path when available."""
         model_id = self.RESOURCE_ALIASES.get(resource, resource)
         return resolve_local_model_path(model_id)
 
-    def load(self, model_name: str = "paraformer-zh", enable_diarization: bool = False):
+    def load(
+        self,
+        model_name: str = "paraformer-zh",
+        enable_diarization: bool = False,
+        speaker_model_name: str = "cam++",
+    ):
         """Load the selected FunASR model."""
         if model_name not in self.MODELS:
             raise ValueError(
@@ -46,21 +67,30 @@ class FunASREngine:
 
         model_target = self._resolve_resource(self.MODELS[model_name])
         device = self._get_device()
-        print(f"[FunASR] Using device: {device}")
-        print(f"[FunASR] Loading model from: {model_target}")
+        self.logger.info(
+            "[FunASR] Loading model '%s' (device=%s, diarization=%s)",
+            model_name,
+            device,
+            "on" if enable_diarization else "off",
+        )
+        if self._debug_logs_enabled():
+            self.logger.info("[FunASR] Model path: %s", model_target)
 
         self.enable_diarization = enable_diarization
+        self.speaker_model_name = normalize_speaker_model_name(speaker_model_name)
 
         diarization_kwargs: dict[str, object] = {}
         if enable_diarization:
-            _, spk_model_target = resolve_speaker_model_for_load("cam++")
+            _, spk_model_target = resolve_speaker_model_for_load(self.speaker_model_name)
             diarization_kwargs = {
                 "spk_model": spk_model_target,
+                "spk_model_revision": self.MODEL_REVISIONS["spk"],
                 "spk_mode": "punc_segment",
             }
 
         common_kwargs = {
             "model": model_target,
+            "model_revision": self.MODEL_REVISIONS["asr"],
             "device": device,
             "disable_update": True,
             **diarization_kwargs,
@@ -69,29 +99,32 @@ class FunASREngine:
         if model_name == "sensevoice-small":
             self.model = AutoModel(
                 vad_model=self._resolve_resource("fsmn-vad"),
+                vad_model_revision=self.MODEL_REVISIONS["vad"],
                 vad_kwargs={"max_single_segment_time": 30000},
                 **common_kwargs,
             )
         elif model_name == "seaco-paraformer":
             self.model = AutoModel(
-                model_revision="v2.0.4",
                 vad_model=self._resolve_resource("fsmn-vad"),
+                vad_model_revision=self.MODEL_REVISIONS["vad"],
                 punc_model=self._resolve_resource("ct-punc"),
+                punc_model_revision=self.MODEL_REVISIONS["punc"],
                 **common_kwargs,
             )
         else:
             self.model = AutoModel(
-                model_revision="v2.0.4",
                 vad_model=self._resolve_resource("fsmn-vad"),
+                vad_model_revision=self.MODEL_REVISIONS["vad"],
                 punc_model=self._resolve_resource("ct-punc"),
+                punc_model_revision=self.MODEL_REVISIONS["punc"],
                 **common_kwargs,
             )
 
         self.model_name = model_name
         if enable_diarization:
-            print(f"[FunASR] Loaded model with diarization: {model_name}")
+            self.logger.info("[FunASR] Loaded model with diarization: %s", model_name)
         else:
-            print(f"[FunASR] Loaded model: {model_name}")
+            self.logger.info("[FunASR] Loaded model: %s", model_name)
 
     def _get_device(self) -> str:
         """Prefer CUDA, then MPS, then CPU."""
@@ -124,6 +157,16 @@ class FunASREngine:
         )
         return text.strip()
 
+    @staticmethod
+    def _probe_audio_duration(audio_path: str) -> float:
+        try:
+            with wave.open(audio_path, "rb") as wf:
+                sample_rate = wf.getframerate()
+                frames = wf.getnframes()
+            return frames / float(sample_rate or 1)
+        except Exception:
+            return 0.0
+
     def transcribe(
         self,
         audio_path: str,
@@ -139,7 +182,8 @@ class FunASREngine:
         if hotwords:
             parts = [part.strip() for part in hotwords.split(",") if part.strip()]
             hotword_str = " ".join(parts)
-            print(f"[FunASR] Hotwords: {hotword_str}")
+            if self._debug_logs_enabled():
+                self.logger.info("[FunASR] Hotwords: %s", hotword_str)
 
         result = self.model.generate(
             input=audio_path,
@@ -155,6 +199,8 @@ class FunASREngine:
 
         segments = []
         sentences = output.get("sentence_info", [])
+        sentence_count = len(sentences) if isinstance(sentences, list) else 0
+        speaker_sentence_count = 0
         if sentences:
             for sent in sentences:
                 speaker = None
@@ -163,6 +209,8 @@ class FunASREngine:
                         speaker = f"SPEAKER_{int(sent.get('spk', 0)):02d}"
                     except Exception:
                         speaker = None
+                if speaker:
+                    speaker_sentence_count += 1
 
                 segment = {
                     "start": sent.get("start", 0) / 1000,
@@ -174,6 +222,25 @@ class FunASREngine:
                 segments.append(segment)
 
         duration = segments[-1]["end"] if segments else 0
+        if text and duration <= 0:
+            duration = self._probe_audio_duration(audio_path)
+        output_keys = sorted(output.keys()) if isinstance(output, dict) else []
+        first_sentence_keys = (
+            sorted(sentences[0].keys())
+            if sentence_count > 0 and isinstance(sentences[0], dict)
+            else []
+        )
+        self.logger.info(
+            "[FunASR] Transcribe result summary: model=%s text_len=%s output_keys=%s sentence_info_count=%s speaker_sentence_count=%s segment_count=%s first_sentence_keys=%s duration=%s",
+            self.model_name,
+            len(text),
+            output_keys,
+            sentence_count,
+            speaker_sentence_count,
+            len(segments),
+            first_sentence_keys,
+            round(float(duration or 0), 3),
+        )
         return {
             "text": text,
             "segments": segments,
