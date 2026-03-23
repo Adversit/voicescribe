@@ -1,6 +1,7 @@
 """Speaker diarization and recognition built on FunASR speaker models."""
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +12,7 @@ import soundfile as sf
 
 from diarization.speaker_models import (
     normalize_speaker_model_name,
+    get_speaker_model_candidates,
     resolve_local_model_path,
     resolve_speaker_model_for_load,
 )
@@ -28,13 +30,21 @@ class SpeakerDiarizer:
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.diarization_model = None
+        self.diarization_model_backend: Optional[str] = None
+        self.diarization_model_id: Optional[str] = None
+        self.diarization_candidates: List[str] = []
         self.sv_model = None
         self.sv_model_name = normalize_speaker_model_name(
             sv_model_name or os.environ.get("VOICESCRIBE_SPK_MODEL")
         )
         self.speakers: Dict[str, Dict[str, Any]] = {}
+        self.logger = logging.getLogger("diarization.speaker")
 
         self._load_speakers()
+
+    @staticmethod
+    def _debug_logs_enabled() -> bool:
+        return os.environ.get("VOICESCRIBE_DEBUG_LOGS") == "1"
 
     def _load_speakers_payload(self, speakers_file: Path) -> dict:
         encodings = ["utf-8", "utf-8-sig", "gb18030", "gbk"]
@@ -102,14 +112,44 @@ class SpeakerDiarizer:
                 "Speaker diarization requires funasr. Install with: pip install funasr"
             ) from exc
 
-        self.sv_model_name, sv_path = resolve_speaker_model_for_load(self.sv_model_name)
-        print(
-            f"[Speaker] Loading speaker verification model [{self.sv_model_name}] from {sv_path}..."
-        )
-        self.sv_model = AutoModel(model=sv_path, disable_update=True)
-        print("[Speaker] Speaker verification model loaded")
+        self.sv_model_name = resolve_speaker_model_for_load(self.sv_model_name)[0]
+        sv_candidates = get_speaker_model_candidates(self.sv_model_name)
+        sv_loaded = False
+        for candidate in sv_candidates:
+            try:
+                resolved = resolve_local_model_path(candidate)
+                self.logger.info(
+                    "[Speaker] Loading speaker verification model [%s]",
+                    self.sv_model_name,
+                )
+                if self._debug_logs_enabled():
+                    self.logger.info("[Speaker] SV model path: %s", resolved)
+                self.sv_model = AutoModel(model=resolved, disable_update=True)
+                sv_loaded = True
+                break
+            except Exception as exc:
+                self.logger.warning(
+                    "[Speaker] SV model candidate failed (%s): %s",
+                    candidate,
+                    exc,
+                )
+                self.sv_model = None
+        if not sv_loaded:
+            raise RuntimeError(
+                f"Failed to load speaker verification model '{self.sv_model_name}'. "
+                f"Tried: {sv_candidates}"
+            )
+        self.logger.info("[Speaker] Speaker verification model loaded")
 
         if load_diarization:
+            try:
+                from modelscope.pipelines import pipeline as ms_pipeline
+                from modelscope.utils.constant import Tasks as ms_tasks
+            except ImportError as exc:
+                raise ImportError(
+                    "Offline diarization requires modelscope. Install backend requirements first."
+                ) from exc
+
             diarization_candidates = []
             override = os.environ.get("VOICESCRIBE_DIARIZATION_MODEL")
             if override:
@@ -120,19 +160,104 @@ class SpeakerDiarizer:
                     "damo/speech_diarization_sond-zh-cn-alimeeting-16k-n16k4-pytorch",
                 ]
             )
+            self.diarization_candidates = diarization_candidates
 
             for model_id in diarization_candidates:
                 try:
-                    resolved = resolve_local_model_path(model_id)
-                    print(f"[Speaker] Loading diarization model: {resolved}...")
-                    self.diarization_model = AutoModel(model=resolved, disable_update=True)
-                    print(f"[Speaker] Diarization model loaded: {model_id}")
+                    self._load_modelscope_diarization_pipeline(
+                        ms_pipeline,
+                        ms_tasks,
+                        model_id,
+                    )
                     break
                 except Exception as exc:
-                    print(f"[Speaker] Diarization model failed to load ({model_id}): {exc}")
+                    self.logger.warning(
+                        "[Speaker] Diarization model failed to load (%s): %s",
+                        model_id,
+                        exc,
+                    )
                     self.diarization_model = None
+                    self.diarization_model_backend = None
+                    self.diarization_model_id = None
 
-        print("[Speaker] FunASR speaker models ready")
+        self.logger.info("[Speaker] Speaker models ready")
+
+    def _load_modelscope_diarization_pipeline(self, ms_pipeline, ms_tasks, model_id: str):
+        resolved = resolve_local_model_path(model_id)
+        self.logger.info(
+            "[Speaker] Loading offline diarization pipeline [%s] via ModelScope",
+            model_id,
+        )
+        if self._debug_logs_enabled():
+            self.logger.info("[Speaker] Diarization model path: %s", resolved)
+        self.diarization_model = ms_pipeline(
+            task=ms_tasks.speaker_diarization,
+            model=resolved,
+        )
+        self.diarization_model_backend = "modelscope_pipeline"
+        self.diarization_model_id = model_id
+        self.logger.info("[Speaker] Diarization model loaded: %s", model_id)
+
+    @staticmethod
+    def _normalize_speaker_label(speaker: Any) -> str:
+        if isinstance(speaker, (int, float)):
+            return f"SPEAKER_{int(speaker):02d}"
+        label = str(speaker)
+        if label.isdigit():
+            return f"SPEAKER_{int(label):02d}"
+        lowered = label.lower()
+        if lowered.startswith("speaker_"):
+            suffix = lowered.split("_", 1)[1]
+            if suffix.isdigit():
+                return f"SPEAKER_{int(suffix):02d}"
+        return label
+
+    def _normalize_diarization_items(self, diarization_items: Any) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        if isinstance(diarization_items, list):
+            for item in diarization_items:
+                if len(item) >= 3:
+                    results.append(
+                        {
+                            "start": float(item[0]),
+                            "end": float(item[1]),
+                            "speaker": self._normalize_speaker_label(item[2]),
+                        }
+                    )
+        return results
+
+    def _run_modelscope_diarization(self, audio_path: str) -> List[Dict[str, Any]]:
+        try:
+            result = self.diarization_model(audio_path)
+        except AssertionError as exc:
+            if "effective audio duration is too short" in str(exc).lower():
+                duration = 0.0
+                try:
+                    info = sf.info(audio_path)
+                    duration = float(getattr(info, "duration", 0.0) or 0.0)
+                except Exception:
+                    pass
+                self.logger.warning(
+                    "[Speaker] Diarization audio too short for offline pipeline, preserving single-speaker fallback span"
+                )
+                return [
+                    {
+                        "start": 0.0,
+                        "end": duration if duration > 0.0 else 9999.0,
+                        "speaker": "SPEAKER_00",
+                    }
+                ]
+            raise
+        diarization_items = result.get("text", []) if isinstance(result, dict) else []
+        normalized = self._normalize_diarization_items(diarization_items)
+        unique_speakers = sorted({item["speaker"] for item in normalized})
+        self.logger.info(
+            "[Speaker] Raw diarization result: spans=%s unique_speakers=%s labels=%s",
+            len(normalized),
+            len(unique_speakers),
+            unique_speakers,
+        )
+        return normalized
 
     def _read_audio_mono(self, audio_path: str) -> tuple[np.ndarray, int]:
         data, sample_rate = sf.read(audio_path)
@@ -176,22 +301,65 @@ class SpeakerDiarizer:
 
     def diarize(self, audio_path: str) -> List[Dict[str, Any]]:
         if self.diarization_model is None:
-            print("[Speaker] No diarization model, assuming single speaker")
+            self.logger.warning("[Speaker] No diarization model, assuming single speaker")
             return [{"start": 0.0, "end": 9999.0, "speaker": "SPEAKER_00"}]
 
-        result = self.diarization_model.generate(audio_path)
-        results: List[Dict[str, Any]] = []
-        if isinstance(result, list):
-            for item in result:
-                if len(item) >= 3:
-                    results.append(
-                        {
-                            "start": float(item[0]),
-                            "end": float(item[1]),
-                            "speaker": str(item[2]),
-                        }
-                    )
-        return results
+        if self.diarization_model_backend == "modelscope_pipeline":
+            results = self._run_modelscope_diarization(audio_path)
+            unique_speakers = {item["speaker"] for item in results}
+            if len(unique_speakers) <= 1:
+                current_id = self.diarization_model_id
+                fallback_candidates = [
+                    candidate for candidate in self.diarization_candidates if candidate != current_id
+                ]
+                if fallback_candidates:
+                    try:
+                        from modelscope.pipelines import pipeline as ms_pipeline
+                        from modelscope.utils.constant import Tasks as ms_tasks
+
+                        for candidate in fallback_candidates:
+                            self.logger.info(
+                                "[Speaker] Primary diarization model [%s] produced %s speaker(s); trying fallback [%s]...",
+                                current_id,
+                                len(unique_speakers),
+                                candidate,
+                            )
+                            original_model = self.diarization_model
+                            original_backend = self.diarization_model_backend
+                            original_id = self.diarization_model_id
+                            try:
+                                self._load_modelscope_diarization_pipeline(
+                                    ms_pipeline,
+                                    ms_tasks,
+                                    candidate,
+                                )
+                                fallback_results = self._run_modelscope_diarization(audio_path)
+                                fallback_unique = {item["speaker"] for item in fallback_results}
+                                if len(fallback_unique) > len(unique_speakers):
+                                    self.logger.info(
+                                        "[Speaker] Using fallback diarization model [%s] with %s speaker(s)",
+                                        candidate,
+                                        len(fallback_unique),
+                                    )
+                                    return fallback_results
+                            except Exception as exc:
+                                self.logger.warning(
+                                    "[Speaker] Fallback diarization model failed (%s): %s",
+                                    candidate,
+                                    exc,
+                                )
+                            self.diarization_model = original_model
+                            self.diarization_model_backend = original_backend
+                            self.diarization_model_id = original_id
+                    except Exception as exc:
+                        self.logger.warning(
+                            "[Speaker] Could not evaluate fallback diarization models: %s",
+                            exc,
+                        )
+            return results
+
+        diarization_items = self.diarization_model.generate(audio_path)
+        return self._normalize_diarization_items(diarization_items)
 
     def extract_embedding(self, audio_path: str) -> np.ndarray:
         if self.sv_model is None:
@@ -246,7 +414,7 @@ class SpeakerDiarizer:
         np.save(self.data_dir / f"{speaker_id}.npy", embedding)
         self._save_speakers()
 
-        print(f"[Speaker] Registered: {name} ({speaker_id}), embedding shape: {embedding.shape}")
+        self.logger.info("[Speaker] Registered: %s (%s)", name, speaker_id)
         return speaker_id
 
     def delete_speaker(self, speaker_id: str) -> bool:
@@ -261,7 +429,7 @@ class SpeakerDiarizer:
                 target.unlink()
 
         self._save_speakers()
-        print(f"[Speaker] Deleted: {speaker_id}")
+        self.logger.info("[Speaker] Deleted: %s", speaker_id)
         return True
 
     def identify_speaker(
@@ -291,7 +459,12 @@ class SpeakerDiarizer:
                 best_match = speaker_id
 
         if best_match:
-            print(f"[Speaker] Identified: {best_match} (score: {best_score:.3f})")
+            if self._debug_logs_enabled():
+                self.logger.info(
+                    "[Speaker] Identified: %s (score: %.3f)",
+                    best_match,
+                    best_score,
+                )
         return best_match
 
     def _collect_segment_overlaps(
@@ -416,7 +589,7 @@ class SpeakerDiarizer:
                         if matched_id:
                             matched_name = self.speakers[matched_id].get("name", matched_id)
                             speaker_mapping[label] = matched_name
-                            print(f"[Speaker] Matched {label} -> {matched_name}")
+                            self.logger.info("[Speaker] Matched %s -> %s", label, matched_name)
                 else:
                     embedding = self.extract_embedding(audio_path)
                     matched_id = self.identify_speaker(embedding)
@@ -424,15 +597,82 @@ class SpeakerDiarizer:
                         matched_name = self.speakers[matched_id].get("name", matched_id)
                         for diar_item in diarization:
                             speaker_mapping[diar_item["speaker"]] = matched_name
-                        print(f"[Speaker] Matched: {matched_name}")
+                        self.logger.info("[Speaker] Matched: %s", matched_name)
             except Exception as exc:
-                print(f"[Speaker] Embedding extraction failed: {exc}")
+                self.logger.warning("[Speaker] Embedding extraction failed: %s", exc)
 
         original_text = transcription.get("text", "")
+        self.logger.info(
+            "[Speaker] assign_speakers input: diarization_spans=%s mapped_speakers=%s asr_segments=%s",
+            len(diarization),
+            len(speaker_mapping),
+            len(segments),
+        )
         if not segments and original_text:
-            if speaker_mapping:
-                speaker_name = list(speaker_mapping.values())[0]
-                transcription["text"] = f"[{speaker_name}] {original_text}"
+            normalized_diarization: List[Dict[str, Any]] = []
+            for diar_item in diarization:
+                speaker_name = speaker_mapping.get(
+                    diar_item["speaker"],
+                    self._normalize_speaker_label(diar_item["speaker"]),
+                )
+                normalized_diarization.append(
+                    {
+                        "speaker": speaker_name,
+                        "start": float(diar_item["start"]),
+                        "end": float(diar_item["end"]),
+                    }
+                )
+
+            if len({item["speaker"] for item in normalized_diarization}) > 1:
+                span_start = min(item["start"] for item in normalized_diarization)
+                span_end = max(item["end"] for item in normalized_diarization)
+                overlaps = self._collect_segment_overlaps(
+                    {"start": span_start, "end": span_end, "text": original_text},
+                    normalized_diarization,
+                )
+                split_segments = self._split_text_by_overlaps(original_text, overlaps)
+                if split_segments:
+                    transcription["segments"] = split_segments
+                    transcription["text"] = "\n".join(
+                        f"[{segment['speaker']}] {segment['text']}" for segment in split_segments
+                    )
+                    self.logger.info(
+                        "[Speaker] assign_speakers output: generated_segments=%s grouped_text_lines=%s",
+                        len(split_segments),
+                        len(split_segments),
+                    )
+                    return transcription
+
+            primary_speaker = (
+                normalized_diarization[0]["speaker"]
+                if normalized_diarization
+                else (list(speaker_mapping.values())[0] if speaker_mapping else "SPEAKER_00")
+            )
+            primary_start = (
+                min(float(item["start"]) for item in normalized_diarization)
+                if normalized_diarization
+                else 0.0
+            )
+            primary_end = (
+                max(float(item["end"]) for item in normalized_diarization)
+                if normalized_diarization
+                else float(transcription.get("duration", 0.0) or 0.0)
+            )
+            if primary_end <= primary_start:
+                primary_end = max(primary_start, float(transcription.get("duration", 0.0) or 0.0))
+
+            transcription["segments"] = [
+                {
+                    "start": primary_start,
+                    "end": primary_end,
+                    "speaker": primary_speaker,
+                    "text": original_text,
+                }
+            ]
+            transcription["text"] = f"[{primary_speaker}] {original_text}"
+            self.logger.info(
+                "[Speaker] assign_speakers output: single-speaker fallback segment preserved"
+            )
             return transcription
 
         rebuilt_segments: List[Dict[str, Any]] = []
@@ -484,6 +724,11 @@ class SpeakerDiarizer:
             lines.append(f"[{current_speaker}] {' '.join(current_text)}")
 
         transcription["text"] = "\n".join(lines) if lines else original_text
+        self.logger.info(
+            "[Speaker] assign_speakers output: final_segments=%s final_lines=%s",
+            len(rebuilt_segments),
+            len(lines),
+        )
         return transcription
 
     def get_speaker_audio_path(self, speaker_id: str) -> Optional[str]:

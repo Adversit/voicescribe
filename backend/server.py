@@ -15,6 +15,7 @@ VoiceScribe Backend Server
 
 import os
 import sys
+from contextlib import asynccontextmanager
 
 # Load .env file (HF_TOKEN, VOICESCRIBE_MODEL_DIR, etc.)
 from dotenv import load_dotenv
@@ -47,6 +48,7 @@ import shutil
 import json
 import wave
 import logging
+import time
 
 import numpy as np
 
@@ -62,20 +64,36 @@ from diarization.speaker_models import (
     normalize_speaker_model_name,
     speaker_model_relative_dirs,
 )
+from telemetry import (
+    classify_http_error_detail,
+    classify_transcribe_error,
+    emit_event,
+    generate_id,
+    probe_audio_file,
+)
 
 
 def _configure_app_logging() -> None:
     """Ensure backend application logs are visible alongside uvicorn logs."""
+    debug_logs = os.environ.get("VOICESCRIBE_DEBUG_LOGS") == "1"
     root_logger = logging.getLogger()
     if not root_logger.handlers:
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.INFO if debug_logs else logging.WARNING,
             format="%(levelname)s:%(name)s:%(message)s",
         )
-    elif root_logger.level > logging.INFO:
-        root_logger.setLevel(logging.INFO)
+    else:
+        root_logger.setLevel(logging.INFO if debug_logs else logging.WARNING)
 
     for logger_name in ("meeting", "diarization", "engines", "server"):
+        logging.getLogger(logger_name).setLevel(logging.INFO)
+
+    for logger_name in ("modelscope", "jieba", "charset_normalizer"):
+        logging.getLogger(logger_name).setLevel(
+            logging.INFO if debug_logs else logging.WARNING
+        )
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         logging.getLogger(logger_name).setLevel(logging.INFO)
 
 
@@ -191,6 +209,22 @@ try:
         print("[Warning] Install: pip install git+https://github.com/FireRedTeam/FireRedASR.git")
 except ImportError as e:
     print(f"[Warning] FireRedASR engine not available: {e}")
+
+try:
+    from engines.qwen3asr_engine import Qwen3ASREngine
+    QWEN3_ASR_AVAILABLE = _module_available("qwen_asr")
+    if not QWEN3_ASR_AVAILABLE:
+        print("[Warning] Qwen3-ASR engine not available: missing qwen_asr package")
+except ImportError as e:
+    print(f"[Warning] Qwen3-ASR engine not available: {e}")
+
+try:
+    from engines.firered2_engine import FireRed2Engine
+    FIRERED2_AVAILABLE = _module_available("fireredasr")
+    if not FIRERED2_AVAILABLE:
+        print("[Warning] FireRedASR2 engine not available: missing fireredasr package")
+except ImportError as e:
+    print(f"[Warning] FireRedASR2 engine not available: {e}")
 
 # 模型缓存目录（用于下载/管理模型权重）
 # 固定默认到项目 models/，可由 VOICESCRIBE_MODEL_DIR 覆盖
@@ -465,17 +499,6 @@ except ImportError as e:
     print(f"[Warning] AI refiner not available: {e}")
 
 
-app = FastAPI(title="VoiceScribe", version="0.1.0")
-
-# CORS for local app
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Global instances
 engines = {}
 engines_lock = asyncio.Lock()
@@ -484,6 +507,33 @@ MOCK_MODE = False
 CURRENT_SPEAKER_MODEL = normalize_speaker_model_name(
     os.environ.get("VOICESCRIBE_SPK_MODEL", "cam++")
 )
+
+
+_FUNASR_TIMESTAMP_CAPABLE_MODELS = {
+    "paraformer-zh",
+    "seaco-paraformer",
+}
+
+
+def _resolve_funasr_internal_diarization(
+    enable_diarization: bool,
+    speaker_model: str,
+    model_name: str | None = None,
+) -> tuple[bool, str | None]:
+    """FunASR internal spk_model currently only supports cam++ reliably.
+
+    Other speaker models remain available for streaming/offline speaker mapping
+    via the independent speaker tracker, but should not be passed into
+    FunASR's internal diarization loader.
+    """
+    selected = normalize_speaker_model_name(speaker_model)
+    if not enable_diarization:
+        return False, None
+    if model_name and model_name not in _FUNASR_TIMESTAMP_CAPABLE_MODELS:
+        return False, None
+    if selected == "cam++":
+        return True, selected
+    return False, None
 os.environ["VOICESCRIBE_SPK_MODEL"] = CURRENT_SPEAKER_MODEL
 
 
@@ -498,8 +548,7 @@ PRELOAD_CONFIG = {
 ENABLE_PRELOAD = os.environ.get("VOICESCRIBE_PRELOAD_MODELS") == "1"
 
 
-@app.on_event("startup")
-async def preload_models():
+async def _preload_models_on_startup():
     """启动时预加载模型，避免首次转录等待"""
     _scan_and_register_existing_models()
 
@@ -526,6 +575,24 @@ async def preload_models():
                 print(f"[Preload] Whisper ready!")
         except Exception as e:
             print(f"[Preload] Failed to load {engine_name}: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _preload_models_on_startup()
+    yield
+
+
+app = FastAPI(title="VoiceScribe", version="0.1.0", lifespan=lifespan)
+
+# CORS for local app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class TranscribeRequest(BaseModel):
@@ -905,12 +972,15 @@ async def load_engine(
     engine: Optional[str] = Form(None),
     model: Optional[str] = Form(None),
     enable_diarization: Optional[bool] = Form(None),
+    speaker_model: Optional[str] = Form(None),
     request: Request = None,
 ):
     if engine is None or model is None:
         if request is not None:
             engine = engine or request.query_params.get("engine")
             model = model or request.query_params.get("model")
+            if speaker_model is None:
+                speaker_model = request.query_params.get("speaker_model")
     if engine is None or model is None:
         raise HTTPException(422, "Missing engine/model")
     """预加载指定引擎和模型"""
@@ -926,6 +996,10 @@ async def load_engine(
     if MOCK_MODE:
         engines[engine] = {"engine": None, "model": model}
         return {"status": "loaded (mock)", "engine": engine, "model": model}
+
+    existing_engine = engines.get(engine)
+    if existing_engine and existing_engine.get("engine") is not None and existing_engine.get("model") == model:
+        return {"status": "already_loaded", "engine": engine, "model": model}
     
     if engine == "whisper":
         if not WHISPER_AVAILABLE:
@@ -950,8 +1024,26 @@ async def load_engine(
         if not FUNASR_AVAILABLE:
             raise HTTPException(400, "FunASR engine not available. Install funasr.")
         eng = FunASREngine()
-        eng.load(model, enable_diarization=bool(enable_diarization))
-        engines["funasr"] = {"engine": eng, "model": model, "diarization": bool(enable_diarization)}
+        selected_speaker_model = normalize_speaker_model_name(
+            speaker_model or CURRENT_SPEAKER_MODEL
+        )
+        internal_diarization, internal_speaker_model = _resolve_funasr_internal_diarization(
+            bool(enable_diarization),
+            selected_speaker_model,
+            model,
+        )
+        eng.load(
+            model,
+            enable_diarization=internal_diarization,
+            speaker_model_name=internal_speaker_model or "cam++",
+        )
+        engines["funasr"] = {
+            "engine": eng,
+            "model": model,
+            "diarization": internal_diarization,
+            "speaker_model": selected_speaker_model,
+            "internal_speaker_model": internal_speaker_model,
+        }
     elif engine == "parakeet":
         if not PARAKEET_AVAILABLE:
             raise HTTPException(400, "Parakeet engine not available. Requires NVIDIA GPU and NeMo toolkit.")
@@ -967,15 +1059,21 @@ async def load_engine(
         eng.load(model, local_model_path=local_model_path)
         engines["firered"] = {"engine": eng, "model": model}
     elif engine == "qwen3asr":
-        raise HTTPException(
-            501,
-            "Qwen3-ASR is registered for download and path management only. Inference adapter is not integrated yet.",
-        )
+        if not QWEN3_ASR_AVAILABLE:
+            raise HTTPException(400, "Qwen3-ASR engine not available. Install qwen-asr.")
+        entry = _get_registry_entry("qwen3asr", model)
+        local_model_path = entry.get("path") if entry else None
+        eng = Qwen3ASREngine()
+        eng.load(model, local_model_path=local_model_path)
+        engines["qwen3asr"] = {"engine": eng, "model": model}
     elif engine == "firered2":
-        raise HTTPException(
-            501,
-            "FireRedASR2 is registered for download and path management only. Inference adapter is not integrated yet.",
-        )
+        if not FIRERED2_AVAILABLE:
+            raise HTTPException(400, "FireRedASR2 engine not available. Install fireredasr.")
+        entry = _get_registry_entry("firered2", model)
+        local_model_path = entry.get("path") if entry else None
+        eng = FireRed2Engine()
+        eng.load(model, local_model_path=local_model_path)
+        engines["firered2"] = {"engine": eng, "model": model}
     else:
         raise HTTPException(400, f"Unknown engine: {engine}")
     
@@ -1005,35 +1103,261 @@ def mock_transcribe(audio_path: str, language: str = "zh") -> dict:
     }
 
 
+def apply_unified_speaker_system(
+    result: dict,
+    *,
+    engine: str,
+    enable_diarization: bool,
+    audio_path: str,
+    source: str,
+) -> dict:
+    """Apply the shared offline speaker pipeline."""
+    global diarizer, engines
+
+    if not enable_diarization:
+        logger.info("[Speaker] %s: diarization disabled, skipping speaker pipeline", source)
+        return result
+
+    diarization_done = False
+
+    if (
+        DIARIZATION_AVAILABLE
+        and engine == "funasr"
+        and engines.get("funasr", {}).get("diarization", False)
+    ):
+        try:
+            diarization_list = [
+                {
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "speaker": seg.get("speaker"),
+                }
+                for seg in result.get("segments", [])
+                if seg.get("speaker") is not None
+            ]
+            if diarization_list:
+                logger.info(
+                    "[Speaker] %s: using FunASR internal diarization (%s speaker-tagged segments)",
+                    source,
+                    len(diarization_list),
+                )
+                diarization_done = True
+                if diarizer is None:
+                    diarizer = _new_speaker_diarizer()
+                if diarizer.speakers and diarizer.sv_model is None:
+                    diarizer.load(load_diarization=False)
+                result = diarizer.assign_speakers(
+                    result,
+                    diarization_list,
+                    audio_path=audio_path,
+                )
+            else:
+                logger.info(
+                    "[Speaker] %s: FunASR internal diarization returned no speaker segments, falling back to offline diarizer",
+                    source,
+                )
+        except Exception as exc:
+            logger.warning("[Speaker] %s name mapping failed: %s", source, exc)
+
+    if DIARIZATION_AVAILABLE and not diarization_done:
+        try:
+            logger.info("[Speaker] %s: running offline diarization fallback", source)
+            if diarizer is None:
+                diarizer = _new_speaker_diarizer()
+                diarizer.load()
+            elif diarizer.diarization_model is None:
+                diarizer.load()
+            elif diarizer.sv_model is None and diarizer.speakers:
+                diarizer.load(load_diarization=False)
+
+            speakers = diarizer.diarize(audio_path)
+            result = diarizer.assign_speakers(
+                result,
+                speakers,
+                audio_path=audio_path,
+            )
+        except Exception as exc:
+            logger.warning("[Speaker] %s diarization failed: %s", source, exc)
+    elif diarization_done:
+        logger.info("[Speaker] %s: offline diarization fallback skipped", source)
+
+    return result
+
+
+def _normalize_audio_upload(tmp_path: str) -> tuple[str, Optional[str], dict]:
+    """Normalize uploaded audio to mono 16k PCM WAV when needed."""
+    suffix = Path(tmp_path).suffix.lower()
+    if suffix == ".wav":
+        return tmp_path, None, {"audio_normalized": False}
+
+    try:
+        import torch
+        import torchaudio
+
+        waveform, sample_rate = torchaudio.load(tmp_path)
+        original_channels = int(waveform.shape[0]) if waveform.ndim > 1 else 1
+        if waveform.ndim == 1:
+            waveform = waveform.unsqueeze(0)
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        if sample_rate != 16000:
+            waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
+            sample_rate = 16000
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as handle:
+            normalized_path = handle.name
+
+        torchaudio.save(
+            normalized_path,
+            waveform.to(torch.float32),
+            sample_rate,
+            encoding="PCM_S",
+            bits_per_sample=16,
+        )
+        duration = float(waveform.shape[-1] / sample_rate) if sample_rate else 0.0
+        return normalized_path, normalized_path, {
+            "audio_normalized": True,
+            "source_audio_path": tmp_path,
+            "normalized_audio_path": normalized_path,
+            "normalized_audio_sample_rate": sample_rate,
+            "normalized_audio_channels": 1,
+            "source_audio_channels": original_channels,
+            "normalized_audio_duration_s": round(duration, 3),
+        }
+    except Exception as exc:
+        return tmp_path, None, {
+            "audio_normalized": False,
+            "audio_normalize_error": str(exc),
+        }
+
+
 @app.post("/transcribe")
 async def transcribe(
+    request: Request,
     audio: UploadFile = File(...),
     engine: str = Form("whisper"),
     model: str = Form("large-v3"),
     language: str = Form("zh"),
     enable_diarization: bool = Form(False),
+    speaker_model: str = Form(""),
     hotwords: str = Form(""),
     enable_ai_refine: bool = Form(False),
 ) -> TranscribeResult:
     """转录音频文件"""
     global engines, diarizer
     
-    # Save uploaded file
-    suffix = Path(audio.filename).suffix or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await audio.read()
-        tmp.write(content)
-        tmp_path = tmp.name
+    request_started = time.perf_counter()
+    stage = "save_upload"
+    tmp_path: Optional[str] = None
+    normalized_tmp_path: Optional[str] = None
+    working_audio_path: Optional[str] = None
+    audio_probe: dict = {}
+    recording_session_id = request.headers.get("x-recording-session-id")
+    transcribe_request_id = (
+        request.headers.get("x-transcribe-request-id") or generate_id("req")
+    )
+    hotword_count = len([word.strip() for word in hotwords.split(",") if word.strip()])
+    selected_speaker_model = normalize_speaker_model_name(
+        speaker_model or CURRENT_SPEAKER_MODEL
+    )
+    internal_diarization, internal_speaker_model = _resolve_funasr_internal_diarization(
+        bool(enable_diarization),
+        selected_speaker_model,
+        model if engine == "funasr" else None,
+    )
+
+    emit_event(
+        "backend.transcribe",
+        "transcribe_request_started",
+        logger_name="server",
+        recording_session_id=recording_session_id,
+        transcribe_request_id=transcribe_request_id,
+        filename=audio.filename,
+        content_type=audio.content_type,
+        engine=engine,
+        model=model,
+        language=language,
+        enable_diarization=enable_diarization,
+        speaker_model=selected_speaker_model,
+        enable_ai_refine=enable_ai_refine,
+        hotword_count=hotword_count,
+    )
     
     try:
         # Mock 模式
+        suffix = Path(audio.filename or "").suffix or ".wav"
+        content = await audio.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        emit_event(
+            "backend.transcribe",
+            "temp_audio_written",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            audio_path=tmp_path,
+            audio_size_bytes=len(content),
+            audio_suffix=suffix,
+        )
+
+        stage = "normalize_audio"
+        working_audio_path, normalized_tmp_path, normalization_info = _normalize_audio_upload(
+            tmp_path
+        )
+        emit_event(
+            "backend.transcribe",
+            "audio_normalized",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            **normalization_info,
+        )
+
+        stage = "probe_audio"
+        audio_probe = probe_audio_file(working_audio_path)
+        emit_event(
+            "backend.transcribe",
+            "uploaded_audio_probed",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            **audio_probe,
+        )
+
+        if len(content) == 0:
+            raise HTTPException(400, "Empty audio upload")
+        if not audio_probe.get("audio_probe_ok", False):
+            raise HTTPException(400, "Invalid or unsupported audio file")
+        if float(audio_probe.get("audio_duration_s", 0) or 0) <= 0:
+            raise HTTPException(400, "Audio duration is zero")
+        if (
+            bool(audio_probe.get("audio_is_silent", False))
+            and float(audio_probe.get("audio_duration_s", 0) or 0) >= 1.0
+        ):
+            raise HTTPException(422, "No speech detected in audio")
+
         if MOCK_MODE:
-            result = mock_transcribe(tmp_path, language)
+            stage = "mock_transcribe"
+            result = mock_transcribe(working_audio_path, language)
             # AI 文本优化（mock 模式也支持）
             if enable_ai_refine and AI_REFINE_AVAILABLE:
                 refiner = AIRefiner()
                 hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
                 result["text"] = refiner.refine_sync(result["text"], hotwords_list)
+            emit_event(
+                "backend.transcribe",
+                "transcribe_response_sent",
+                logger_name="server",
+                recording_session_id=recording_session_id,
+                transcribe_request_id=transcribe_request_id,
+                engine=f"{engine} (mock)",
+                model=model,
+                segment_count=len(result.get("segments", [])),
+                result_duration_s=result.get("duration", 0),
+                elapsed_ms=int((time.perf_counter() - request_started) * 1000),
+            )
             return TranscribeResult(
                 text=result["text"],
                 segments=result.get("segments", []),
@@ -1053,35 +1377,100 @@ async def transcribe(
             raise HTTPException(400, "Parakeet engine not available")
         if engine == "firered" and not FIRERED_AVAILABLE:
             raise HTTPException(400, "FireRedASR engine not available")
-        if engine == "qwen3asr":
-            raise HTTPException(501, "Qwen3-ASR inference adapter not integrated yet")
-        if engine == "firered2":
-            raise HTTPException(501, "FireRedASR2 inference adapter not integrated yet")
+        if engine == "qwen3asr" and not QWEN3_ASR_AVAILABLE:
+            raise HTTPException(400, "Qwen3-ASR engine not available")
+        if engine == "firered2" and not FIRERED2_AVAILABLE:
+            raise HTTPException(400, "FireRedASR2 engine not available")
         
         # Get or create engine
+        engine_action = "reused"
         if engine not in engines or engines[engine]["model"] != model:
-            await load_engine(engine, model, enable_diarization=enable_diarization if engine == "funasr" else None)
-        elif engine == "funasr" and enable_diarization:
+            stage = "load_engine"
+            await load_engine(
+                engine,
+                model,
+                enable_diarization=internal_diarization if engine == "funasr" else None,
+                speaker_model=selected_speaker_model if engine == "funasr" else None,
+            )
+            engine_action = "loaded"
+        elif engine == "funasr":
             # 如果需要说话人识别但当前引擎未开启，则重新加载
-            if not engines.get("funasr", {}).get("diarization", False):
-                await load_engine(engine, model, enable_diarization=True)
+            funasr_state = engines.get("funasr", {})
+            if (
+                funasr_state.get("diarization", False) != internal_diarization
+                or funasr_state.get("speaker_model") != selected_speaker_model
+                or funasr_state.get("internal_speaker_model") != internal_speaker_model
+            ):
+                stage = "load_engine"
+                await load_engine(
+                    engine,
+                    model,
+                    enable_diarization=internal_diarization,
+                    speaker_model=selected_speaker_model,
+                )
+                engine_action = (
+                    "loaded_with_diarization"
+                    if internal_diarization
+                    else "loaded_without_internal_diarization"
+                )
         
+        emit_event(
+            "backend.transcribe",
+            "engine_loaded_or_reused",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            engine=engine,
+            model=model,
+            engine_action=engine_action,
+        )
+
         eng = engines[engine]["engine"]
 
         # Transcribe (pass hotwords for FunASR)
+        stage = "engine_transcribe"
+        emit_event(
+            "backend.transcribe",
+            "engine_transcribe_started",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            engine=engine,
+            model=model,
+            hotword_count=hotword_count,
+        )
         if engine == "funasr" and hotwords:
             print(f"[Transcribe] FunASR with hotwords: {hotwords}")
-            result = eng.transcribe(tmp_path, language=language, hotwords=hotwords)
+            result = eng.transcribe(working_audio_path, language=language, hotwords=hotwords)
         else:
             print(f"[Transcribe] Engine={engine}, hotwords={hotwords or '(none)'}")
-            result = eng.transcribe(tmp_path, language=language)
+            result = eng.transcribe(working_audio_path, language=language)
         
         # Speaker diarization if enabled (FunASR 内置 spk_model 时可跳过)
-        diarization_done = False
-        if engine == "funasr" and enable_diarization:
+        emit_event(
+            "backend.transcribe",
+            "engine_transcribe_finished",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            engine=engine,
+            model=model,
+            segment_count=len(result.get("segments", [])),
+            result_duration_s=result.get("duration", 0),
+        )
+        stage = "speaker_diarization"
+        result = apply_unified_speaker_system(
+            result,
+            engine=engine,
+            enable_diarization=enable_diarization,
+            audio_path=working_audio_path,
+            source="transcribe",
+        )
+        if False and engine == "funasr" and internal_diarization:
             if engines.get("funasr", {}).get("diarization", False):
                 # 如果 FunASR 已给出 speaker 标签，尝试将标签映射为已注册说话人姓名
                 try:
+                    stage = "speaker_diarization"
                     diarization_list = [
                         {
                             "start": seg["start"],
@@ -1097,20 +1486,33 @@ async def transcribe(
                             diarizer = _new_speaker_diarizer()
                         if diarizer.speakers and diarizer.sv_model is None:
                             diarizer.load(load_diarization=False)
-                        result = diarizer.assign_speakers(result, diarization_list, audio_path=tmp_path)
+                        result = diarizer.assign_speakers(
+                            result,
+                            diarization_list,
+                            audio_path=working_audio_path,
+                        )
                 except Exception as e:
                     print(f"[Speaker] Name mapping failed: {e}")
 
-        if enable_diarization and DIARIZATION_AVAILABLE and not diarization_done:
+        if False and enable_diarization and DIARIZATION_AVAILABLE and not diarization_done:
             if diarizer is None:
                 diarizer = _new_speaker_diarizer()
                 diarizer.load()
+            elif diarizer.diarization_model is None:
+                diarizer.load()
+            elif diarizer.sv_model is None and diarizer.speakers:
+                diarizer.load(load_diarization=False)
 
-            speakers = diarizer.diarize(tmp_path)
-            result = diarizer.assign_speakers(result, speakers, audio_path=tmp_path)
+            speakers = diarizer.diarize(working_audio_path)
+            result = diarizer.assign_speakers(
+                result,
+                speakers,
+                audio_path=working_audio_path,
+            )
 
         # AI 文本优化
         if enable_ai_refine and AI_REFINE_AVAILABLE:
+            stage = "ai_refine"
             refiner = AIRefiner()
             hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
             print(f"[AI Refine] Hotwords: {hotwords_list}")
@@ -1118,6 +1520,18 @@ async def transcribe(
             result["text"] = refiner.refine_sync(result["text"], hotwords_list)
             print(f"[AI Refine] Refined: {result['text'][:100]}...")
 
+        emit_event(
+            "backend.transcribe",
+            "transcribe_response_sent",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            engine=engine,
+            model=model,
+            segment_count=len(result.get("segments", [])),
+            result_duration_s=result.get("duration", 0),
+            elapsed_ms=int((time.perf_counter() - request_started) * 1000),
+        )
         return TranscribeResult(
             text=result["text"],
             segments=result.get("segments", []),
@@ -1125,9 +1539,53 @@ async def transcribe(
             engine=engine,
             model=model,
         )
-    
+
+    except HTTPException as exc:
+        emit_event(
+            "backend.transcribe",
+            "transcribe_failed",
+            level="ERROR",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            stage=stage,
+            error_type=classify_http_error_detail(exc.detail),
+            status_code=exc.status_code,
+            error_message=exc.detail,
+            elapsed_ms=int((time.perf_counter() - request_started) * 1000),
+            **audio_probe,
+        )
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[Transcribe] request_id=%s stage=%s failed",
+            transcribe_request_id,
+            stage,
+        )
+        emit_event(
+            "backend.transcribe",
+            "transcribe_failed",
+            level="ERROR",
+            logger_name="server",
+            recording_session_id=recording_session_id,
+            transcribe_request_id=transcribe_request_id,
+            stage=stage,
+            error_type=classify_transcribe_error(stage, exc),
+            exception_type=type(exc).__name__,
+            error_message=str(exc),
+            elapsed_ms=int((time.perf_counter() - request_started) * 1000),
+            **audio_probe,
+        )
+        raise HTTPException(500, "Transcription failed") from exc
     finally:
-        os.unlink(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        if (
+            normalized_tmp_path
+            and normalized_tmp_path != tmp_path
+            and os.path.exists(normalized_tmp_path)
+        ):
+            os.unlink(normalized_tmp_path)
 
 
 logger = logging.getLogger(__name__)
@@ -1163,6 +1621,7 @@ async def stream_ws(websocket: WebSocket):
     Server sends: {"type": "session_end", ...}
     """
     from meeting.session import MeetingSession, SessionConfig
+    from meeting.stream_commit_buffer import StreamingCommitBuffer
 
     async def _summary_loop(sess, ws):
         """Periodically generate summaries."""
@@ -1199,38 +1658,267 @@ async def stream_ws(websocket: WebSocket):
                         "text": refined,
                     })
 
+    async def _process_commit_window(sess, commit_window):
+        """Run ASR + speaker flow for one buffered commit window and emit websocket events."""
+        utterances = await sess.process_commit_window(commit_window)
+        for utterance in utterances:
+            await websocket.send_json(utterance.to_dict())
+
+            await websocket.send_json({
+                "type": "speaker_active",
+                "speaker": utterance.speaker,
+                "speaker_id": utterance.speaker_id,
+                "active_speakers": utterance.speakers,
+            })
+
+            if sess.config.enable_ai_summary:
+                sess.summarizer.add_utterance(utterance)
+
+            if sess.config.enable_ai_refine:
+                refined = await sess.refine_utterance(utterance)
+                if refined:
+                    await websocket.send_json({
+                        "type": "utterance_refined",
+                        "utterance_id": utterance.id,
+                        "text": refined,
+                    })
+
+    async def _emit_mock_stream_events(sess, audio_bytes, offset_s, flush=False):
+        """Emit deterministic protocol events for MOCK_MODE without real VAD."""
+        pending_bytes = getattr(sess, "_mock_stream_buffer", b"") + (audio_bytes or b"")
+        if not pending_bytes:
+            return offset_s
+
+        aligned_len = len(pending_bytes) - (len(pending_bytes) % 2)
+        aligned_bytes = pending_bytes[:aligned_len]
+        remaining_bytes = pending_bytes[aligned_len:]
+        min_emit_bytes = int(0.2 * 16000 * 2)
+
+        if not flush and len(aligned_bytes) < min_emit_bytes:
+            sess._mock_stream_buffer = pending_bytes
+            return offset_s
+
+        if not aligned_bytes:
+            sess._mock_stream_buffer = remaining_bytes
+            return offset_s
+
+        sess._mock_stream_buffer = remaining_bytes
+        audio = np.frombuffer(aligned_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        if audio.size == 0:
+            return offset_s
+
+        duration = audio.size / 16000.0
+        if duration <= 0:
+            return offset_s
+
+        result = sess.asr_engine.transcribe_array(
+            audio,
+            sample_rate=16000,
+            hotwords=sess.config.hotwords,
+        )
+        primary_speaker = "Speaker"
+        primary_speaker_id = "unknown"
+        speaker_labels = [
+            {
+                "speaker": primary_speaker,
+                "speaker_id": primary_speaker_id,
+                "confidence": 0.0,
+                "role": "primary",
+            }
+        ]
+        utterance = sess._build_utterance(
+            text=str(result.get("text", "")).strip() or "[mock utterance]",
+            start=offset_s,
+            end=offset_s + duration,
+            speaker_name=primary_speaker,
+            speaker_id=primary_speaker_id,
+            confidence=0.0,
+            speakers=speaker_labels,
+            overlap_detected=False,
+            overlap_score=0.0,
+            speaker_spans=[
+                {
+                    "start": offset_s,
+                    "end": offset_s + duration,
+                    "speaker": primary_speaker,
+                    "speaker_id": primary_speaker_id,
+                    "confidence": 0.0,
+                    "speakers": speaker_labels,
+                    "overlap_detected": False,
+                    "overlap_score": 0.0,
+                }
+            ],
+        )
+        sess.add_utterance(utterance)
+        await websocket.send_json(utterance.to_dict())
+        await websocket.send_json({
+            "type": "speaker_active",
+            "speaker": utterance.speaker,
+            "speaker_id": utterance.speaker_id,
+            "active_speakers": utterance.speakers,
+        })
+
+        if sess.config.enable_ai_refine:
+            refined = await sess.refine_utterance(utterance)
+            if refined:
+                await websocket.send_json({
+                    "type": "utterance_refined",
+                    "utterance_id": utterance.id,
+                    "text": refined,
+                })
+
+        return offset_s + duration
+
     await websocket.accept()
     session = None
     summary_task = None
+    mock_stream_offset_s = 0.0
+    commit_buffer = None
 
     try:
         while True:
             data = await websocket.receive()
 
             if "text" in data:
-                msg = json.loads(data["text"])
+                try:
+                    msg = json.loads(data["text"])
+                except json.JSONDecodeError:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "invalid json",
+                    })
+                    if summary_task:
+                        summary_task.cancel()
+                        summary_task = None
+                    if session:
+                        session.cleanup()
+                        session = None
+                    break
                 action = msg.get("action")
 
                 if action == "start":
+                    requested_vad_max_segment_s = float(msg.get("vad_max_segment_s", 30.0))
+                    commit_min_window_s = float(msg.get("commit_min_window_s", 5.0))
+                    commit_preferred_window_s = float(msg.get("commit_preferred_window_s", 6.0))
+                    commit_max_window_s = float(msg.get("commit_max_window_s", 8.0))
+                    commit_stable_silence_gap_s = float(
+                        msg.get("commit_stable_silence_gap_s", 1.0)
+                    )
                     config = SessionConfig(
                         engine=msg.get("engine", "funasr"),
                         model=msg.get("model", "seaco-paraformer"),
                         speakers_enabled=msg.get("speakers_enabled", True),
+                        speaker_model=normalize_speaker_model_name(
+                            msg.get("speaker_model") or CURRENT_SPEAKER_MODEL
+                        ),
                         hotwords=msg.get("hotwords", ""),
                         enable_ai_refine=msg.get("enable_ai_refine", True),
                         enable_ai_summary=msg.get("enable_ai_summary", True),
                         summary_interval=msg.get("summary_interval", 120),
                         llm_provider=msg.get("llm_provider", "claude_cli"),
                         llm_model=msg.get("llm_model", "haiku"),
+                        vad_threshold=float(msg.get("vad_threshold", 0.5)),
+                        vad_min_speech_ms=int(msg.get("vad_min_speech_ms", 300)),
+                        vad_hangover_ms=int(msg.get("vad_hangover_ms", 700)),
+                        vad_pre_roll_ms=int(msg.get("vad_pre_roll_ms", 200)),
+                        vad_max_segment_s=min(requested_vad_max_segment_s, commit_max_window_s),
+                        speaker_match_threshold=float(msg.get("speaker_match_threshold", 0.6)),
+                        active_registered_floor_min=float(
+                            msg.get("active_registered_floor_min", 0.5)
+                        ),
+                        active_registered_floor_offset=float(
+                            msg.get("active_registered_floor_offset", 0.1)
+                        ),
+                        active_registered_keep_margin=float(
+                            msg.get("active_registered_keep_margin", 0.04)
+                        ),
+                        stable_registered_floor_offset=float(
+                            msg.get("stable_registered_floor_offset", 0.08)
+                        ),
+                        stable_registered_keep_margin=float(
+                            msg.get("stable_registered_keep_margin", 0.06)
+                        ),
+                        registered_switch_floor_min=float(
+                            msg.get("registered_switch_floor_min", 0.52)
+                        ),
+                        registered_switch_floor_offset=float(
+                            msg.get("registered_switch_floor_offset", 0.06)
+                        ),
+                        registered_switch_margin=float(
+                            msg.get("registered_switch_margin", 0.05)
+                        ),
+                        span_continuity_floor_min=float(
+                            msg.get("span_continuity_floor_min", 0.38)
+                        ),
+                        span_continuity_floor_offset=float(
+                            msg.get("span_continuity_floor_offset", 0.12)
+                        ),
+                        span_continuity_keep_margin=float(
+                            msg.get("span_continuity_keep_margin", 0.08)
+                        ),
+                        span_top_fallback_offset=float(
+                            msg.get("span_top_fallback_offset", 0.05)
+                        ),
+                        pyannote_window_s=float(msg.get("pyannote_window_s", 1.2)),
+                        pyannote_hop_s=float(msg.get("pyannote_hop_s", 0.6)),
+                        pyannote_change_similarity=float(
+                            msg.get("pyannote_change_similarity", 0.72)
+                        ),
+                        min_multi_speaker_span_s=float(
+                            msg.get("min_multi_speaker_span_s", 0.8)
+                        ),
+                        noise_filter_enabled=bool(msg.get("noise_filter_enabled", True)),
+                        noise_max_duration_s=float(msg.get("noise_max_duration_s", 0.35)),
+                        noise_rms_threshold=float(msg.get("noise_rms_threshold", 0.012)),
+                        noise_peak_threshold=float(msg.get("noise_peak_threshold", 0.04)),
+                        commit_min_window_s=commit_min_window_s,
+                        commit_preferred_window_s=commit_preferred_window_s,
+                        commit_max_window_s=commit_max_window_s,
+                        commit_stable_silence_gap_s=commit_stable_silence_gap_s,
                     )
                     session = MeetingSession(config)
+                    commit_buffer = None if MOCK_MODE else StreamingCommitBuffer(
+                        min_commit_window_s=config.commit_min_window_s,
+                        preferred_commit_window_s=config.commit_preferred_window_s,
+                        max_commit_window_s=config.commit_max_window_s,
+                        stable_silence_gap_s=config.commit_stable_silence_gap_s,
+                    )
+                    internal_diarization, internal_speaker_model = _resolve_funasr_internal_diarization(
+                        config.speakers_enabled,
+                        config.speaker_model,
+                        config.model if config.engine == "funasr" else None,
+                    )
 
                     # Set ASR engine (auto-load if needed)
                     engine_name = config.engine
-                    if engine_name not in engines or engines[engine_name].get("model") != config.model:
+                    engine_state = engines.get(engine_name, {})
+                    needs_reload = (
+                        engine_name not in engines
+                        or engine_state.get("model") != config.model
+                    )
+                    if (
+                        not needs_reload
+                        and engine_name == "funasr"
+                        and (
+                            engine_state.get("speaker_model") != config.speaker_model
+                            or engine_state.get("diarization", False) != internal_diarization
+                            or engine_state.get("internal_speaker_model") != internal_speaker_model
+                        )
+                    ):
+                        needs_reload = True
+                    if needs_reload:
                         if not MOCK_MODE:
                             try:
-                                await load_engine(engine_name, config.model)
+                                await load_engine(
+                                    engine_name,
+                                    config.model,
+                                    enable_diarization=internal_diarization
+                                    if engine_name == "funasr"
+                                    else None,
+                                    speaker_model=config.speaker_model
+                                    if engine_name == "funasr"
+                                    else None,
+                                )
                             except Exception as e:
                                 await websocket.send_json({
                                     "type": "error",
@@ -1291,6 +1979,7 @@ async def stream_ws(websocket: WebSocket):
                         "type": "started",
                         "session_id": session.session_id,
                         "engine": config.engine,
+                        "speaker_model": config.speaker_model,
                         "speakers_enabled": config.speakers_enabled,
                         "speaker_backend": speaker_backend,
                         "registered_speakers": speaker_count,
@@ -1303,19 +1992,34 @@ async def stream_ws(websocket: WebSocket):
                         )
                     else:
                         summary_task = None
+                    mock_stream_offset_s = 0.0
 
                 elif action == "end":
                     if summary_task:
                         summary_task.cancel()
                         summary_task = None
                     if session:
-                        # Flush tail audio that has not yet reached hangover silence.
-                        try:
-                            tail_segment = session.vad.flush()
-                            if tail_segment is not None:
-                                await _process_stream_segment(session, tail_segment)
-                        except Exception as e:
-                            logger.warning(f"[Stream] Tail flush failed: {e}")
+                        if MOCK_MODE:
+                            mock_stream_offset_s = await _emit_mock_stream_events(
+                                session,
+                                b"",
+                                mock_stream_offset_s,
+                                flush=True,
+                            )
+                        else:
+                            # Flush tail audio that has not yet reached hangover silence.
+                            try:
+                                tail_segment = session.vad.flush()
+                                if tail_segment is not None:
+                                    commit_window = commit_buffer.push(tail_segment) if commit_buffer else None
+                                    if commit_window is not None:
+                                        await _process_commit_window(session, commit_window)
+                                if commit_buffer and commit_buffer.has_pending:
+                                    tail_window = commit_buffer.flush()
+                                    if tail_window is not None:
+                                        await _process_commit_window(session, tail_window)
+                            except Exception as e:
+                                logger.warning(f"[Stream] Tail flush failed: {e}")
 
                         session_data = session.get_session_data()
                         await websocket.send_json({
@@ -1326,11 +2030,21 @@ async def stream_ws(websocket: WebSocket):
                         })
                         session.cleanup()
                         session = None
+                        mock_stream_offset_s = 0.0
+                        commit_buffer = None
                     break
 
             elif "bytes" in data:
                 # Binary PCM audio data
                 if session is None:
+                    continue
+
+                if MOCK_MODE:
+                    mock_stream_offset_s = await _emit_mock_stream_events(
+                        session,
+                        data["bytes"],
+                        mock_stream_offset_s,
+                    )
                     continue
 
                 audio_bytes = data["bytes"]
@@ -1350,7 +2064,9 @@ async def stream_ws(websocket: WebSocket):
                     if segment is not None:
                         # VAD detected end of utterance
                         try:
-                            await _process_stream_segment(session, segment)
+                            commit_window = commit_buffer.push(segment) if commit_buffer else None
+                            if commit_window is not None:
+                                await _process_commit_window(session, commit_window)
                         except Exception as e:
                             logger.error(f"[Stream] Processing error: {e}")
                             await websocket.send_json({
@@ -1374,12 +2090,14 @@ async def stream_ws(websocket: WebSocket):
             except Exception:
                 pass
             session.cleanup()
+            commit_buffer = None
     except Exception as e:
         logger.error(f"[Stream] WebSocket error: {e}")
         if summary_task:
             summary_task.cancel()
         if session:
             session.cleanup()
+        commit_buffer = None
 
 
 @app.post("/speakers/reload-models")
@@ -1391,7 +2109,7 @@ async def reload_speaker_models(
     """Reload speaker recognition model backends.
 
     - Streaming tracker backends are re-evaluated (pyannote clustering -> CAM++ mapping).
-    - SpeakerDiarizer instance is reset. If preload=true, load models immediately.
+    - Offline SpeakerDiarizer is preloaded whenever speaker diarization is enabled.
     """
     global diarizer, CURRENT_SPEAKER_MODEL
 
@@ -1451,27 +2169,27 @@ async def reload_speaker_models(
         tracker_error = str(e)
         logger.warning(f"[Speaker] Failed to reload streaming tracker: {e}")
 
-    diarizer_preload = plan["preload_mapping"] if 'plan' in locals() else preload_flag
-    diarizer_status = "disabled"
+    diarizer = None
+    diarizer_status = "mock" if MOCK_MODE else "disabled"
     diarizer_error = None
-    if not DIARIZATION_AVAILABLE:
+    try:
+        should_preload_offline = bool(
+            DIARIZATION_AVAILABLE
+            and not MOCK_MODE
+            and "plan" in locals()
+            and plan.get("preload_mapping")
+        )
+        if should_preload_offline:
+            diarizer = _new_speaker_diarizer()
+            diarizer.load()
+            diarizer_status = "preloaded"
+        elif not MOCK_MODE and DIARIZATION_AVAILABLE:
+            diarizer_status = "disabled"
+    except Exception as e:
         diarizer = None
-    elif MOCK_MODE:
-        diarizer = None
-        diarizer_status = "mock"
-    else:
-        diarizer = None
-        diarizer_status = "reset"
-        if diarizer_preload:
-            try:
-                diarizer = _new_speaker_diarizer()
-                diarizer.load()
-                diarizer_status = "loaded"
-            except Exception as e:
-                diarizer = None
-                diarizer_status = "error"
-                diarizer_error = str(e)
-                logger.warning(f"[Speaker] Failed to preload SpeakerDiarizer: {e}")
+        diarizer_status = "error"
+        diarizer_error = str(e)
+        logger.warning("[Speaker] Failed to preload offline diarizer: %s", e)
 
     return {
         "status": "reloaded",
@@ -1587,7 +2305,15 @@ def main():
     parser.add_argument("--port", type=int, default=8765, help="Port to bind (default: 8765)")
     args = parser.parse_args()
     
-    MOCK_MODE = args.mock or (not WHISPER_AVAILABLE and not WHISPERCPP_AVAILABLE and not FUNASR_AVAILABLE and not PARAKEET_AVAILABLE and not FIRERED_AVAILABLE)
+    MOCK_MODE = args.mock or (
+        not WHISPER_AVAILABLE
+        and not WHISPERCPP_AVAILABLE
+        and not FUNASR_AVAILABLE
+        and not PARAKEET_AVAILABLE
+        and not FIRERED_AVAILABLE
+        and not QWEN3_ASR_AVAILABLE
+        and not FIRERED2_AVAILABLE
+    )
 
     if MOCK_MODE:
         print("=" * 50)

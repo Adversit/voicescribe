@@ -8,6 +8,10 @@ websockets>=12.0
 faster-whisper>=0.10.0
 funasr>=1.0.0
 modelscope>=1.10.0
+addict>=2.4.0
+datasets>=3.0.0,<=3.6.0
+simplejson>=3.20.0
+hdbscan>=0.8.41
 fireredasr>=0.0.2  # FireRedASR (best Chinese ASR, CER 3.18%)
 
 # Audio processing
