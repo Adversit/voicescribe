@@ -1,189 +1,165 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Keyboard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Keyboard } from "lucide-react";
-
-// Keep this list aligned with the macOS app's available keys.
-const AVAILABLE_KEYS = [
-    "无",
-    "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
-    "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-    "Space", "-", "=",
-];
-
-interface HotkeyConfig {
-    useCommand: boolean;
-    useShift: boolean;
-    useOption: boolean;
-    useControl: boolean;
-    selectedKey: string;
-}
+import { Label } from "@/components/ui/label";
+import {
+    createDefaultHotkeyConfig,
+    formatHotkeyConfig,
+    formatHotkeyKeys,
+    normalizeBrowserCapturedKey,
+    sortHotkeyKeys,
+    type HotkeyConfig,
+    type HotkeyKey,
+} from "@/lib/hotkey-config";
 
 export function HotkeySettings() {
-    const [config, setConfig] = useState<HotkeyConfig>({
-        useCommand: false,
-        useShift: false,
-        useOption: true,
-        useControl: false,
-        selectedKey: "R",
-    });
+    const [config, setConfig] = useState<HotkeyConfig>(createDefaultHotkeyConfig());
+    const [isCapturing, setIsCapturing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [capturedKeys, setCapturedKeys] = useState<HotkeyKey[]>([]);
+    const captureKeysRef = useRef<Set<HotkeyKey>>(new Set());
 
     useEffect(() => {
         if (typeof window !== "undefined" && window.electron?.hotkey) {
-            window.electron.hotkey.get().then((savedConfig: unknown) => {
-                if (savedConfig) setConfig(savedConfig as HotkeyConfig);
+            window.electron.hotkey.get().then((savedConfig: HotkeyConfig) => {
+                if (savedConfig) {
+                    setConfig(savedConfig);
+                }
             });
         }
     }, []);
 
-    const hasValidModifier = config.useControl || config.useOption || config.useShift || config.useCommand;
+    useEffect(() => {
+        if (!isCapturing) {
+            captureKeysRef.current.clear();
+            setCapturedKeys([]);
+            return;
+        }
 
-    const previewHotkey = () => {
-        const parts: string[] = [];
-        if (config.useControl) parts.push("Ctrl");
-        if (config.useOption) parts.push("Alt");
-        if (config.useShift) parts.push("Shift");
-        if (config.useCommand) parts.push("Win");
-        if (config.selectedKey !== "无") parts.push(config.selectedKey);
-        return parts.length > 0 ? parts.join(" + ") : "未设置";
-    };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (event.code === "Escape") {
+                captureKeysRef.current.clear();
+                setIsCapturing(false);
+                return;
+            }
+
+            const key = normalizeBrowserCapturedKey(event);
+            if (!key) {
+                return;
+            }
+
+            captureKeysRef.current.add(key);
+            setCapturedKeys(sortHotkeyKeys([...captureKeysRef.current]));
+        };
+
+        const handleKeyUp = (event: KeyboardEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const key = normalizeBrowserCapturedKey(event);
+            if (!key) {
+                return;
+            }
+
+            captureKeysRef.current.add(key);
+            const nextKeys = sortHotkeyKeys([...captureKeysRef.current]);
+            if (nextKeys.length > 0) {
+                setConfig({
+                    recordingShortcut: {
+                        keys: nextKeys,
+                    },
+                });
+            }
+            captureKeysRef.current.clear();
+            setCapturedKeys([]);
+            setIsCapturing(false);
+        };
+
+        window.addEventListener("keydown", handleKeyDown, true);
+        window.addEventListener("keyup", handleKeyUp, true);
+        return () => {
+            window.removeEventListener("keydown", handleKeyDown, true);
+            window.removeEventListener("keyup", handleKeyUp, true);
+        };
+    }, [isCapturing]);
+
+    const preview = useMemo(() => formatHotkeyConfig(config), [config]);
+    const capturePreview = useMemo(() => formatHotkeyKeys(capturedKeys), [capturedKeys]);
 
     const applyHotkey = async () => {
-        if (typeof window !== "undefined" && window.electron?.hotkey) {
-            const res = await window.electron.hotkey.update(config);
-            if (!res?.success) {
-                console.error("Failed to update hotkey");
+        if (typeof window === "undefined" || !window.electron?.hotkey) {
+            return;
+        }
+
+        setIsSaving(true);
+        setSaveError(null);
+        try {
+            const result = await window.electron.hotkey.update(config);
+            if (!result?.success) {
+                setSaveError("快捷键保存失败");
             }
+        } catch (error) {
+            setSaveError(String(error));
+        } finally {
+            setIsSaving(false);
         }
     };
 
     return (
         <div className="space-y-6">
             <div>
-                <h3 className="text-lg font-medium">录音快捷键</h3>
+                <h3 className="text-lg font-medium">快捷键</h3>
+                <p className="text-sm text-muted-foreground">
+                    支持单键和组合键。短按开始或停止录音，长按会在按住后开始录音，松开即停止。
+                </p>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 rounded-xl border border-border/60 p-4">
                 <div className="space-y-2">
-                    <Label>修饰键（至少选择一个）</Label>
-                    <div className="flex flex-wrap gap-4">
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="ctrl"
-                                checked={config.useControl}
-                                onCheckedChange={(checked) =>
-                                    setConfig({ ...config, useControl: checked === true })
-                                }
-                            />
-                            <Label htmlFor="ctrl" className="font-normal">Ctrl</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="alt"
-                                checked={config.useOption}
-                                onCheckedChange={(checked) =>
-                                    setConfig({ ...config, useOption: checked === true })
-                                }
-                            />
-                            <Label htmlFor="alt" className="font-normal">Alt</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="shift"
-                                checked={config.useShift}
-                                onCheckedChange={(checked) =>
-                                    setConfig({ ...config, useShift: checked === true })
-                                }
-                            />
-                            <Label htmlFor="shift" className="font-normal">Shift</Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="win"
-                                checked={config.useCommand}
-                                onCheckedChange={(checked) =>
-                                    setConfig({ ...config, useCommand: checked === true })
-                                }
-                            />
-                            <Label htmlFor="win" className="font-normal">Win</Label>
-                        </div>
+                    <Label>录音快捷键</Label>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <Button
+                            variant={isCapturing ? "secondary" : "default"}
+                            onClick={() => {
+                                setIsCapturing((current) => !current);
+                                captureKeysRef.current.clear();
+                                setCapturedKeys([]);
+                            }}
+                        >
+                            {isCapturing ? "按下快捷键..." : "录制快捷键"}
+                        </Button>
+                        <span className="text-sm text-muted-foreground">
+                            {isCapturing ? capturePreview : preview}
+                        </span>
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                        点击“录制快捷键”后直接按下目标按键。按 Esc 仅会取消本次录制，不会写入为快捷键。
+                    </p>
                 </div>
 
-                <div className="space-y-2">
-                    <Label>附加按键（可选）</Label>
-                    <Select
-                        value={config.selectedKey}
-                        onValueChange={(value) => setConfig({ ...config, selectedKey: value })}
-                    >
-                        <SelectTrigger className="w-[180px]">
-                            <SelectValue placeholder="选择按键" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {AVAILABLE_KEYS.map((key) => (
-                                <SelectItem key={key} value={key}>
-                                    {key === "无" ? "无（仅修饰键）" : key}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-
-                <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+                <div className="flex items-center gap-4 rounded-lg bg-muted/50 p-4">
                     <Keyboard className="h-5 w-5 text-blue-500" />
-                    <div>
-                        <p className="text-sm text-muted-foreground">当前快捷键</p>
-                        <p className="font-medium text-green-500">{previewHotkey()}</p>
+                    <div className="space-y-1">
+                        <p className="text-sm text-muted-foreground">当前录音快捷键</p>
+                        <p className="font-medium text-foreground">{preview}</p>
+                        <p className="text-xs text-muted-foreground">
+                            Esc 固定用于取消录制，不参与快捷键配置。
+                        </p>
                     </div>
                 </div>
 
-                {!hasValidModifier && (
-                    <p className="text-sm text-red-500">至少需要选择一个修饰键</p>
-                )}
-                {hasValidModifier && (
-                    <p className="text-sm text-muted-foreground">新快捷键预览: {previewHotkey()}</p>
-                )}
-
-                <Button onClick={() => void applyHotkey()} disabled={!hasValidModifier}>
-                    应用快捷键
-                </Button>
-
-                <div className="space-y-4 pt-4 border-t">
-                    <h4 className="font-medium">使用方式</h4>
-                    <div className="space-y-3 text-sm">
-                        <div className="flex items-start gap-3">
-                            <span className="text-blue-500">-</span>
-                            <div>
-                                <p className="font-medium">切换录音</p>
-                                <p className="text-muted-foreground">按一次开始录音，再按一次停止并转写</p>
-                            </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="text-green-500">-</span>
-                            <div>
-                                <p className="font-medium">托盘控制</p>
-                                <p className="text-muted-foreground">点击托盘图标也可以开始/停止录音</p>
-                            </div>
-                        </div>
-                        <div className="flex items-start gap-3">
-                            <span className="text-orange-500">-</span>
-                            <div>
-                                <p className="font-medium">取消</p>
-                                <p className="text-muted-foreground">录音时点击悬浮窗可取消（不转写）</p>
-                            </div>
-                        </div>
-                    </div>
+                <div className="flex items-center gap-3">
+                    <Button onClick={() => void applyHotkey()} disabled={isSaving || isCapturing}>
+                        {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        保存快捷键
+                    </Button>
+                    {saveError && <span className="text-sm text-red-500">{saveError}</span>}
                 </div>
             </div>
         </div>

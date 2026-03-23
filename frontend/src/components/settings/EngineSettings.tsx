@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectContent,
@@ -10,7 +10,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Check, Download, Trash2 } from "lucide-react";
+import { Check, Download, Loader2, Trash2 } from "lucide-react";
 
 interface Engine {
     name: string;
@@ -34,45 +34,43 @@ interface ModelStatus {
 interface PersistedSettings {
     engine: string;
     model: string;
-    speakerModel: "cam++" | "eres2netv2" | "eres2net-large";
+    speakerModel: SpeakerModel;
 }
+
+type SpeakerModel = "cam++" | "eres2netv2" | "eres2net-large";
+type BackendEngine = Pick<Engine, "name" | "models" | "loaded_model" | "available">;
+const FIXED_SPEAKER_MODEL: SpeakerModel = "cam++";
 
 const ENGINE_UI_META: Record<string, { displayName: string; description: string }> = {
     firered: {
         displayName: "FireRedASR",
-        description: "中文识别精度优先，适合离线高质量转写。",
+        description: "适合中文实时与离线转录的 FireRed 系列模型。",
     },
     funasr: {
         displayName: "FunASR",
-        description: "中文识别与热词支持好，支持说话人识别。",
+        description: "默认推荐，兼顾中文识别效果与流式能力。",
     },
     whisper: {
         displayName: "Whisper",
-        description: "通用多语种模型，稳定性较好。",
+        description: "OpenAI Whisper 系列模型。",
     },
     whispercpp: {
         displayName: "Whisper.cpp",
-        description: "轻量本地推理，资源占用较低。",
+        description: "适合 CPU 环境的 Whisper.cpp 部署。",
     },
     parakeet: {
         displayName: "Parakeet",
-        description: "NVIDIA 模型，通常需要 CUDA 环境。",
+        description: "NVIDIA Parakeet 系列模型，需要 CUDA 环境。",
     },
     firered2: {
         displayName: "FireRedASR2",
-        description: "FireRedASR2 models are registered for download and local path management.",
+        description: "FireRedASR2 系列模型。",
     },
     qwen3asr: {
         displayName: "Qwen3-ASR",
-        description: "Qwen3-ASR models are registered for download and local path management.",
+        description: "Qwen3-ASR 系列模型。",
     },
 };
-
-const SPEAKER_MODEL_OPTIONS: Array<"cam++" | "eres2netv2" | "eres2net-large"> = [
-    "cam++",
-    "eres2netv2",
-    "eres2net-large",
-];
 
 function modelDisplayName(model: string): string {
     const names: Record<string, string> = {
@@ -100,20 +98,23 @@ function modelDisplayName(model: string): string {
 
 function speakerModelDisplayName(model: string): string {
     const names: Record<string, string> = {
-        "cam++": "CAM++ (默认)",
-        "eres2netv2": "ERes2NetV2",
+        "cam++": "CAM++",
+        eres2netv2: "ERes2NetV2",
         "eres2net-large": "ERes2Net-large",
     };
     return names[model] || model;
 }
 
+function formatBytes(bytes: number): string {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function EngineSettings() {
     const [selectedEngine, setSelectedEngine] = useState("");
     const [selectedModel, setSelectedModel] = useState("");
-    const [selectedSpeakerModel, setSelectedSpeakerModel] = useState<
-        "cam++" | "eres2netv2" | "eres2net-large"
-    >("cam++");
-    const [loadedSpeakerModel, setLoadedSpeakerModel] = useState<string | null>(null);
+    const [selectedSpeakerModel] = useState<SpeakerModel>(FIXED_SPEAKER_MODEL);
     const [engines, setEngines] = useState<Engine[]>([]);
     const [modelStatuses, setModelStatuses] = useState<ModelStatus[]>([]);
     const [persistedSettings, setPersistedSettings] = useState<PersistedSettings | null>(null);
@@ -123,44 +124,36 @@ export function EngineSettings() {
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
     const currentEngine = useMemo(
-        () => engines.find((e) => e.name === selectedEngine),
-        [engines, selectedEngine]
+        () => engines.find((engine) => engine.name === selectedEngine),
+        [engines, selectedEngine],
     );
 
     const getModelStatus = (engine: string, model: string): ModelStatus | undefined =>
-        modelStatuses.find((s) => s.engine === engine && s.model === model);
+        modelStatuses.find((status) => status.engine === engine && status.model === model);
 
     const getOrderedModels = (engine: string, models: string[]): string[] => {
-        return [...models].sort((a, b) => {
-            const aAvailable = getModelStatus(engine, a)?.available ? 1 : 0;
-            const bAvailable = getModelStatus(engine, b)?.available ? 1 : 0;
-            if (aAvailable !== bAvailable) return bAvailable - aAvailable;
-            return a.localeCompare(b);
+        return [...models].sort((left, right) => {
+            const leftAvailable = getModelStatus(engine, left)?.available ? 1 : 0;
+            const rightAvailable = getModelStatus(engine, right)?.available ? 1 : 0;
+            if (leftAvailable !== rightAvailable) {
+                return rightAvailable - leftAvailable;
+            }
+            return left.localeCompare(right);
         });
     };
 
-    const persistSelection = async (engine: string, model: string) => {
-        if (typeof window === "undefined" || !window.electron) return;
+    const persistEngineSelection = async (engine: string, model: string) => {
+        if (!window.electron) return;
         await window.electron.settings.update({ engine, model });
     };
 
-    const refreshLoadedSpeakerModel = async () => {
-        if (typeof window === "undefined" || !window.electron) return;
-        try {
-            const health = await window.electron.backend.checkHealth();
-            setLoadedSpeakerModel(health?.speaker_model || null);
-        } catch (err) {
-            console.error("Failed to refresh loaded speaker model:", err);
-        }
-    };
-
     const fetchModelStatuses = async () => {
-        if (typeof window === "undefined" || !window.electron) return;
+        if (!window.electron) return;
         try {
             const statuses = await window.electron.backend.getModels();
             setModelStatuses(statuses);
 
-            const hasDownloading = statuses.some((s: ModelStatus) => s.downloading);
+            const hasDownloading = statuses.some((status: ModelStatus) => status.downloading);
             if (hasDownloading && !pollingRef.current) {
                 pollingRef.current = setInterval(() => {
                     void fetchModelStatuses();
@@ -169,33 +162,36 @@ export function EngineSettings() {
                 clearInterval(pollingRef.current);
                 pollingRef.current = null;
             }
-        } catch (err) {
-            console.error("Failed to fetch model statuses:", err);
+        } catch (error) {
+            console.error("Failed to fetch model statuses:", error);
         }
     };
 
     const fetchEngines = async (preferred?: PersistedSettings | null) => {
-        if (typeof window === "undefined" || !window.electron) return;
+        if (!window.electron) return;
         try {
-            const backendEngines = await window.electron.backend.getEngines();
-            if (!backendEngines || backendEngines.length === 0) return;
+            const backendEngines: BackendEngine[] = await window.electron.backend.getEngines();
+            if (!backendEngines || backendEngines.length === 0) {
+                return;
+            }
 
-            const mapped: Engine[] = backendEngines.map(
-                (be: {
-                    name: string;
-                    models: string[];
-                    loaded_model: string | null;
-                    available: boolean;
-                }) => {
-                    const meta = ENGINE_UI_META[be.name] || { displayName: be.name, description: "" };
-                    return { ...be, displayName: meta.displayName, description: meta.description };
-                }
-            );
+            const mapped: Engine[] = backendEngines.map((engine: BackendEngine) => {
+                const meta = ENGINE_UI_META[engine.name] || {
+                    displayName: engine.name,
+                    description: "",
+                };
+                return {
+                    ...engine,
+                    displayName: meta.displayName,
+                    description: meta.description,
+                };
+            });
+
             setEngines(mapped);
 
-            const names = new Set(mapped.map((e) => e.name));
-            const loadedEngine = mapped.find((e) => e.loaded_model)?.name;
-            const firstAvailable = mapped.find((e) => e.available)?.name;
+            const names = new Set(mapped.map((engine) => engine.name));
+            const loadedEngine = mapped.find((engine) => engine.loaded_model)?.name;
+            const firstAvailable = mapped.find((engine) => engine.available)?.name;
             const firstAny = mapped[0]?.name;
 
             const initialEngine =
@@ -209,8 +205,8 @@ export function EngineSettings() {
             if (initialEngine && initialEngine !== selectedEngine) {
                 setSelectedEngine(initialEngine);
             }
-        } catch (err) {
-            console.error("Failed to fetch engines:", err);
+        } catch (error) {
+            console.error("Failed to fetch engines:", error);
         }
     };
 
@@ -218,29 +214,27 @@ export function EngineSettings() {
         let active = true;
 
         const bootstrap = async () => {
-            if (typeof window === "undefined" || !window.electron) return;
+            if (!window.electron) return;
 
             try {
                 const settings = await window.electron.settings.get();
                 const preferred: PersistedSettings = {
                     engine: settings.engine || "firered",
                     model: settings.model || "firered-aed-l",
-                    speakerModel: settings.speakerModel || "cam++",
+                    speakerModel: FIXED_SPEAKER_MODEL,
                 };
+
                 if (!active) return;
                 setPersistedSettings(preferred);
-                setSelectedSpeakerModel(preferred.speakerModel);
 
-                await Promise.all([
-                    fetchModelStatuses(),
-                    fetchEngines(preferred),
-                    refreshLoadedSpeakerModel(),
-                ]);
-            } catch (err) {
-                console.error("Failed to initialize engine settings:", err);
-                await Promise.all([fetchModelStatuses(), fetchEngines(null), refreshLoadedSpeakerModel()]);
+                await Promise.all([fetchModelStatuses(), fetchEngines(preferred)]);
+            } catch (error) {
+                console.error("Failed to initialize engine settings:", error);
+                await Promise.all([fetchModelStatuses(), fetchEngines(null)]);
             } finally {
-                if (active) setIsReady(true);
+                if (active) {
+                    setIsReady(true);
+                }
             }
         };
 
@@ -256,7 +250,9 @@ export function EngineSettings() {
     }, []);
 
     useEffect(() => {
-        if (!currentEngine || currentEngine.models.length === 0) return;
+        if (!currentEngine || currentEngine.models.length === 0) {
+            return;
+        }
 
         const modelSet = new Set(currentEngine.models);
         const preferredModel =
@@ -275,19 +271,21 @@ export function EngineSettings() {
         if (nextModel && nextModel !== selectedModel) {
             setSelectedModel(nextModel);
         }
-    }, [currentEngine, modelStatuses, persistedSettings]);
+    }, [currentEngine, modelStatuses, persistedSettings, selectedModel]);
 
     useEffect(() => {
-        if (!isReady || !selectedEngine || !selectedModel) return;
-        void persistSelection(selectedEngine, selectedModel);
+        if (!isReady || !selectedEngine || !selectedModel) {
+            return;
+        }
+        void persistEngineSelection(selectedEngine, selectedModel);
     }, [isReady, selectedEngine, selectedModel]);
 
     const downloadModel = async (engine: string, model: string) => {
         try {
             await window.electron.backend.downloadModel(engine, model);
             await fetchModelStatuses();
-        } catch (err) {
-            console.error("Failed to download model:", err);
+        } catch (error) {
+            console.error("Failed to download model:", error);
         }
     };
 
@@ -295,30 +293,24 @@ export function EngineSettings() {
         try {
             await window.electron.backend.deleteModel(engine, model);
             await fetchModelStatuses();
-        } catch (err) {
-            console.error("Failed to delete model:", err);
+        } catch (error) {
+            console.error("Failed to delete model:", error);
         }
-    };
-
-    const formatBytes = (bytes: number): string => {
-        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-        if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
     };
 
     const loadModel = async () => {
         if (!currentEngine || !selectedModel) return;
         setIsLoading(true);
         setLoadError(null);
+
         try {
             const result = await window.electron.backend.loadEngine(selectedEngine, selectedModel);
             if (result.error) {
                 setLoadError(result.error);
                 return;
             }
-            await persistSelection(selectedEngine, selectedModel);
+            await persistEngineSelection(selectedEngine, selectedModel);
             await fetchEngines(persistedSettings);
-            await refreshLoadedSpeakerModel();
         } catch (error) {
             setLoadError(String(error));
         } finally {
@@ -332,21 +324,22 @@ export function EngineSettings() {
               .filter((status): status is ModelStatus => Boolean(status))
         : [];
 
-    const speakerModelStatuses = getOrderedModels(
-        "speaker",
-        SPEAKER_MODEL_OPTIONS as unknown as string[]
-    )
-        .map((modelName) => getModelStatus("speaker", modelName))
-        .filter((status): status is ModelStatus => Boolean(status));
+    const speakerModelStatuses = [
+        {
+            model: FIXED_SPEAKER_MODEL,
+            status: getModelStatus("speaker", FIXED_SPEAKER_MODEL),
+        },
+    ];
 
     return (
         <div className="space-y-6">
             <div className="space-y-4">
                 <div>
-                    <h3 className="text-lg font-medium">引擎</h3>
+                    <h3 className="text-lg font-medium">语音转录模型</h3>
                 </div>
+
                 <div className="space-y-2">
-                    <Label>选择引擎</Label>
+                    <Label>转录引擎</Label>
                     <Select
                         value={selectedEngine}
                         onValueChange={(value) => {
@@ -355,12 +348,12 @@ export function EngineSettings() {
                             setPersistedSettings((prev) =>
                                 prev
                                     ? { ...prev, engine: value }
-                                    : { engine: value, model: "", speakerModel: selectedSpeakerModel }
+                                    : { engine: value, model: "", speakerModel: selectedSpeakerModel },
                             );
                         }}
                     >
                         <SelectTrigger className="w-[320px]">
-                            <SelectValue placeholder="请选择引擎" />
+                            <SelectValue placeholder="选择转录引擎" />
                         </SelectTrigger>
                         <SelectContent>
                             {engines.map((engine) => (
@@ -374,14 +367,9 @@ export function EngineSettings() {
                         <p className="text-sm text-muted-foreground">{currentEngine.description}</p>
                     )}
                 </div>
-            </div>
 
-            <div className="space-y-4">
-                <div>
-                    <h3 className="text-lg font-medium">模型</h3>
-                </div>
                 <div className="space-y-2">
-                    <Label>选择模型</Label>
+                    <Label>引擎模型</Label>
                     <Select
                         value={selectedModel}
                         onValueChange={(value) => {
@@ -393,12 +381,12 @@ export function EngineSettings() {
                                           engine: selectedEngine || "firered",
                                           model: value,
                                           speakerModel: selectedSpeakerModel,
-                                      }
+                                      },
                             );
                         }}
                     >
                         <SelectTrigger className="w-[320px]">
-                            <SelectValue placeholder="请选择模型" />
+                            <SelectValue placeholder="选择引擎模型" />
                         </SelectTrigger>
                         <SelectContent>
                             {currentEngine
@@ -408,9 +396,6 @@ export function EngineSettings() {
                                               {modelDisplayName(model)}
                                               {getModelStatus(currentEngine.name, model)?.available && (
                                                   <span className="text-xs text-green-600">已下载</span>
-                                              )}
-                                              {currentEngine.loaded_model === model && (
-                                                  <Check className="h-3 w-3 text-green-500" />
                                               )}
                                           </span>
                                       </SelectItem>
@@ -423,206 +408,97 @@ export function EngineSettings() {
                             当前已加载：{modelDisplayName(currentEngine.loaded_model)}
                         </p>
                     )}
+
+                    <div className="space-y-2 pt-2">
+                        <Button onClick={() => void loadModel()} disabled={isLoading || !currentEngine?.available}>
+                            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {isLoading
+                                ? "正在加载模型..."
+                                : currentEngine?.loaded_model === selectedModel
+                                  ? "重新加载模型"
+                                  : "加载模型"}
+                        </Button>
+                        {loadError && <p className="text-sm text-red-500">{loadError}</p>}
+                        <p className="text-sm text-muted-foreground">
+                            加载模型按钮只会加载当前选中的 ASR 模型，不会切换说话人识别模型。
+                        </p>
+                    </div>
                 </div>
 
                 <div className="space-y-2">
-                    <Label>模型下载状态</Label>
-                    {engineModelStatuses.length > 0 ? (
-                        <div className="border rounded-md divide-y">
-                            {engineModelStatuses.map((status) => (
-                                <div key={status.model} className="flex items-center justify-between p-3">
-                                    <span className="text-sm">{modelDisplayName(status.model)}</span>
-                                    <div className="flex items-center gap-2">
-                                        {status.downloading ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                                                {status.downloaded_bytes && status.size_bytes ? (
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {formatBytes(status.downloaded_bytes)} /{" "}
-                                                        {formatBytes(status.size_bytes)}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-xs text-muted-foreground">下载中...</span>
-                                                )}
-                                            </>
-                                        ) : status.available ? (
-                                            <>
-                                                {status.size_bytes && (
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {formatBytes(status.size_bytes)}
-                                                    </span>
-                                                )}
-                                                {currentEngine && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() =>
-                                                            void deleteModel(currentEngine.name, status.model)
-                                                        }
-                                                        title="删除模型"
-                                                    >
-                                                        <Trash2 className="h-4 w-4 text-red-500" />
-                                                    </Button>
-                                                )}
-                                            </>
-                                        ) : (
-                                            currentEngine && (
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() =>
-                                                        void downloadModel(currentEngine.name, status.model)
-                                                    }
-                                                    title="下载模型"
-                                                >
-                                                    <Download className="h-4 w-4 text-blue-500" />
-                                                </Button>
-                                            )
-                                        )}
-                                        {status.error && (
-                                            <span className="text-xs text-red-500">{status.error}</span>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/30">
-                            后端暂未返回模型状态。
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            <div className="space-y-4">
-                <div>
-                    <h3 className="text-lg font-medium">说话人识别模型</h3>
-                </div>
-                <div className="space-y-2">
-                    <Label>选择说话人模型</Label>
-                    <Select
-                        value={selectedSpeakerModel}
-                        onValueChange={(value: "cam++" | "eres2netv2" | "eres2net-large") => {
-                            setSelectedSpeakerModel(value);
-                            setPersistedSettings((prev) =>
-                                prev
-                                    ? { ...prev, speakerModel: value }
-                                    : {
-                                          engine: selectedEngine || "firered",
-                                          model: selectedModel || "firered-aed-l",
-                                          speakerModel: value,
-                                      }
-                            );
-                            void window.electron.settings.update({ speakerModel: value }).then(() => {
-                                void refreshLoadedSpeakerModel();
-                            });
-                        }}
-                    >
+                    <Label>说话人模型</Label>
+                    <Select value={selectedSpeakerModel} disabled>
                         <SelectTrigger className="w-[320px]">
-                            <SelectValue placeholder="请选择说话人模型" />
+                            <SelectValue placeholder="CAM++" />
                         </SelectTrigger>
                         <SelectContent>
-                            {SPEAKER_MODEL_OPTIONS.map((model) => (
-                                <SelectItem key={model} value={model}>
-                                    {speakerModelDisplayName(model)}
-                                </SelectItem>
-                            ))}
+                            <SelectItem value={selectedSpeakerModel}>
+                                <span className="flex items-center gap-2">
+                                    {speakerModelDisplayName(selectedSpeakerModel)}
+                                    <Check className="h-3 w-3 text-green-500" />
+                                </span>
+                            </SelectItem>
                         </SelectContent>
                     </Select>
                     <p className="text-sm text-muted-foreground">
-                        该选项会影响离线说话人识别和流式说话人匹配，切换后自动重载模型。
+                        当前版本固定使用 CAM++ 作为说话人识别模型，前端暂不提供切换入口。
                     </p>
                 </div>
 
                 <div className="space-y-2">
-                    <Label>说话人模型下载状态</Label>
-                    {speakerModelStatuses.length > 0 ? (
-                        <div className="border rounded-md divide-y">
-                            {speakerModelStatuses.map((status) => (
-                                <div key={status.model} className="flex items-center justify-between p-3">
-                                    <span className="text-sm">{speakerModelDisplayName(status.model)}</span>
-                                    <div className="flex items-center gap-2">
-                                        {loadedSpeakerModel === status.model && (
-                                            <Check className="h-3 w-3 text-green-500" />
-                                        )}
-                                        {status.downloading ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                                                {status.downloaded_bytes && status.size_bytes ? (
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {formatBytes(status.downloaded_bytes)} /{" "}
-                                                        {formatBytes(status.size_bytes)}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-xs text-muted-foreground">下载中...</span>
-                                                )}
-                                            </>
-                                        ) : status.available ? (
-                                            <>
-                                                {status.size_bytes && (
-                                                    <span className="text-xs text-muted-foreground">
-                                                        {formatBytes(status.size_bytes)}
-                                                    </span>
-                                                )}
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => void deleteModel("speaker", status.model)}
-                                                    title="删除模型"
-                                                >
-                                                    <Trash2 className="h-4 w-4 text-red-500" />
-                                                </Button>
-                                            </>
-                                        ) : (
+                    <Label>说话人模型文件</Label>
+                    <div className="divide-y rounded-md border">
+                        {speakerModelStatuses.map(({ model, status }) => (
+                            <div key={model} className="flex items-center justify-between p-3">
+                                <span className="text-sm">{speakerModelDisplayName(model)}</span>
+                                <div className="flex items-center gap-2">
+                                    {status?.downloading ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                                            {status.downloaded_bytes && status.size_bytes ? (
+                                                <span className="text-xs text-muted-foreground">
+                                                    {formatBytes(status.downloaded_bytes)} /{" "}
+                                                    {formatBytes(status.size_bytes)}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground">Downloading...</span>
+                                            )}
+                                        </>
+                                    ) : status?.available ? (
+                                        <>
+                                            {status.size_bytes && (
+                                                <span className="text-xs text-muted-foreground">
+                                                    {formatBytes(status.size_bytes)}
+                                                </span>
+                                            )}
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
-                                                onClick={() => void downloadModel("speaker", status.model)}
-                                                title="下载模型"
+                                                onClick={() => void deleteModel("speaker", model)}
+                                                title="删除模型"
                                             >
-                                                <Download className="h-4 w-4 text-blue-500" />
+                                                <Trash2 className="h-4 w-4 text-red-500" />
                                             </Button>
-                                        )}
-                                        {status.error && (
-                                            <span className="text-xs text-red-500">{status.error}</span>
-                                        )}
-                                    </div>
+                                        </>
+                                    ) : (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => void downloadModel("speaker", model)}
+                                            title="下载模型"
+                                        >
+                                            <Download className="h-4 w-4 text-blue-500" />
+                                        </Button>
+                                    )}
+                                    {status?.error && (
+                                        <span className="text-xs text-red-500">{status.error}</span>
+                                    )}
                                 </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-sm text-muted-foreground p-3 border rounded-md bg-muted/30">
-                            后端暂未返回说话人模型状态。
-                        </div>
-                    )}
-                    {loadedSpeakerModel && (
-                        <p className="text-sm text-green-600">
-                            当前已加载：{speakerModelDisplayName(loadedSpeakerModel)}
-                        </p>
-                    )}
-                </div>
-            </div>
-
-            <div className="space-y-4">
-                <div>
-                    <h3 className="text-lg font-medium">加载所选模型</h3>
-                </div>
-                <div className="space-y-2">
-                    <Button onClick={() => void loadModel()} disabled={isLoading || !currentEngine?.available}>
-                        {isLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        {isLoading
-                            ? "加载中..."
-                            : currentEngine?.loaded_model === selectedModel
-                              ? "已加载"
-                              : "加载模型"}
-                    </Button>
-                    {loadError && <p className="text-sm text-red-500">{loadError}</p>}
-                    <p className="text-sm text-muted-foreground">
-                        首次加载可能会自动下载模型文件，耗时取决于模型大小和网络速度。
-                    </p>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>
     );
 }
-
