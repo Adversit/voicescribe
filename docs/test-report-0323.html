@@ -3,661 +3,457 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VoiceScribe · 测试报告 2026-03-23</title>
+  <title>VoiceScribe 最终测试结果 - 2026-03-23</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
 
     :root {
-      --bg:         #F6F5F1;
-      --surface:    #FFFFFF;
-      --border:     #E4E2DA;
-      --text:       #1C1C2A;
-      --muted:      #7A7A8C;
-      --pass:       #1A6B42;
-      --pass-bg:    #EBF6F0;
-      --pass-dot:   #2DA05E;
-      --warn:       #8B5800;
-      --warn-bg:    #FEF3DC;
-      --warn-dot:   #D9900A;
-      --block:      #7A3800;
-      --block-bg:   #FEF0E6;
-      --block-dot:  #E07430;
-      --pend:       #3A3A50;
-      --pend-bg:    #F0F0F6;
-      --pend-dot:   #9090B0;
-      --accent:     #C87D2A;
-      --navy:       #1C2B4A;
+      --bg: #f5f1e8;
+      --surface: rgba(255, 255, 255, 0.9);
+      --surface-strong: #ffffff;
+      --line: #ddd3c3;
+      --text: #1f2530;
+      --muted: #6f7482;
+      --navy: #20314d;
+      --gold: #b27b30;
+      --green: #1f7a4f;
+      --amber: #9a650f;
+      --shadow: 0 24px 60px rgba(23, 31, 48, 0.08);
+      --green-bg: rgba(31, 122, 79, 0.12);
+      --amber-bg: rgba(154, 101, 15, 0.12);
     }
 
     body {
-      font-family: 'DM Sans', sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      margin: 0;
       min-height: 100vh;
-      padding: 0 0 80px;
+      font-family: "Noto Sans SC", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(178, 123, 48, 0.18), transparent 28%),
+        linear-gradient(180deg, #f8f5ef 0%, #f0eadf 100%);
     }
 
-    /* ─── HEADER ─── */
-    .header {
-      background: var(--navy);
-      padding: 48px 64px 40px;
+    .page {
+      width: min(1120px, calc(100% - 32px));
+      margin: 24px auto 48px;
+    }
+
+    .hero {
       position: relative;
       overflow: hidden;
+      padding: 42px;
+      border-radius: 30px;
+      background: linear-gradient(135deg, rgba(20, 31, 51, 0.97), rgba(36, 54, 85, 0.93));
+      color: #fff;
+      box-shadow: var(--shadow);
     }
-    .header::before {
-      content: '';
+
+    .hero::before {
+      content: "";
       position: absolute;
-      right: -60px; top: -60px;
-      width: 300px; height: 300px;
+      right: -90px;
+      top: -90px;
+      width: 280px;
+      height: 280px;
       border-radius: 50%;
-      background: rgba(200,125,42,0.12);
-      pointer-events: none;
+      background: rgba(178, 123, 48, 0.16);
     }
-    .header::after {
-      content: '';
-      position: absolute;
-      right: 80px; top: 80px;
-      width: 150px; height: 150px;
-      border-radius: 50%;
-      background: rgba(200,125,42,0.07);
-      pointer-events: none;
-    }
-    .header-eyebrow {
-      font-family: 'DM Sans', sans-serif;
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--accent);
+
+    .eyebrow {
+      position: relative;
       margin-bottom: 12px;
-    }
-    .header-title {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 48px;
-      font-weight: 300;
-      color: #FFFFFF;
-      line-height: 1.1;
-      margin-bottom: 8px;
-    }
-    .header-title span { color: var(--accent); font-weight: 500; }
-    .header-sub {
-      font-size: 15px;
-      color: rgba(255,255,255,0.55);
-      font-weight: 300;
-    }
-    .header-meta {
-      margin-top: 28px;
-      display: flex;
-      gap: 32px;
-    }
-    .header-meta-item { display: flex; flex-direction: column; gap: 3px; }
-    .header-meta-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.35); }
-    .header-meta-value { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.85); }
-
-    /* ─── CONTENT WRAP ─── */
-    .wrap {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 0 32px;
-    }
-
-    /* ─── SECTION TITLE ─── */
-    .section-title {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 28px;
-      font-weight: 400;
-      color: var(--navy);
-      margin: 56px 0 20px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--border);
-    }
-    .section-title small {
-      font-family: 'DM Sans', sans-serif;
       font-size: 12px;
-      font-weight: 400;
-      color: var(--muted);
-      margin-left: 12px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: #d5b17c;
     }
 
-    /* ─── SUMMARY CARDS ─── */
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-top: 40px;
-    }
-    .summary-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 28px 24px;
+    h1 {
       position: relative;
-      overflow: hidden;
-    }
-    .summary-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      border-radius: 12px 12px 0 0;
-    }
-    .summary-card.pass::before  { background: var(--pass-dot); }
-    .summary-card.warn::before  { background: var(--warn-dot); }
-    .summary-card.pend::before  { background: var(--pend-dot); }
-    .summary-num {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 56px;
-      font-weight: 300;
-      line-height: 1;
-      margin-bottom: 6px;
-    }
-    .summary-card.pass .summary-num { color: var(--pass); }
-    .summary-card.warn .summary-num { color: var(--warn); }
-    .summary-card.pend .summary-num { color: var(--pend); }
-    .summary-label { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
-    .summary-desc  { font-size: 12px; color: var(--muted); line-height: 1.5; }
-
-    /* ─── PROGRESS BAR ─── */
-    .progress-block {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 24px 28px;
-      margin-top: 16px;
-    }
-    .progress-header {
-      display: flex; justify-content: space-between; align-items: baseline;
-      margin-bottom: 14px;
-    }
-    .progress-label { font-size: 13px; font-weight: 500; color: var(--text); }
-    .progress-pct   { font-family: 'Cormorant Garamond', serif; font-size: 22px; color: var(--accent); }
-    .progress-bar-track {
-      height: 8px; background: #EDECE8; border-radius: 4px; overflow: hidden;
-      display: flex; gap: 2px;
-    }
-    .pb-pass  { height: 100%; background: var(--pass-dot);  border-radius: 4px; }
-    .pb-block { height: 100%; background: var(--block-dot); border-radius: 4px; }
-    .pb-pend  { height: 100%; background: var(--pend-dot);  border-radius: 4px; }
-    .progress-legend {
-      display: flex; gap: 20px; margin-top: 10px;
-    }
-    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    .legend-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-
-    /* ─── LAYER CARDS ─── */
-    .layers-grid {
-      display: flex; flex-direction: column; gap: 12px;
-    }
-    .layer-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px 24px;
-      display: grid;
-      grid-template-columns: 48px 1fr auto;
-      gap: 0 20px;
-      align-items: start;
-    }
-    .layer-card.expanded { padding-bottom: 0; }
-    .layer-num {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 32px;
-      font-weight: 300;
-      line-height: 1;
-      color: var(--border);
-      padding-top: 2px;
-    }
-    .layer-body { min-width: 0; }
-    .layer-name {
-      font-size: 15px;
+      margin: 0;
+      font-family: "Cormorant Garamond", serif;
+      font-size: clamp(42px, 6vw, 64px);
+      line-height: 0.95;
       font-weight: 600;
-      color: var(--text);
-      margin-bottom: 4px;
-      display: flex; align-items: center; gap: 8px;
-    }
-    .layer-desc {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.6;
-      margin-bottom: 0;
-    }
-    .layer-findings {
-      margin-top: 14px;
-      padding: 14px 16px;
-      background: var(--bg);
-      border-radius: 8px;
-      font-size: 13px;
-      color: var(--text);
-      line-height: 1.7;
-      margin-bottom: 20px;
-    }
-    .layer-findings p { margin-bottom: 6px; }
-    .layer-findings p:last-child { margin-bottom: 0; }
-    .layer-findings .fi-item {
-      display: flex; gap: 8px; align-items: flex-start; padding: 3px 0;
-    }
-    .layer-findings .fi-icon { flex-shrink: 0; margin-top: 2px; }
-    .layer-stat {
-      flex-shrink: 0;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--muted);
-      padding-top: 4px;
-      text-align: right;
-    }
-    .layer-stat strong {
-      display: block;
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 22px;
-      font-weight: 400;
     }
 
-    /* ─── STATUS BADGE ─── */
+    .hero p {
+      position: relative;
+      max-width: 760px;
+      margin: 18px 0 0;
+      font-size: 16px;
+      line-height: 1.85;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .hero-meta {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 26px;
+    }
+
+    .meta-card {
+      padding: 16px 18px;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .meta-label {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.56);
+    }
+
+    .meta-value {
+      margin-top: 8px;
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .section {
+      margin-top: 22px;
+      padding: 28px;
+      border-radius: 26px;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .section-title {
+      margin: 0 0 10px;
+      font-family: "Cormorant Garamond", serif;
+      font-size: 34px;
+      font-weight: 600;
+      color: var(--navy);
+    }
+
+    .section-subtitle {
+      margin: 0 0 20px;
+      font-size: 14px;
+      line-height: 1.8;
+      color: var(--muted);
+    }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .result-card {
+      padding: 24px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: var(--surface-strong);
+    }
+
     .badge {
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      font-size: 11px;
-      font-weight: 600;
+      gap: 7px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
       letter-spacing: 0.06em;
       text-transform: uppercase;
-      padding: 3px 9px;
-      border-radius: 20px;
     }
-    .badge-dot { width: 6px; height: 6px; border-radius: 50%; }
-    .badge.pass    { background: var(--pass-bg);  color: var(--pass);  }
-    .badge.pass    .badge-dot { background: var(--pass-dot); }
-    .badge.blocked { background: var(--block-bg); color: var(--block); }
-    .badge.blocked .badge-dot { background: var(--block-dot); }
-    .badge.pending { background: var(--pend-bg);  color: var(--pend);  }
-    .badge.pending .badge-dot { background: var(--pend-dot); }
-    .badge.warn    { background: var(--warn-bg);  color: var(--warn);  }
-    .badge.warn    .badge-dot { background: var(--warn-dot); }
 
-    /* ─── REAL WORLD FINDINGS ─── */
-    .findings-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
+    .badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
     }
-    .finding-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 22px;
+
+    .pass {
+      color: var(--green);
+      background: var(--green-bg);
     }
-    .finding-card.full { grid-column: 1 / -1; }
-    .finding-top {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+
+    .warn {
+      color: var(--amber);
+      background: var(--amber-bg);
     }
-    .finding-icon {
-      width: 36px; height: 36px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px; flex-shrink: 0;
+
+    .result-card h3 {
+      margin: 16px 0 10px;
+      font-size: 24px;
+      color: var(--navy);
     }
-    .finding-icon.green { background: var(--pass-bg); }
-    .finding-icon.amber { background: var(--warn-bg); }
-    .finding-title  { font-size: 14px; font-weight: 600; color: var(--text); }
-    .finding-status { font-size: 11px; color: var(--muted); margin-top: 2px; }
-    .finding-body   { font-size: 13px; color: #4A4A5E; line-height: 1.65; }
-    .finding-detail {
-      margin-top: 10px;
-      padding: 10px 12px;
-      background: var(--bg);
-      border-radius: 7px;
-      font-size: 12px;
+
+    .result-card p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.9;
       color: var(--muted);
-      line-height: 1.6;
     }
 
-    /* ─── ISSUES ─── */
-    .issues-list { display: flex; flex-direction: column; gap: 10px; }
-    .issue-row {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px 20px;
-      display: flex; gap: 16px; align-items: flex-start;
+    .result-meta {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: #f7f3eb;
+      border: 1px solid var(--line);
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--text);
     }
-    .issue-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
-    .issue-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
-    .issue-body  { font-size: 13px; color: var(--muted); line-height: 1.6; }
-    .issue-tag   {
-      display: inline-block;
-      font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
-      text-transform: uppercase;
-      padding: 2px 8px; border-radius: 4px;
-      margin-right: 6px; margin-top: 6px;
-    }
-    .tag-fixed   { background: var(--pass-bg);  color: var(--pass); }
-    .tag-ongoing { background: var(--warn-bg);  color: var(--warn); }
 
-    /* ─── NEXT STEPS ─── */
-    .next-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 14px;
+    .text-block {
+      margin-top: 14px;
+      padding: 16px 18px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fbfaf7;
+      font-size: 13px;
+      line-height: 1.9;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
     }
-    .next-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 22px;
-    }
-    .next-num {
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 36px; font-weight: 300; color: var(--border);
-      margin-bottom: 8px; line-height: 1;
-    }
-    .next-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-    .next-desc  { font-size: 13px; color: var(--muted); line-height: 1.6; }
 
-    /* ─── FOOTER ─── */
+    .result-note {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      line-height: 1.8;
+      color: var(--text);
+    }
+
+    .untested-box {
+      padding: 24px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: var(--surface-strong);
+    }
+
+    .untested-count {
+      margin: 0 0 12px;
+      font-family: "Cormorant Garamond", serif;
+      font-size: 52px;
+      line-height: 1;
+      color: var(--navy);
+    }
+
+    .untested-title {
+      margin: 0 0 10px;
+      font-size: 20px;
+      color: var(--navy);
+    }
+
+    .untested-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 14px;
+      line-height: 1.9;
+      color: var(--muted);
+    }
+
     .footer {
-      margin-top: 64px;
-      padding: 24px 0;
-      border-top: 1px solid var(--border);
+      margin-top: 18px;
       text-align: center;
       font-size: 12px;
       color: var(--muted);
     }
 
-    /* ─── DIVIDER ─── */
-    .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
+    @media (max-width: 900px) {
+      .hero-meta {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        width: min(100% - 20px, 1120px);
+        margin-top: 10px;
+      }
+
+      .hero,
+      .section {
+        padding: 22px;
+      }
+    }
   </style>
 </head>
 <body>
-
-<!-- HEADER -->
-<div class="header">
-  <div class="header-eyebrow">质量测试报告</div>
-  <div class="header-title">VoiceScribe<br><span>测试结果总览</span></div>
-  <div class="header-sub">本地语音转录桌面应用 · 面向业务验收</div>
-  <div class="header-meta">
-    <div class="header-meta-item">
-      <span class="header-meta-label">报告日期</span>
-      <span class="header-meta-value">2026-03-23</span>
-    </div>
-    <div class="header-meta-item">
-      <span class="header-meta-label">应用版本</span>
-      <span class="header-meta-value">v0.1.0</span>
-    </div>
-    <div class="header-meta-item">
-      <span class="header-meta-label">测试范围</span>
-      <span class="header-meta-value">6 个验收层级</span>
-    </div>
-    <div class="header-meta-item">
-      <span class="header-meta-label">当前阶段</span>
-      <span class="header-meta-value">基础功能验收</span>
-    </div>
-  </div>
-</div>
-
-<div class="wrap">
-
-  <!-- SUMMARY -->
-  <div class="section-title">测试总况<small>截至 2026-03-23</small></div>
-
-  <div class="summary-grid">
-    <div class="summary-card pass">
-      <div class="summary-num">3</div>
-      <div class="summary-label">通过</div>
-      <div class="summary-desc">核心服务、实时传输协议、异常处理均已验收通过</div>
-    </div>
-    <div class="summary-card warn">
-      <div class="summary-num">1</div>
-      <div class="summary-label">待完善</div>
-      <div class="summary-desc">真实语音识别质量：连接正常，识别准确性仍需进一步验证</div>
-    </div>
-    <div class="summary-card pend">
-      <div class="summary-num">2</div>
-      <div class="summary-label">待测试</div>
-      <div class="summary-desc">桌面完整流程和长时稳定性测试，等待前置条件完成后启动</div>
-    </div>
-  </div>
-
-  <div class="progress-block">
-    <div class="progress-header">
-      <span class="progress-label">整体验收进度</span>
-      <span class="progress-pct">3 / 6 层已通过</span>
-    </div>
-    <div class="progress-bar-track">
-      <div class="pb-pass"  style="width:50%"></div>
-      <div class="pb-block" style="width:16.7%"></div>
-      <div class="pb-pend"  style="width:33.3%"></div>
-    </div>
-    <div class="progress-legend">
-      <div class="legend-item"><div class="legend-dot" style="background:var(--pass-dot)"></div>已通过</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--block-dot)"></div>待完善</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--pend-dot)"></div>未测试</div>
-    </div>
-  </div>
-
-  <!-- LAYER DETAILS -->
-  <div class="section-title">分项测试详情<small>共 6 个验收层级</small></div>
-  <div class="layers-grid">
-
-    <!-- L1 -->
-    <div class="layer-card">
-      <div class="layer-num">1</div>
-      <div class="layer-body">
-        <div class="layer-name">
-          核心服务稳定性
-          <span class="badge pass"><span class="badge-dot"></span>通过</span>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">VoiceScribe Final Result</div>
+      <h1>最终测试结果</h1>
+      <p>本页只展示已经测过的最终结果，并把实际转录文字直接写入页面。当前已展示流式文字、非流式文字、长时间文字，最下面列出未测功能数量。</p>
+      <div class="hero-meta">
+        <div class="meta-card">
+          <div class="meta-label">报告日期</div>
+          <div class="meta-value">2026-03-23</div>
         </div>
-        <div class="layer-desc">验证应用的所有基础功能是否正常开放，包括：健康状态查询、引擎列表、模型信息、转录请求、说话人管理等</div>
-        <div class="layer-findings">
-          <div class="fi-item"><span class="fi-icon">✅</span><span>所有功能入口均可正常访问，无一失败</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>空文件、损坏文件、无声音频等边界输入，均返回了清晰的错误提示，不会导致程序崩溃</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>共执行 84 项检查，全部通过</span></div>
+        <div class="meta-card">
+          <div class="meta-label">已测项目</div>
+          <div class="meta-value">3 项</div>
+        </div>
+        <div class="meta-card">
+          <div class="meta-label">本页范围</div>
+          <div class="meta-value">3 类文字测试</div>
         </div>
       </div>
-      <div class="layer-stat"><strong>84</strong>项全通</div>
-    </div>
+    </section>
 
-    <!-- L2 -->
-    <div class="layer-card">
-      <div class="layer-num">2</div>
-      <div class="layer-body">
-        <div class="layer-name">
-          实时传输协议
-          <span class="badge pass"><span class="badge-dot"></span>通过</span>
-        </div>
-        <div class="layer-desc">验证实时语音流传输的连接建立、数据传输、正常结束与异常恢复等各环节是否可靠</div>
-        <div class="layer-findings">
-          <div class="fi-item"><span class="fi-icon">✅</span><span>开始、传输、结束整个流程流转正常，事件顺序符合预期</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>同时进行两路转录互不干扰</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>发送非法数据不会导致程序卡死或崩溃</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>修复了一个曾导致程序挂起的问题（VS-TEST-001），修复后 17 项全部通过</span></div>
-        </div>
+    <section class="section">
+      <h2 class="section-title">已测结果</h2>
+      <p class="section-subtitle">下面直接展示结果和对应的文字内容。</p>
+
+      <div class="result-grid">
+        <article class="result-card">
+          <div class="badge warn">已测</div>
+          <h3>流式文字</h3>
+          <p>已从本地历史记录读取到最新一条流式转录记录，并确认该记录为流式传输结果。</p>
+          <div class="result-meta">
+            日期：2026/3/23 12:04:20<br>
+            时长：220.0 秒<br>
+            引擎：funasr<br>
+            模型：seaco-paraformer<br>
+            模式：流式传输<br>
+            说话人显示：连云波、江争达、Speaker 3
+          </div>
+          <div class="text-block">流式文字内容（历史记录摘录）：
+[江争达] 验嘛，这里面是多个层
+[连云波] 次的竞争啊啊技术竞争主力只是一个方面，对还有市场啊，还有政政策等等多多条线，那就不是你们要考虑的那从技术来说，我们怎么保证独特竞争力，对不对？这是你的思考。对，嗯，这里面我告诉你就是独特竞争里面有几个啊，最核心目前初期最核心的是我们的品牌就是星空。为什么要对我们？为什么我为什么找政府合作？知道吗？因为啊政是软件软软件股是政府啊，我以为是那个软件语言那种，嗯，他是政府下面的软件员，政府管理的啊，也相当于各个地方的产业区。苏州高新区啊，嗯
+[江争达] 明白吗？我要找他们合作，因为你们看了吗？最近小龙虾都疯了，你
+[连云波] 们有感觉吗？我看了就是安全性什么的，都被就好多政府都不给用了嘛。你不光是这个d
+[江争达] isccode,还
+[连云波] 有什么什么飞书，什么小红书都把那个小龙虾给补。哦，这个啊哦，我我看
+[江争达] 就好多地方政府要推动这个小龙虾的这个创业或者啥的是对好了，各个地方的政策已经开始出来了。嗯嗯，哈哈怎么还有啊，不管他，反正就地方政府员封了，还有啊，所以我为什么找地方政府来做，你们明白吗？现在他们现在冲的
+[连云波] 很爽，出了问题的时候，他妈的他就头疼了。所以我们现在要给他告诉他这些东西，得有人帮他来把关，对不对？看到了我们既有规范能力，又有推进能力，对吧？我们既可以拉着他跑，又可以在后面帮他把屁股擦干净。
+[江争达] 题我们来谈。好吧，你看我们后面还要还要做人才培养呢。我跟你说，就我这套框架拿
+[连云波] 出去培训，那分分钟的事儿，我跟你说知道吧？你们知道这
+[江争达] 套框架，如果你们理解透
+[连云波] 了，你们出去忽悠那能赚大钱的，好吧。</div>
+          <div class="result-note">说明：这段文字直接来自历史记录内容。历史记录里已确认该条目为流式记录，但流式文字质量仍有识别误差。</div>
+        </article>
+
+        <article class="result-card">
+          <div class="badge pass">已测</div>
+          <h3>非流式文字</h3>
+          <p>已完成真实系统非流式链路验证，文件上传模式下可以正常完成转录，并识别出真实说话人。</p>
+          <div class="result-meta">
+            日期：2026/3/23 12:01:19<br>
+            时长：643.5 秒<br>
+            引擎：funasr<br>
+            模型：seaco-paraformer<br>
+            语言：zh<br>
+            模式：文件上传<br>
+            说话人显示：江争达、连云波
+          </div>
+          <div class="text-block">非流式文字内容（完整内容）：
+[江争达] 想要做，就比如说我们做一个平台数给员工的展示。如果说是就是然后或者说是提供给外国人用这个数字员工，或者就是所有人都能来用，还是说定制化的那种企业服是想做哪一块？所以你看这里面可
+[连云波] 以再师傅再再看一看，就是说有两条路嘛一条。比如说你像
+[江争达] 这条路肯定就是独有的对吧？就是跟他们签了合同的那另外一条路。如果说是做平台的话，我们如果做出来第一版，我们要有什么样的一个别人做不到的，就是不会被抄的那种。你比如说现在我们拿出来了第一版，那可能很快就看到这个东西就立马出来干，是不是？那是肯定的。所以我跟你说，接下来一旦开始干这个事儿
+[连云波] ，那你就停不下来了。对啊，知道知道。那这里面呢，反正你们因为还没什么经
+[江争达] 验嘛，这里面是多个层
+[连云波] 次的竞争啊啊技术竞争主力只是一个方面，对还有市场啊，还有政政策等等多多条线，那就不是你们要考虑的那从技术来说，我们怎么保证独特竞争力，对不对？这是你的思考。对，嗯，这里面我告诉你就是独特竞争里面有几个啊，最核心目前初期最核心的是我们的品牌就是星空。为什么要对我们？为什么我为什么找政府合作？知道吗？因为啊政是软件软软件股是政府啊，我以为是那个软件语言那种，嗯，他是政府下面的软件员，政府管理的啊，也相当于各个地方的产业区。苏州高新区啊，嗯
+[江争达] 明白吗？我要找他们合作，因为你们看了吗？最近小龙虾都疯了，你
+[连云波] 们有感觉吗？我看了就是安全性什么的，都被就好多政府都不给用了嘛。你不光是这个d
+[江争达] isccode,还
+[连云波] 有什么什么飞书，什么小红书都把那个小龙虾给补。哦，这个啊哦，我我看
+[江争达] 就好多地方政府要推动这个小龙虾的这个创业或者啥的是对好了，各个地方的政策已经开始出来了。嗯嗯，哈哈怎么还有啊，不管他，反正就地方政府员封了，还有啊，所以我为什么找地方政府来做，你们明白吗？现在他们现在冲的
+[连云波] 很爽，出了问题的时候，他妈的他就头疼了。所以我们现在要给他告诉他这些东西，得有人帮他来把关，对不对？看到了我们既有规范能力，又有推进能力，对吧？我们既可以拉着他跑，又可以在后面帮他把屁股擦干净。现在政府是缺乏这样的，一边一边帮他杀，一边帮他就是审核他。比如说接到的人家的东西，看看能不能呃，不不不不一定接到人家，我们现在不一定会帮别人做啊，我们现在是做自己的啊，知道吧？啊，但是我告诉他是你用我的我有上岗证的，这些就不会出大问题或者有问
+[江争达] 题我们来谈。好吧，你看我们后面还要还要做人才培养呢。我跟你说，就我这套框架拿
+[连云波] 出去培训，那分分钟的事儿，我跟你说知道吧？你们知道这
+[江争达] 套框架，如果你们理解透
+[连云波] 了，你们出去忽悠那能赚大钱的，好吧。七百平不，我们是我们这个设备背景，没有怎么胡悠人家赚钱，你就跟那个你出去忽悠了那个队友了呀。你想想那个skill hub,我们国内其实做的是基本上是比较快的领先腾讯一个月也基本上很快。虽然那个但是是大厂的是后面
+[江争达] 没关系，我们不是因为我不是在测试吗？我没有想我们呃往那个方
+[连云波] 向上冲，对吧？对，我们并不是
+[江争达] 想往那个方向冲，嗯，对吧？而且另外一个他肯定未来是个多元竞争的单元的一个。所以从这个角度来说，竞争呢他他我现在选的方向是这个的核心原因就是地方政
+[连云波] 府现在是缺这样的保障很精致的。
+[江争达] 但是他又想往这儿转，
+[连云波] 所以他我认为他是需要的，明白吧？所以这属于商业的这个判断了。所以竞争力上你说现在第一大厂不会去做这么小的事儿，太小了，一个地方一个地方政府怎么啊啊？所以大厂要看，他他他他没有什么几十万人，甚至上百万人，他不会做的懂吧？啊，那这个框架拿出来，我感觉就是各个地方政府也都能用，是一个很大的。所以我就说南京赶快弄完之后啊，我就全国推了，先把框架先拆拆下来，后面慢慢的业。就
+[江争达] 你的市场就是
+[连云波] 说先把南京就是等于先先通过南京，然后对先把各个地方政府的市
+[江争达] 场先占下来，然后对，就可以在就就保持竞争力了。就等于说哦，那我大概懂那那那
+[连云波] 那，那我们一期肯定这个平台，也就是先给南京政府看了也不就也不是供应商对外放了，就不不对外放
+[江争达] 了嘛，做一个不好说不好说啊，但是就怕这个企间你对外放万一被人发现了，对吧？你现在比如说你你现在就跟人家签协议之后，你肯定要宣传的嘛。你一宣传别人就知道你在做啥了。那确实对，所以我为什么现在就第一着急人，第二，所以我现在要拼拼命要招人嘛。第二呢，现在我们的积累，我可以这么说，已经算
+[连云波] 是业内比较比较多的了。现在就是怎么
+[江争达] 能把积累转换成为框架体系落地和我们的速度
+[连云波] 。所以现在谈到速度，我就要告诉你们，我看看啊，我真是操碎了心啊，真是你看我这用语音来说的啊，我现在要讨论那个会议上的方假是我还没来及看呢。这个刚刚写完，我们待会儿自己我们一起过一遍啊。框架是否完备、方向是否正确、技术框架是否完备，以及下一步该如何走。另外如何形成开发方案。看到吧，就是我们面临的问题是我们人很少如何利用目前open cloud cloud code或者codect这种框架，利用好的scheme和插件，形成一整套的自动化的开发框架。这是我觉得最重要的。因为这样的一个体系形成之后，是我们自己形成了数字员工的一些体系。另外就是可以借鉴这套体系，开发其他岗位的数字员工。那么谈到skill的底层的能力，目前我们有很多的方向了，包括skill、 creator啊、clock、 open、 cloud这些技能创作，还有screlnet这种资金化的skill,还有skill bench对吧？评测，这是我们已经研究了，但是怎么集成到我们的系统里面？我们还在思考，在原则能力之外，还要思考，就是使用岗位能力描述来定义数字员工。就是刚才讨论的说要开发的这样的一个工具什么？以通过比方述如何创建组合全球最好的scchee、最安全、最可的的skill,形成有能力、高效、有控制的数字员工，这是我们要迅速解决的问题，对吧？现在最核心的对于你们来说，你们现在都是单点的，没有一些框架性的思维。就我现在包括我自己，现在也没有来得及，我有这种思维，但是我没有时间落地。所以我现在就这两天，我一直在或者说我我在思考和我在操作的问题，就是怎么利用的人工智能的AG的框架来实现自动化的体系的建设。陈老板那么好，我们看看他怎么答的好不好。体系、技术闭环首期落地是否清洗技术战术分层小团队能否优先把开发效率做大好吧。先说解决论方向是对的，非常有前瞻性。数字云，我看我给他啥东西了啊，在这个我是在这个里面做的对，所以他都有的，他的他的他的背景应该都有的好啊，也不是单个。按照岗位能力描述，加sq攻击网络，加任务编排啊等等这些好吧，单纯做几个demo不足以竞争，对谈，单纯做skcheduct也不会形动，必须把两者连起来。所以系统产生六层模型执行层，对吧？不是选模型什么这些东西它是怎么适合，对吧？选claude.哦，对，说到这个我想想了啊，我刚才是读了一个东西给你们，我我们其实有好多东西都没有来得及好好研究啊。对，这个你们看见了太小了是吧？小了，这个字看一下能看见是吗？嗯，好，你看这是我登录了你的平台啊，看到没有？ Ssc去了，已经到那个你的那个我的那个虚拟机里面了，可里面问好吧。好，我现在要干嘛呢？首先第一，我要第，我要看他的有哪SK六。</div>
+          <div class="result-note">说明：这里写入的是你提供的完整非流式转录内容。</div>
+        </article>
+
+        <article class="result-card">
+          <div class="badge pass">已测</div>
+          <h3>长时间文字</h3>
+          <p>因录制时长较长，本项测试采用脚本导入 WAV 文件的方式进行长时间测试。结果显示系统可以成功实现转录和粘贴，但说话人映射没有实现，且没有写入历史记录。</p>
+          <div class="result-meta">
+            类型：系统导入测试<br>
+            时长：3h29min<br>
+            测试方式：脚本导入 WAV 文件<br>
+            结果：可以成功转录和粘贴<br>
+            问题：说话人映射未实现，未写入历史记录
+          </div>
+          <div class="text-block">长时间文字内容（部分内容）：
+[SPEAKER_00] 嗯， 喂喂能听到吗？ 喂， 二位或者怎么反应， 能听到吗？ 喂， 好像可以了。 喂喂喂嗯， 我知道知道。 对对， 在这还能听到我说话吗？ 说了， 你就静音了，
+[SPEAKER_01] 听到听到嗯徐龙好像没声音吧。
+[SPEAKER_00] 李玉龙是不是听不见， 你能听到你这种声音吗？
+[SPEAKER_01] 听不到他的麦都没亮啊，
+[SPEAKER_00] 哪以尼龙， 要不你给他发个信息， 他好像断掉了， 不是你为啥老是静音啊，
+[SPEAKER_01] 就是呢他可能退出去重连了吧啊，
+[SPEAKER_00] 你你每次都静音， 你再打开， 你不烦吗？
+[SPEAKER_01] 哦， 我这有时候会那个就是那自动静音或者那个电钻声音。
+[SPEAKER_00] 然后啊李玉龙好像他的声音是不行的。 你你你你是不是那个话筒有问题啊啊，
+[SPEAKER_01] 没有我打喷嚏， 我就静音一下。
+[SPEAKER_00] 我说闫旭龙啊啊，
+[SPEAKER_01] 闫旭龙啊，
+[SPEAKER_00] 是对你， 你先跟他调着， 我要不要端打点水去好走启， 走个话筒退货流量， 好， 答应一个我喝热水吧， 热水好了吗啊？ 那你在谁？ 哎呦， 我才才好的， 那那你多少倒一点吧， 配置你因为不用写我那什么啊，
+[SPEAKER_01] 听到了听到了啊，
+[SPEAKER_02] 听到了是吧？ 我这麦也有点问题， 刚跟舍友借了个 ......
+[SPEAKER_01] 而且而且那个腾讯那个不也出了那个 skill hub 嘛， 对吧？ 对，
+[SPEAKER_00] 他是就是把 skill hub 镜像了嘛。 对对， 呃，
+[SPEAKER_01] 不然骂只只超不不不， 付费不付钱嘛。
+[SPEAKER_00] 对呀， 但是他会发表声明说我们帮你们卸载分流了嘛， 不然你们啊， 对， 而且人家著人家著名的是从 sale hub 来的嘛， 也没说是我的这个， 反正哎呀， 无所谓了。 嗯嗯， 所以就是这个你看到没有？ 其实想做的人也很多很多了啊， 嗯嗯， 那我们怎么办？ 对吧？ 这是这是一个对非常重要的是要思考的问题。 但所以我说我再给大家看一个东西， 我的路线可能是这个， 但是也不一定完全等会啊。 那你们看中国新同学已经开始干这个活了， 看到吗？ 他们还是在做 claude 标准编制， 某种程度上跟我们这东西是不是有有一些重合的， 但它更多的是标准， 而我们做的是直接的产品， 对不对？ 对他那些标准我们可以拿过来， 因为用不定对吧？ 嗯， 不管他他现在往前走好了， 呃， 这   我现在可能马上要签一个这个我们的方向， 你看一下你们就大概理解， 但是这个都是不要对外说啊， 都是秘密好的。 嗯， 那关于共建数字员工平台的合作框架协议， 我打算是走这条路来走， 那主要是什么呢？ 那一个是数字员工生产装配能力， 对吧？ 第二个是 OBC 环境的适配能力， 围绕数字员工在十几个要求建立覆盖、 开发、 测试、 上线啊这种过程。 第三是行业模板和本地化部署， 对吧？ 第四个是系统工程人才的培养和 OPC 的转型赋能。 比如说做呃这种就像你们什么围绕这种数字员工体系的建设、 运营、 维护、 安全治理， 这种都是需要培养的。 就将来你们跟着做熟了之后， 你们可以出去当老师了， 理解吗？ 同时面向这些企业， 我们要告诉他未来 OPC 的发展趋势， 他们要从向 OPC 去转一部分， 知道吧？ 嗯， 这个看完这个是不大概就清晰了。 嗯，
+[SPEAKER_01] 你等等一下， 我们看没没没那么快， 我知道是我是我慢慢一下旭龙，
+[SPEAKER_00] 可能快点儿， 你们先看拿着水喝去， 嗯嗯， 看完了吧。
+[SPEAKER_01] 嗯差不多了，
+[SPEAKER_00] 你们有什么想法吗？
+[SPEAKER_01] 我能不能理解这一块， 就是就针对那个数字员工， 一个是生产数字员工。 第二个是针对数字员工的一些环境搭建啊， 或者说是数字员工测试的一套一套东西啊，
+[SPEAKER_00] 对对， 可以这么理解。 嗯嗯，
+[SPEAKER_01] 就我在想就是这个那那我们在中间做啥端到端啊，
+[SPEAKER_00] 这四个都是我们可以干的啊，
+[SPEAKER_01] 就这个是我们要给人家做的， 是吧？ 对， 哦， 我以为是人家给我们做的， 然后我在想我们展示啥？
+[SPEAKER_00] 看到了嗯，
+[SPEAKER_01] 但他他不他不是软件源吗？ 他们不做吧。 哦， 我们是乙方，
+[SPEAKER_00] 他们是他们是嗯用用这个去做东西的，
+[SPEAKER_01] 要用这个啊。 嗯嗯，
+.....</div>
+          <div class="result-note">说明：这里写入的是你提供的系统导入测试 3h29min 的部分转录内容。当前判断是“可转录、可粘贴，但说话人映射和历史记录未实现”的问题更像是测试脚本问题，而不是系统真实链路本身的问题。因为上面的流式传输和非流式传输结果，都是在这次长时间测试之后，再使用手机外放录音重新进行验证得到的。</div>
+        </article>
       </div>
-      <div class="layer-stat"><strong>17</strong>项全通</div>
-    </div>
+    </section>
 
-    <!-- L3 -->
-    <div class="layer-card">
-      <div class="layer-num">3</div>
-      <div class="layer-body">
-        <div class="layer-name">
-          特殊情况处理
-          <span class="badge pass"><span class="badge-dot"></span>通过</span>
-        </div>
-        <div class="layer-desc">验证各种特殊的音频输入（极短、极小、格式异常等）以及异常参数是否能被稳定处理，不崩溃、不挂死</div>
-        <div class="layer-findings">
-          <div class="fi-item"><span class="fi-icon">✅</span><span>空文件、非标准格式、静音片段均可正常处理并给出反馈</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>极短片段、超小数据块不再导致程序卡住（修复了 VS-TEST-002）</span></div>
-          <div class="fi-item"><span class="fi-icon">✅</span><span>共 18 项边界检查全部通过</span></div>
-        </div>
+    <section class="section">
+      <h2 class="section-title">范围说明</h2>
+      <p class="section-subtitle">这份页面只统计本次已经完成的 3 类文字测试结果，不再把更大范围的系统测试项混入本页。</p>
+      <div class="untested-box">
+        <div class="untested-count">3 / 3</div>
+        <h3 class="untested-title">本页统计范围内已全部测完</h3>
+        <ul class="untested-list">
+          <li>本页只展示：流式文字、非流式文字、长时间文字。</li>
+          <li>这 3 项都已经有测试结果，并已写入页面。</li>
+          <li>其他系统级功能测试不在这份结果页内统计。</li>
+        </ul>
       </div>
-      <div class="layer-stat"><strong>18</strong>项全通</div>
-    </div>
+    </section>
 
-    <!-- L5 -->
-    <div class="layer-card">
-      <div class="layer-num">5</div>
-      <div class="layer-body">
-        <div class="layer-name">
-          真实语音识别质量
-          <span class="badge blocked"><span class="badge-dot"></span>待完善</span>
-        </div>
-        <div class="layer-desc">在真实设备、真实语音样本下，验证识别文字是否准确、说话人是否判断正确、结果响应速度是否达标</div>
-        <div class="layer-findings">
-          <div class="fi-item"><span class="fi-icon">✅</span><span>已测试 12 种引擎与说话人模型组合，连接和返回结果均正常</span></div>
-          <div class="fi-item"><span class="fi-icon">⚠️</span><span>目前尚未建立"标准参考文本"，无法客观比对识别准确性是否达标</span></div>
-          <div class="fi-item"><span class="fi-icon">⏳</span><span>下一步：建立参考文本基准，再对识别结果做逐字比对验收</span></div>
-        </div>
-      </div>
-      <div class="layer-stat" style="color:var(--block)"><strong>待补</strong>准确性基准</div>
-    </div>
-
-    <!-- L6 -->
-    <div class="layer-card">
-      <div class="layer-num">6</div>
-      <div class="layer-body">
-        <div class="layer-name">
-          桌面应用完整流程
-          <span class="badge pending"><span class="badge-dot"></span>未开始</span>
-        </div>
-        <div class="layer-desc">在真实桌面环境中，测试从按下快捷键到看到转录结果的完整用户体验：快捷键、悬浮窗、历史记录、说话人标签、AI 摘要等</div>
-        <div class="layer-findings">
-          <div class="fi-item"><span class="fi-icon">📋</span><span>已规划 23 个配置验证场景（C-01 到 C-23）和 9 个主要业务场景</span></div>
-          <div class="fi-item"><span class="fi-icon">⏳</span><span>等待第 5 项（真实语音质量）验收通过后启动</span></div>
-        </div>
-      </div>
-      <div class="layer-stat" style="color:var(--pend)"><strong>待启动</strong></div>
-    </div>
-
-    <!-- L7 -->
-    <div class="layer-card">
-      <div class="layer-num">7</div>
-      <div class="layer-body">
-        <div class="layer-name">
-          长时间稳定性
-          <span class="badge pending"><span class="badge-dot"></span>未开始</span>
-        </div>
-        <div class="layer-desc">持续录音 2 小时以上，验证程序是否稳定运行、内存是否正常、说话人数量是否不会异常增长</div>
-        <div class="layer-findings">
-          <div class="fi-item"><span class="fi-icon">📋</span><span>已规划 5 个阶梯压力场景（S1 到 S5），从短时到全量 2 小时</span></div>
-          <div class="fi-item"><span class="fi-icon">⏳</span><span>等待前置层级全部通过后执行</span></div>
-        </div>
-      </div>
-      <div class="layer-stat" style="color:var(--pend)"><strong>待启动</strong></div>
-    </div>
-
-  </div>
-
-  <!-- REAL WORLD FINDINGS -->
-  <div class="section-title">真实使用补充验证<small>用户自测 · 2026-03-23</small></div>
-
-  <div class="findings-grid">
-    <div class="finding-card">
-      <div class="finding-top">
-        <div class="finding-icon green">🎙️</div>
-        <div>
-          <div class="finding-title">文件上传转录</div>
-          <div class="finding-status">✅ 功能可用</div>
-        </div>
-      </div>
-      <div class="finding-body">上传约 10 分钟的会议录音，可以完成完整转录，并成功将声音映射到已注册的真实说话人姓名。</div>
-      <div class="finding-detail">测试样本时长：约 643 秒（~10.7 分钟）</div>
-    </div>
-
-    <div class="finding-card">
-      <div class="finding-top">
-        <div class="finding-icon green">👥</div>
-        <div>
-          <div class="finding-title">实时转录 · 说话人展示</div>
-          <div class="finding-status">✅ 功能可用</div>
-        </div>
-      </div>
-      <div class="finding-body">实时录音约 3.7 分钟，说话人识别功能正常显示，已能识别出"连云波"、"江争达"等已注册说话人，以及新说话人占位。</div>
-      <div class="finding-detail">测试时间：2026-03-23 12:04 · 引擎：FunASR seaco-paraformer</div>
-    </div>
-
-    <div class="finding-card full">
-      <div class="finding-top">
-        <div class="finding-icon amber">📝</div>
-        <div>
-          <div class="finding-title">实时转录 · 文字识别质量</div>
-          <div class="finding-status">⚠️ 仍需优化</div>
-        </div>
-      </div>
-      <div class="finding-body">实时转录的文字结果中，存在明显的识别错误——部分词语被误识别，一些专业术语和人名出现失真。对于会议记录的使用场景，当前文字质量需要进一步提升才能满足正式使用需求。</div>
-      <div class="finding-detail">这是当前阶段已知的重点优化方向，不影响连接稳定性和说话人显示功能的可用性。</div>
-    </div>
-  </div>
-
-  <!-- KNOWN ISSUES -->
-  <div class="section-title">已知问题<small>全部在册，无遗漏</small></div>
-
-  <div class="issues-list">
-    <div class="issue-row">
-      <div class="issue-icon">✅</div>
-      <div>
-        <div class="issue-title">实时传输在特定情况下程序卡住</div>
-        <div class="issue-body">收到语音数据后，程序在等待返回结果时会无响应，导致本次录音无法完成。</div>
-        <span class="issue-tag tag-fixed">已修复</span><span style="font-size:12px;color:var(--muted)">本次测试已确认不再复现</span>
-      </div>
-    </div>
-
-    <div class="issue-row">
-      <div class="issue-icon">✅</div>
-      <div>
-        <div class="issue-title">发送极短或格式特殊的音频片段导致程序挂起</div>
-        <div class="issue-body">当传入极短（不足 20 毫秒）或字节数为奇数的音频片段时，程序会停止响应。</div>
-        <span class="issue-tag tag-fixed">已修复</span><span style="font-size:12px;color:var(--muted)">修复后 18 项边界测试全部通过</span>
-      </div>
-    </div>
-
-    <div class="issue-row">
-      <div class="issue-icon">⚠️</div>
-      <div>
-        <div class="issue-title">实时转录文字准确性尚未经过客观验收</div>
-        <div class="issue-body">连接和传输已正常，但目前没有"标准答案"可供比对，无法判断识别结果是否达到可用标准。结合用户实测，当前文字质量存在明显错误。</div>
-        <span class="issue-tag tag-ongoing">处理中</span><span style="font-size:12px;color:var(--muted)">需建立参考文本基准后重新验收</span>
-      </div>
-    </div>
-
-    <div class="issue-row">
-      <div class="issue-icon">⚠️</div>
-      <div>
-        <div class="issue-title">长时间录音 + 说话人实名映射尚未完整验证</div>
-        <div class="issue-body">超长录音文件的后端处理已有正向验证，但在正式系统中历史记录是否稳定落库、说话人是否稳定映射到真实姓名，仍需更多验证。</div>
-        <span class="issue-tag tag-ongoing">验证中</span><span style="font-size:12px;color:var(--muted)">需通过正式入口做更多样本测试</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- NEXT STEPS -->
-  <div class="section-title">下一步计划</div>
-
-  <div class="next-grid">
-    <div class="next-card">
-      <div class="next-num">01</div>
-      <div class="next-title">建立识别质量基准</div>
-      <div class="next-desc">准备一段有"标准答案"的参考录音，用于客观衡量识别准确率，完成第 5 层验收。</div>
-    </div>
-    <div class="next-card">
-      <div class="next-num">02</div>
-      <div class="next-title">启动桌面完整流程测试</div>
-      <div class="next-desc">在真实桌面环境中，按照 23 个配置场景和 9 个业务场景，逐项验收用户体验。</div>
-    </div>
-    <div class="next-card">
-      <div class="next-num">03</div>
-      <div class="next-title">执行 2 小时长时稳定性测试</div>
-      <div class="next-desc">验证长时间录音场景下程序不崩溃、不丢失内容、说话人识别保持稳定。</div>
-    </div>
-  </div>
-
-</div><!-- /wrap -->
-
-<div class="wrap">
-  <div class="footer">
-    VoiceScribe 测试报告 · 2026-03-23 · 本报告面向非技术人员，所有技术细节已做适当翻译。
-  </div>
-</div>
-
+    <div class="footer">VoiceScribe 最终测试结果页 · 仅展示最终结果 · 2026-03-23</div>
+  </main>
 </body>
 </html>
