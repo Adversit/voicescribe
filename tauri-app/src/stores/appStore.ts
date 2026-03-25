@@ -51,6 +51,8 @@ interface AppStore {
   toast: string | null;
   isRecording: boolean;
   isTranscribing: boolean;
+  recordingCancelled: boolean;
+  recordingStartedAt: number | null;
   audioLevel: number;
   lastResult: TranscribeResult | null;
   setPage: (page: PageKey) => void;
@@ -58,6 +60,7 @@ interface AppStore {
   setToast: (message: string | null) => void;
   setRecording: (value: boolean) => void;
   setTranscribing: (value: boolean) => void;
+  setRecordingCancelled: (value: boolean) => void;
   setAudioLevel: (value: number) => void;
   setLastResult: (value: TranscribeResult | null) => void;
   checkConnection: () => Promise<void>;
@@ -79,6 +82,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toast: null,
   isRecording: false,
   isTranscribing: false,
+  recordingCancelled: false,
+  recordingStartedAt: null,
   audioLevel: 0,
   lastResult: null,
   setPage: (page) => set({ currentPage: page }),
@@ -89,8 +94,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return { settings: next };
     }),
   setToast: (message) => set({ toast: message }),
-  setRecording: (value) => set({ isRecording: value }),
-  setTranscribing: (value) => set({ isTranscribing: value }),
+  setRecording: (value) =>
+    set({
+      isRecording: value,
+      recordingStartedAt: value ? Date.now() : null,
+      recordingCancelled: false,
+    }),
+  setTranscribing: (value) =>
+    set({
+      isTranscribing: value,
+      recordingCancelled: value ? false : get().recordingCancelled,
+    }),
+  setRecordingCancelled: (value) => set({ recordingCancelled: value }),
   setAudioLevel: (value) => set({ audioLevel: value }),
   setLastResult: (value) => set({ lastResult: value }),
   checkConnection: async () => {

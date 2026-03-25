@@ -10,6 +10,12 @@ use tauri::{AppHandle, Manager, State};
 const BACKEND_PORT: u16 = 8765;
 const BASE_URL: &str = "http://127.0.0.1:8765";
 
+fn project_root_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BackendRuntimeStatus {
     running: bool,
@@ -40,10 +46,7 @@ pub struct TranscribeResult {
 }
 
 fn dev_backend_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("backend")
+    project_root_dir().join("backend")
 }
 
 fn resource_backend_dir(app: &AppHandle) -> Option<PathBuf> {
@@ -73,6 +76,11 @@ fn repo_runtime_dir(backend_dir: &Path) -> Option<PathBuf> {
 }
 
 fn resolve_runtime_dir(app: &AppHandle, backend_dir: &Path) -> Result<PathBuf, String> {
+    let project_root = project_root_dir();
+    if project_root.join("backend").exists() {
+        return Ok(project_root);
+    }
+
     if let Some(runtime_dir) = repo_runtime_dir(backend_dir) {
         return Ok(runtime_dir);
     }
@@ -186,8 +194,9 @@ pub fn start_backend(
     command.arg(backend_dir.join("server.py"));
     command.current_dir(&backend_dir);
     command.env("PYTHONUNBUFFERED", "1");
+    command.env("VOICESCRIBE_ROOT", project_root_dir());
     command.env("VOICESCRIBE_RUNTIME_DIR", &runtime_dir);
-    command.env("VOICESCRIBE_MODEL_DIR", runtime_dir.join("models"));
+    command.env("VOICESCRIBE_MODEL_DIR", project_root_dir().join("models"));
     command.env("VOICESCRIBE_CONFIG_DIR", runtime_dir.join("config"));
     command.env(
         "VOICESCRIBE_SPEAKER_DIR",

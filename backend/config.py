@@ -43,9 +43,7 @@ def _default_runtime_root() -> Path:
 
 RUNTIME_ROOT = _default_runtime_root()
 
-MODEL_CACHE_DIR = Path(
-    os.environ.get("VOICESCRIBE_MODEL_DIR", str(RUNTIME_ROOT / "models"))
-).expanduser().resolve()
+MODEL_CACHE_DIR = (PROJECT_ROOT / "models").expanduser().resolve()
 MODELSCOPE_CACHE = str(MODEL_CACHE_DIR)
 MODEL_REGISTRY_PATH = MODEL_CACHE_DIR / "voicescribe_models.json"
 

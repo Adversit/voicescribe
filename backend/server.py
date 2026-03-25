@@ -327,7 +327,7 @@ async def list_engines() -> List[EngineInfo]:
         ),
         EngineInfo(
             name="funasr",
-            models=["seaco-paraformer", "paraformer-zh", "sensevoice-small"],
+            models=list(FunASREngine.MODELS.keys()),
             loaded_model=engines.get("funasr", {}).get("model"),
             available=FUNASR_AVAILABLE,
         ),

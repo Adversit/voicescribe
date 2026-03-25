@@ -1,4 +1,4 @@
-import { RefreshCw, Server, Square } from "lucide-react";
+﻿import { RefreshCw, Server, Square } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 
 export function ConnectionStatus() {
@@ -12,19 +12,11 @@ export function ConnectionStatus() {
     <section className="rounded-[28px] border border-line/80 bg-panel/90 p-5">
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-3">
-          <div
-            className={`h-3 w-3 rounded-full ${
-              backendConnected ? "bg-success" : "bg-accent"
-            }`}
-          />
+          <div className={`h-3 w-3 rounded-full ${backendConnected ? "bg-success" : "bg-accent"}`} />
           <div>
-            <div className="text-sm font-semibold">
-              {backendConnected ? "后端已连接" : "后端未连接"}
-            </div>
+            <div className="text-sm font-semibold">{backendConnected ? "后端已连接" : "后端未连接"}</div>
             <div className="text-xs text-ink/55">
-              {runtime
-                ? `${runtime.status} · 端口 ${runtime.port}`
-                : "等待 Tauri runtime 状态"}
+              {runtime ? `${runtime.status} / 端口 ${runtime.port}` : "等待桌面壳层回报运行时状态"}
             </div>
           </div>
         </div>
