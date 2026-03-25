@@ -99,6 +99,39 @@ ensure_dirs()
 # 下载状态缓存
 model_downloads = {}
 
+WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
+WHISPERCPP_MODELS = ["tiny", "base", "small", "medium", "large"]
+PARAKEET_MODELS = ["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"]
+
+WHISPER_MODEL_REPOS = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "base": "Systran/faster-whisper-base",
+    "small": "Systran/faster-whisper-small",
+    "medium": "Systran/faster-whisper-medium",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+}
+
+WHISPERCPP_MODEL_FILES = {
+    "tiny": "ggml-tiny.bin",
+    "base": "ggml-base.bin",
+    "small": "ggml-small.bin",
+    "medium": "ggml-medium.bin",
+    "large": "ggml-large.bin",
+}
+
+PARAKEET_MODEL_REPOS = {
+    "parakeet-ctc-1.1b": "nvidia/parakeet-ctc-1.1b",
+    "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
+}
+
+ENGINE_MODEL_CATALOG = {
+    "whisper": WHISPER_MODELS,
+    "whispercpp": WHISPERCPP_MODELS,
+    "funasr": list(getattr(globals().get("FunASREngine"), "MODELS", {}).keys()),
+    "parakeet": PARAKEET_MODELS,
+}
+
 def _load_registry() -> dict:
     try:
         if MODEL_REGISTRY_PATH.exists():
@@ -156,6 +189,18 @@ def _get_registry_entry(engine: str, model: str) -> Optional[dict]:
 
     return entry
 
+
+def _model_storage_path(engine: str, model: str) -> Optional[Path]:
+    if engine == "whisper":
+        return (MODEL_CACHE_DIR / "whisper" / model).resolve()
+    if engine == "whispercpp":
+        filename = WHISPERCPP_MODEL_FILES.get(model)
+        if filename:
+            return (WHISPER_CPP_MODEL_DIR / filename).resolve()
+    if engine == "parakeet":
+        return (MODEL_CACHE_DIR / "parakeet" / model).resolve()
+    return None
+
 def _set_registry_entry(engine: str, model: str, path: str, size_bytes: int) -> None:
     registry = _load_registry()
     if engine not in registry:
@@ -186,11 +231,29 @@ def _dir_size(path: str) -> int:
 def _cache_total_size() -> int:
     return _dir_size(str(MODEL_CACHE_DIR))
 
+
+def _path_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    return _dir_size(str(path))
+
 def _get_fun_asr_model_id(model_name: str) -> Optional[str]:
     try:
         return FunASREngine.MODELS.get(model_name)
     except Exception:
         return None
+
+
+def _get_parakeet_model_id(model_name: str) -> Optional[str]:
+    return PARAKEET_MODEL_REPOS.get(model_name)
+
+
+def _iter_engine_models():
+    for engine, model_names in ENGINE_MODEL_CATALOG.items():
+        for model_name in model_names:
+            yield engine, model_name
 
 # Speaker diarization 是可选的
 DIARIZATION_AVAILABLE = False
@@ -315,13 +378,13 @@ async def list_engines() -> List[EngineInfo]:
     available = [
         EngineInfo(
             name="whisper",
-            models=["tiny", "base", "small", "medium", "large-v2", "large-v3"],
+            models=WHISPER_MODELS,
             loaded_model=engines.get("whisper", {}).get("model"),
             available=WHISPER_AVAILABLE,
         ),
         EngineInfo(
             name="whispercpp",
-            models=["tiny", "base", "small", "medium", "large"],
+            models=WHISPERCPP_MODELS,
             loaded_model=engines.get("whispercpp", {}).get("model"),
             available=WHISPERCPP_AVAILABLE,
         ),
@@ -333,7 +396,7 @@ async def list_engines() -> List[EngineInfo]:
         ),
         EngineInfo(
             name="parakeet",
-            models=["parakeet-ctc-1.1b", "parakeet-tdt-1.1b"],
+            models=PARAKEET_MODELS,
             loaded_model=engines.get("parakeet", {}).get("model"),
             available=PARAKEET_AVAILABLE,
         ),
@@ -349,9 +412,16 @@ def _get_model_status(engine: str, model: str) -> ModelStatus:
     available = False
     size_bytes = None
 
+    if not entry:
+        storage_path = _model_storage_path(engine, model)
+        if storage_path and storage_path.exists():
+            size_bytes = _path_size(storage_path)
+            _set_registry_entry(engine, model, str(storage_path), size_bytes)
+            entry = _get_registry_entry(engine, model)
+
     if entry and os.path.exists(entry.get("path", "")):
         available = True
-        size_bytes = entry.get("size_bytes")
+        size_bytes = entry.get("size_bytes") or _path_size(Path(entry["path"]))
     elif entry and not os.path.exists(entry.get("path", "")):
         _delete_registry_entry(engine, model)
 
@@ -364,6 +434,104 @@ def _get_model_status(engine: str, model: str) -> ModelStatus:
         downloaded_bytes=download_state.get("downloaded_bytes"),
         error=download_state.get("error"),
     )
+
+
+async def _monitor_download_path(target_path: Path, state: dict, stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        try:
+            state["downloaded_bytes"] = _path_size(target_path)
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+
+
+async def _download_hf_snapshot(
+    engine: str,
+    model_name: str,
+    repo_id: str,
+    target_dir: Path,
+) -> None:
+    key = f"{engine}:{model_name}"
+    state = model_downloads.setdefault(key, {})
+    state["downloading"] = True
+    state["error"] = None
+    state["downloaded_bytes"] = 0
+
+    stop_event = asyncio.Event()
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    monitor_task = asyncio.create_task(_monitor_download_path(target_dir, state, stop_event))
+
+    try:
+        if not _module_available("huggingface_hub"):
+            raise RuntimeError("huggingface_hub not available")
+
+        from huggingface_hub import snapshot_download
+
+        local_dir = await asyncio.to_thread(
+            snapshot_download,
+            repo_id=repo_id,
+            local_dir=str(target_dir),
+        )
+
+        size_bytes = _path_size(Path(local_dir))
+        _set_registry_entry(engine, model_name, local_dir, size_bytes)
+        state["size_bytes"] = size_bytes
+        state["downloaded_bytes"] = size_bytes
+    except Exception as e:
+        state["error"] = str(e)
+    finally:
+        stop_event.set()
+        try:
+            await monitor_task
+        except Exception:
+            pass
+        state["downloading"] = False
+
+
+async def _download_hf_file(
+    engine: str,
+    model_name: str,
+    repo_id: str,
+    filename: str,
+    target_dir: Path,
+) -> None:
+    key = f"{engine}:{model_name}"
+    state = model_downloads.setdefault(key, {})
+    state["downloading"] = True
+    state["error"] = None
+    state["downloaded_bytes"] = 0
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = (target_dir / filename).resolve()
+    stop_event = asyncio.Event()
+    monitor_task = asyncio.create_task(_monitor_download_path(target_file, state, stop_event))
+
+    try:
+        if not _module_available("huggingface_hub"):
+            raise RuntimeError("huggingface_hub not available")
+
+        from huggingface_hub import hf_hub_download
+
+        local_file = await asyncio.to_thread(
+            hf_hub_download,
+            repo_id=repo_id,
+            filename=filename,
+            local_dir=str(target_dir),
+        )
+
+        size_bytes = _path_size(Path(local_file))
+        _set_registry_entry(engine, model_name, local_file, size_bytes)
+        state["size_bytes"] = size_bytes
+        state["downloaded_bytes"] = size_bytes
+    except Exception as e:
+        state["error"] = str(e)
+    finally:
+        stop_event.set()
+        try:
+            await monitor_task
+        except Exception:
+            pass
+        state["downloading"] = False
 
 
 async def _download_funasr_model(model_name: str) -> None:
@@ -415,38 +583,95 @@ async def _download_funasr_model(model_name: str) -> None:
         state["downloading"] = False
 
 
+async def _download_whisper_model(model_name: str) -> None:
+    repo_id = WHISPER_MODEL_REPOS.get(model_name)
+    if not repo_id:
+        raise ValueError(f"Unknown Whisper model: {model_name}")
+    await _download_hf_snapshot(
+        "whisper",
+        model_name,
+        repo_id,
+        (MODEL_CACHE_DIR / "whisper" / model_name).resolve(),
+    )
+
+
+async def _download_whispercpp_model(model_name: str) -> None:
+    filename = WHISPERCPP_MODEL_FILES.get(model_name)
+    if not filename:
+        raise ValueError(f"Unknown Whisper.cpp model: {model_name}")
+    await _download_hf_file(
+        "whispercpp",
+        model_name,
+        "ggerganov/whisper.cpp",
+        filename,
+        WHISPER_CPP_MODEL_DIR,
+    )
+
+
+async def _download_parakeet_model(model_name: str) -> None:
+    repo_id = _get_parakeet_model_id(model_name)
+    if not repo_id:
+        raise ValueError(f"Unknown Parakeet model: {model_name}")
+    await _download_hf_snapshot(
+        "parakeet",
+        model_name,
+        repo_id,
+        (MODEL_CACHE_DIR / "parakeet" / model_name).resolve(),
+    )
+
+
 @app.get("/models")
 async def list_models() -> List[ModelStatus]:
-    """列出可用模型（当前仅管理 FunASR 模型缓存）"""
+    """列出所有引擎模型状态"""
     models = []
-    for model_name in FunASREngine.MODELS.keys():
-        models.append(_get_model_status("funasr", model_name))
+    for engine, model_name in _iter_engine_models():
+        models.append(_get_model_status(engine, model_name))
     return models
 
 
 @app.post("/models/download")
 async def download_model(engine: str = Form(...), model: str = Form(...)):
-    if engine != "funasr":
-        raise HTTPException(400, "Only FunASR models are supported for download")
-    if not FUNASR_AVAILABLE:
-        raise HTTPException(400, "FunASR engine not available")
+    if engine not in ENGINE_MODEL_CATALOG or model not in ENGINE_MODEL_CATALOG[engine]:
+        raise HTTPException(400, f"Unknown engine/model: {engine}/{model}")
 
     status = _get_model_status(engine, model)
     if status.available or status.downloading:
         return {"status": "already", "engine": engine, "model": model}
 
-    asyncio.create_task(_download_funasr_model(model))
+    if engine == "funasr":
+        if not FUNASR_AVAILABLE:
+            raise HTTPException(400, "FunASR engine not available")
+        asyncio.create_task(_download_funasr_model(model))
+    elif engine == "whisper":
+        asyncio.create_task(_download_whisper_model(model))
+    elif engine == "whispercpp":
+        asyncio.create_task(_download_whispercpp_model(model))
+    elif engine == "parakeet":
+        asyncio.create_task(_download_parakeet_model(model))
+    else:
+        raise HTTPException(400, f"Download not supported for engine: {engine}")
     return {"status": "started", "engine": engine, "model": model}
 
 
 @app.post("/models/delete")
 async def delete_model(engine: str = Form(...), model: str = Form(...)):
-    if engine != "funasr":
-        raise HTTPException(400, "Only FunASR models are supported for delete")
+    if engine not in ENGINE_MODEL_CATALOG or model not in ENGINE_MODEL_CATALOG[engine]:
+        raise HTTPException(400, f"Unknown engine/model: {engine}/{model}")
 
     entry = _get_registry_entry(engine, model)
     if entry and os.path.exists(entry.get("path", "")):
-        shutil.rmtree(entry["path"], ignore_errors=True)
+        target_path = Path(entry["path"])
+        if target_path.is_file():
+            target_path.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(target_path, ignore_errors=True)
+    else:
+        fallback_path = _model_storage_path(engine, model)
+        if fallback_path and fallback_path.exists():
+            if fallback_path.is_file():
+                fallback_path.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(fallback_path, ignore_errors=True)
     _delete_registry_entry(engine, model)
     return {"status": "deleted", "engine": engine, "model": model}
 
@@ -475,12 +700,14 @@ async def load_engine(
         if not WHISPER_AVAILABLE:
             raise HTTPException(400, "Whisper engine not available. Install faster-whisper.")
         eng = WhisperEngine()
-        eng.load(model)
+        whisper_entry = _get_registry_entry("whisper", model)
+        eng.load(whisper_entry["path"] if whisper_entry and os.path.exists(whisper_entry.get("path", "")) else model)
         engines["whisper"] = {"engine": eng, "model": model}
     elif engine == "whispercpp":
         if not WHISPERCPP_AVAILABLE:
             raise HTTPException(400, "Whisper.cpp engine not available. Install whisper-cpp via brew.")
-        model_path = str(WHISPER_CPP_MODEL_DIR / f"ggml-{model}.bin")
+        whispercpp_entry = _get_registry_entry("whispercpp", model)
+        model_path = whispercpp_entry["path"] if whispercpp_entry and os.path.exists(whispercpp_entry.get("path", "")) else str(WHISPER_CPP_MODEL_DIR / f"ggml-{model}.bin")
         eng = WhisperCppEngine(model_path=model_path)
         engines["whispercpp"] = {"engine": eng, "model": model}
     elif engine == "funasr":
@@ -493,7 +720,8 @@ async def load_engine(
         if not PARAKEET_AVAILABLE:
             raise HTTPException(400, "Parakeet engine not available. Requires NVIDIA GPU and NeMo toolkit.")
         eng = ParakeetEngine()
-        eng.load(model)
+        parakeet_entry = _get_registry_entry("parakeet", model)
+        eng.load(parakeet_entry["path"] if parakeet_entry and os.path.exists(parakeet_entry.get("path", "")) else model)
         engines["parakeet"] = {"engine": eng, "model": model}
     else:
         raise HTTPException(400, f"Unknown engine: {engine}")

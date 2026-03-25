@@ -6,6 +6,7 @@ Whisper ASR Engine
 import os
 from typing import Optional, Dict, Any
 from pathlib import Path
+from config import MODEL_CACHE_DIR
 
 
 class WhisperEngine:
@@ -24,21 +25,30 @@ class WhisperEngine:
     
     def load(self, model_name: str = "large-v3"):
         """加载模型"""
-        if model_name not in self.MODELS:
+        model_source = Path(model_name).expanduser()
+        is_local_path = model_source.exists()
+
+        if not is_local_path and model_name not in self.MODELS:
             raise ValueError(f"Unknown model: {model_name}. Available: {self.MODELS}")
-        
+
+        load_target = str(model_source.resolve()) if is_local_path else model_name
+
         if self.use_faster:
             from faster_whisper import WhisperModel
             
             # 使用 int8 量化，平衡速度和精度
             self.model = WhisperModel(
-                model_name,
+                load_target,
                 device="auto",  # 自动选择 CPU/GPU
                 compute_type="int8",
+                download_root=str((MODEL_CACHE_DIR / "whisper").resolve()),
             )
         else:
             import whisper
-            self.model = whisper.load_model(model_name)
+            self.model = whisper.load_model(
+                load_target,
+                download_root=str((MODEL_CACHE_DIR / "whisper").resolve()),
+            )
         
         self.model_name = model_name
         print(f"[Whisper] Loaded model: {model_name}")

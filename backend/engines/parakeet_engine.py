@@ -5,6 +5,7 @@ NVIDIA 的高性能语音识别模型
 """
 
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 
 class ParakeetEngine:
@@ -26,7 +27,10 @@ class ParakeetEngine:
         注意：Parakeet 需要 NVIDIA GPU 和 NeMo toolkit
         安装：pip install nemo_toolkit['asr']
         """
-        if model_name not in self.MODELS:
+        model_source = Path(model_name).expanduser()
+        is_local_path = model_source.exists()
+
+        if not is_local_path and model_name not in self.MODELS:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self.MODELS.keys())}")
         
         try:
@@ -41,7 +45,7 @@ class ParakeetEngine:
         if not torch.cuda.is_available():
             raise RuntimeError("Parakeet requires NVIDIA GPU with CUDA")
         
-        model_id = self.MODELS[model_name]
+        model_id = str(model_source.resolve()) if is_local_path else self.MODELS[model_name]
         self.model = nemo_asr.models.ASRModel.from_pretrained(model_id)
         self.model_name = model_name
         
