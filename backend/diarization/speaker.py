@@ -10,16 +10,20 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import soundfile as sf
+from config import SPEAKER_DATA_DIR
 
 
 class SpeakerDiarizer:
     """说话人分离与识别（基于 FunASR）"""
 
-    def __init__(self, data_dir: str = "~/.voicescribe/speakers"):
+    def __init__(self, data_dir: str = None):
         """
         Args:
             data_dir: 声纹数据存储目录
         """
+        if data_dir is None:
+            data_dir = str(SPEAKER_DATA_DIR)
+
         self.data_dir = Path(data_dir).expanduser()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 

@@ -8,6 +8,7 @@ __pycache__/
 *$py.class
 venv/
 .venv/
+backend/venv/
 *.egg-info/
 dist/
 build/
@@ -27,6 +28,10 @@ DerivedData/
 app/build/
 *.app/
 runtime/
+tauri-app/dist/
+tauri-app/src-tauri/target/
+tauri-app/node_modules/
+tauri-app/.vite/
 
 # Logs
 *.log
@@ -34,6 +39,11 @@ runtime/
 # Cache
 .cache/
 *.cache
+models/
+hf_cache/
+torch_cache/
+data/
+config/
 
 # Temporary files
 *.tmp

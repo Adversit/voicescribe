@@ -3,6 +3,7 @@ AI 文本优化模块 - 使用 Claude Code 无头模式
 """
 import subprocess
 from pathlib import Path
+from config import CONFIG_DIR
 
 DEFAULT_PROMPT = """你是一个语音转文字的后处理专家。请对以下语音转录文本进行优化：
 
@@ -33,7 +34,7 @@ HOTWORD_REPLACEMENT_PROMPT = """语音识别经常把专有名词误识别为发
 
 class AIRefiner:
     def __init__(self):
-        self.config_dir = Path.home() / ".voicescribe"
+        self.config_dir = CONFIG_DIR
         self.prompt_file = self.config_dir / "refine_prompt.txt"
         self._ensure_config_dir()
 

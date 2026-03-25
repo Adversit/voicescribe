@@ -7,6 +7,7 @@ import tempfile
 import os
 import json
 from pathlib import Path
+from config import WHISPER_CPP_MODEL_DIR, find_whisper_cli
 
 # 繁简转换
 try:
@@ -26,23 +27,25 @@ class WhisperCppEngine:
         初始化引擎
         
         Args:
-            model_path: 模型文件路径，默认使用 ~/.whisper-models/ggml-base.bin
+            model_path: 模型文件路径，默认使用运行时模型目录中的 ggml-base.bin
             language: 语言代码，如 "zh", "en", "auto"
         """
         if model_path is None:
-            model_path = os.path.expanduser("~/.whisper-models/ggml-base.bin")
+            model_path = str(WHISPER_CPP_MODEL_DIR / "ggml-base.bin")
         
         self.model_path = model_path
         self.language = language
-        self.whisper_cli = "/opt/homebrew/bin/whisper-cli"
+        self.whisper_cli = find_whisper_cli()
         
         # 验证模型文件存在
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"模型文件不存在: {self.model_path}")
         
         # 验证 whisper-cli 存在
-        if not os.path.exists(self.whisper_cli):
-            raise FileNotFoundError(f"whisper-cli 未安装: {self.whisper_cli}")
+        if self.whisper_cli is None or not os.path.exists(self.whisper_cli):
+            raise FileNotFoundError(
+                "whisper-cli 未安装。请安装 whisper.cpp，或设置 VOICESCRIBE_WHISPERCPP_CLI"
+            )
     
     def transcribe(self, audio_path: str, language: str = None) -> dict:
         """

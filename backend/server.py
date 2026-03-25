@@ -29,20 +29,26 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, R
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+from config import (
+    CONFIG_DIR,
+    MODEL_CACHE_DIR,
+    MODEL_REGISTRY_PATH,
+    MODELSCOPE_CACHE,
+    WHISPER_CPP_MODEL_DIR,
+    ensure_dirs,
+    find_whisper_cli,
+)
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
 def _whispercpp_cli_available() -> bool:
-    # whispercpp_engine.py 使用固定路径 /opt/homebrew/bin/whisper-cli
-    return os.path.exists("/opt/homebrew/bin/whisper-cli")
+    return find_whisper_cli() is not None
 
 
 def _whispercpp_model_available() -> bool:
-    # whispercpp_engine.py 默认模型路径
-    model_path = os.path.expanduser("~/.whisper-models/ggml-base.bin")
-    return os.path.exists(model_path)
+    return (WHISPER_CPP_MODEL_DIR / "ggml-base.bin").exists()
 
 
 # 尝试导入 ASR 引擎
@@ -85,26 +91,18 @@ try:
 except ImportError as e:
     print(f"[Warning] Parakeet engine not available: {e}")
 
-# 模型缓存目录（用于下载/管理模型权重）
-MODEL_CACHE_DIR = os.environ.get("VOICESCRIBE_MODEL_DIR")
-if not MODEL_CACHE_DIR:
-    MODEL_CACHE_DIR = os.path.join(
-        Path.home(), "Library", "Application Support", "VoiceScribe", "models"
-    )
-
-# 设置 modelscope 缓存目录（如果未设置）
-os.environ.setdefault("MODELSCOPE_CACHE", MODEL_CACHE_DIR)
-os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
-
-MODEL_REGISTRY_PATH = os.path.join(MODEL_CACHE_DIR, "voicescribe_models.json")
+# 设置运行时目录
+os.environ.setdefault("MODELSCOPE_CACHE", MODELSCOPE_CACHE)
+os.environ.setdefault("VOICESCRIBE_CONFIG_DIR", str(CONFIG_DIR))
+ensure_dirs()
 
 # 下载状态缓存
 model_downloads = {}
 
 def _load_registry() -> dict:
     try:
-        if os.path.exists(MODEL_REGISTRY_PATH):
-            with open(MODEL_REGISTRY_PATH, "r", encoding="utf-8") as f:
+        if MODEL_REGISTRY_PATH.exists():
+            with MODEL_REGISTRY_PATH.open("r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception as e:
         print(f"[ModelRegistry] Failed to read registry: {e}")
@@ -112,7 +110,7 @@ def _load_registry() -> dict:
 
 def _save_registry(registry: dict) -> None:
     try:
-        with open(MODEL_REGISTRY_PATH, "w", encoding="utf-8") as f:
+        with MODEL_REGISTRY_PATH.open("w", encoding="utf-8") as f:
             json.dump(registry, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[ModelRegistry] Failed to write registry: {e}")
@@ -149,7 +147,7 @@ def _dir_size(path: str) -> int:
     return total
 
 def _cache_total_size() -> int:
-    return _dir_size(MODEL_CACHE_DIR)
+    return _dir_size(str(MODEL_CACHE_DIR))
 
 def _get_fun_asr_model_id(model_name: str) -> Optional[str]:
     try:
@@ -363,7 +361,7 @@ async def _download_funasr_model(model_name: str) -> None:
         from modelscope.hub.snapshot_download import snapshot_download
 
         local_dir = await asyncio.to_thread(
-            snapshot_download, model_id, cache_dir=MODEL_CACHE_DIR
+            snapshot_download, model_id, cache_dir=str(MODEL_CACHE_DIR)
         )
 
         size_bytes = _dir_size(local_dir)
@@ -445,7 +443,7 @@ async def load_engine(
     elif engine == "whispercpp":
         if not WHISPERCPP_AVAILABLE:
             raise HTTPException(400, "Whisper.cpp engine not available. Install whisper-cpp via brew.")
-        model_path = os.path.expanduser(f"~/.whisper-models/ggml-{model}.bin")
+        model_path = str(WHISPER_CPP_MODEL_DIR / f"ggml-{model}.bin")
         eng = WhisperCppEngine(model_path=model_path)
         engines["whispercpp"] = {"engine": eng, "model": model}
     elif engine == "funasr":
