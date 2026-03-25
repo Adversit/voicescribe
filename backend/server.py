@@ -115,9 +115,46 @@ def _save_registry(registry: dict) -> None:
     except Exception as e:
         print(f"[ModelRegistry] Failed to write registry: {e}")
 
+def _normalize_registry_path(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return path
+
+    candidate = Path(path).expanduser()
+    if candidate.exists():
+        return str(candidate.resolve())
+
+    parts = list(candidate.parts)
+    lowered = [part.lower() for part in parts]
+    if "models" not in lowered:
+        return path
+
+    models_index = lowered.index("models")
+    rebased = MODEL_CACHE_DIR.joinpath(*parts[models_index + 1 :]).resolve()
+    if rebased.exists():
+        return str(rebased)
+
+    return path
+
 def _get_registry_entry(engine: str, model: str) -> Optional[dict]:
     registry = _load_registry()
-    return registry.get(engine, {}).get(model)
+    entry = registry.get(engine, {}).get(model)
+    if not entry:
+        return None
+
+    normalized_path = _normalize_registry_path(entry.get("path"))
+    if normalized_path and normalized_path != entry.get("path"):
+        _set_registry_entry(
+            engine,
+            model,
+            normalized_path,
+            int(entry.get("size_bytes", 0) or 0),
+        )
+        entry = {
+            **entry,
+            "path": normalized_path,
+        }
+
+    return entry
 
 def _set_registry_entry(engine: str, model: str, path: str, size_bytes: int) -> None:
     registry = _load_registry()

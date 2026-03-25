@@ -1,4 +1,4 @@
-﻿use crate::state::BackendProcessState;
+use crate::state::BackendProcessState;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -63,7 +63,20 @@ fn resolve_backend_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .ok_or_else(|| "Unable to locate backend/server.py".to_string())
 }
 
-fn resolve_runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn repo_runtime_dir(backend_dir: &Path) -> Option<PathBuf> {
+    let root = backend_dir.parent()?;
+    if root.join("backend").exists() && root.join("app").exists() {
+        Some(root.to_path_buf())
+    } else {
+        None
+    }
+}
+
+fn resolve_runtime_dir(app: &AppHandle, backend_dir: &Path) -> Result<PathBuf, String> {
+    if let Some(runtime_dir) = repo_runtime_dir(backend_dir) {
+        return Ok(runtime_dir);
+    }
+
     let base = app
         .path()
         .app_data_dir()
@@ -135,7 +148,7 @@ pub fn start_backend(
     state: State<'_, BackendProcessState>,
 ) -> Result<BackendRuntimeStatus, String> {
     let backend_dir = resolve_backend_dir(&app)?;
-    let runtime_dir = resolve_runtime_dir(&app)?;
+    let runtime_dir = resolve_runtime_dir(&app, &backend_dir)?;
     ensure_runtime_dirs(&runtime_dir)?;
 
     {
@@ -221,7 +234,7 @@ pub fn stop_backend(
     state: State<'_, BackendProcessState>,
 ) -> Result<BackendRuntimeStatus, String> {
     let backend_dir = resolve_backend_dir(&app)?;
-    let runtime_dir = resolve_runtime_dir(&app)?;
+    let runtime_dir = resolve_runtime_dir(&app, &backend_dir)?;
     let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
     if let Some(child) = child_guard.as_mut() {
         let _ = child.kill();
@@ -248,7 +261,7 @@ pub fn backend_status(
     state: State<'_, BackendProcessState>,
 ) -> Result<BackendRuntimeStatus, String> {
     let backend_dir = resolve_backend_dir(&app)?;
-    let runtime_dir = resolve_runtime_dir(&app)?;
+    let runtime_dir = resolve_runtime_dir(&app, &backend_dir)?;
     let running = {
         let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
         if let Some(child) = child_guard.as_mut() {

@@ -39,6 +39,10 @@ export function EngineSettings() {
   const selectedEngineInfo = availableEngines.find(
     (engine) => engine.name === settings.selectedEngine,
   );
+  const downloadableModels = models.filter(
+    (model) => model.engine === settings.selectedEngine,
+  );
+  const supportsDownloads = downloadableModels.length > 0;
 
   return (
     <div className="space-y-6">
@@ -46,7 +50,7 @@ export function EngineSettings() {
         <p className="text-xs uppercase tracking-[0.22em] text-ink/45">Engine</p>
         <h1 className="text-3xl font-semibold">引擎与模型</h1>
         <p className="max-w-3xl text-sm leading-6 text-ink/65">
-          应用本身不打包模型。这里仅负责查看后端可见的模型状态，并调用现有系统下载逻辑完成获取。
+          应用本身不打包模型。可选模型来自当前引擎能力；可下载模型只显示后端当前支持下载的那一部分。
         </p>
       </header>
 
@@ -124,54 +128,70 @@ export function EngineSettings() {
           <ul className="mt-3 space-y-3 text-sm leading-6 text-ink/65">
             <li>模型目录由运行时写入用户数据目录，不依赖安装目录。</li>
             <li>安装包只包含后端和桌面壳层，不携带模型权重。</li>
-            <li>FunASR 下载仍走现有 `/models/download` 与注册表逻辑。</li>
+            <li>下载能力取决于后端 `/models*` 接口，不等于所有引擎都支持在线下载。</li>
           </ul>
         </aside>
       </section>
 
       <section className="rounded-[28px] border border-line bg-panel/90 p-5">
-        <div className="text-lg font-semibold">FunASR 模型状态</div>
-        <div className="mt-5 space-y-3">
-          {models.map((model) => (
-            <div
-              key={`${model.engine}-${model.model}`}
-              className="grid gap-3 rounded-2xl border border-line bg-white/70 px-4 py-4 md:grid-cols-[1fr_auto]"
-            >
-              <div>
-                <div className="font-medium">{model.model}</div>
-                <div className="mt-1 text-sm text-ink/55">
-                  状态：{model.downloading ? "下载中" : model.available ? "已就绪" : "未下载"}
-                </div>
-                <div className="mt-1 text-xs text-ink/45">
-                  大小：{formatBytes(model.size_bytes)} · 已下载：
-                  {formatBytes(model.downloaded_bytes)}
-                </div>
-                {model.error ? (
-                  <div className="mt-2 text-sm text-[#a53f1c]">{model.error}</div>
-                ) : null}
-              </div>
-              <div className="flex items-center gap-2">
-                {model.available ? (
-                  <button
-                    type="button"
-                    onClick={() => void deleteModel(model.engine, model.model)}
-                    className="rounded-full border border-line px-4 py-2 text-sm text-ink/75"
-                  >
-                    删除
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void startDownload(model.engine, model.model)}
-                    className="rounded-full bg-accent px-4 py-2 text-sm text-white"
-                    disabled={model.downloading}
-                  >
-                    {model.downloading ? "下载中" : "下载"}
-                  </button>
-                )}
-              </div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold">可下载模型状态</div>
+            <div className="mt-1 text-sm text-ink/55">
+              当前引擎：{settings.selectedEngine}
             </div>
-          ))}
+          </div>
+        </div>
+        <div className="mt-5 space-y-3">
+          {supportsDownloads ? (
+            downloadableModels.map((model) => (
+              <div
+                key={`${model.engine}-${model.model}`}
+                className="grid gap-3 rounded-2xl border border-line bg-white/70 px-4 py-4 md:grid-cols-[1fr_auto]"
+              >
+                <div>
+                  <div className="font-medium">{model.model}</div>
+                  <div className="mt-1 text-sm text-ink/55">
+                    状态：{model.downloading ? "下载中" : model.available ? "已就绪" : "未下载"}
+                  </div>
+                  <div className="mt-1 text-xs text-ink/45">
+                    大小：{formatBytes(model.size_bytes)} · 已下载：
+                    {formatBytes(model.downloaded_bytes)}
+                  </div>
+                  {model.error ? (
+                    <div className="mt-2 text-sm text-[#a53f1c]">{model.error}</div>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  {model.available ? (
+                    <button
+                      type="button"
+                      onClick={() => void deleteModel(model.engine, model.model)}
+                      className="rounded-full border border-line px-4 py-2 text-sm text-ink/75"
+                    >
+                      删除
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void startDownload(model.engine, model.model)}
+                      className="rounded-full bg-accent px-4 py-2 text-sm text-white"
+                      disabled={model.downloading}
+                    >
+                      {model.downloading ? "下载中" : "下载"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="rounded-2xl border border-dashed border-line bg-white/60 px-4 py-5 text-sm leading-6 text-ink/60">
+              当前引擎没有可通过后端 `/models/download` 管理的模型列表。
+              {settings.selectedEngine === "whisper" || settings.selectedEngine === "whispercpp"
+                ? " Whisper 系列目前只提供模型选择，不提供这里的下载状态管理。"
+                : " 如需支持该引擎下载，需要后端先补对应的 `/models*` 能力。"}
+            </div>
+          )}
         </div>
       </section>
     </div>
