@@ -148,25 +148,39 @@ def _save_registry(registry: dict) -> None:
     except Exception as e:
         print(f"[ModelRegistry] Failed to write registry: {e}")
 
+def _is_within_models_dir(path: Path) -> bool:
+    try:
+        path.resolve().relative_to(MODEL_CACHE_DIR)
+        return True
+    except ValueError:
+        return False
+
+
+def _rebase_models_path(candidate: Path) -> Optional[Path]:
+    parts = list(candidate.parts)
+    lowered = [part.lower() for part in parts]
+    if "models" not in lowered:
+        return None
+
+    models_index = lowered.index("models")
+    rebased = MODEL_CACHE_DIR.joinpath(*parts[models_index + 1 :]).resolve()
+    return rebased
+
+
 def _normalize_registry_path(path: Optional[str]) -> Optional[str]:
     if not path:
         return path
 
     candidate = Path(path).expanduser()
-    if candidate.exists():
+    if candidate.exists() and _is_within_models_dir(candidate):
         return str(candidate.resolve())
 
-    parts = list(candidate.parts)
-    lowered = [part.lower() for part in parts]
-    if "models" not in lowered:
-        return path
-
-    models_index = lowered.index("models")
-    rebased = MODEL_CACHE_DIR.joinpath(*parts[models_index + 1 :]).resolve()
-    if rebased.exists():
+    rebased = _rebase_models_path(candidate)
+    if rebased and rebased.exists():
         return str(rebased)
 
-    return path
+    # 模型状态只认当前项目根目录 models/，不接受仓库外或历史目录。
+    return None
 
 def _get_registry_entry(engine: str, model: str) -> Optional[dict]:
     registry = _load_registry()
@@ -175,7 +189,11 @@ def _get_registry_entry(engine: str, model: str) -> Optional[dict]:
         return None
 
     normalized_path = _normalize_registry_path(entry.get("path"))
-    if normalized_path and normalized_path != entry.get("path"):
+    if not normalized_path:
+        _delete_registry_entry(engine, model)
+        return None
+
+    if normalized_path != entry.get("path"):
         _set_registry_entry(
             engine,
             model,
@@ -197,6 +215,10 @@ def _model_storage_path(engine: str, model: str) -> Optional[Path]:
         filename = WHISPERCPP_MODEL_FILES.get(model)
         if filename:
             return (WHISPER_CPP_MODEL_DIR / filename).resolve()
+    if engine == "funasr":
+        model_id = _get_fun_asr_model_id(model)
+        if model_id:
+            return (MODEL_CACHE_DIR / Path(model_id)).resolve()
     if engine == "parakeet":
         return (MODEL_CACHE_DIR / "parakeet" / model).resolve()
     return None
@@ -217,6 +239,11 @@ def _delete_registry_entry(engine: str, model: str) -> None:
     if engine in registry and model in registry[engine]:
         del registry[engine][model]
         _save_registry(registry)
+
+
+def _reset_download_state(engine: str, model: str) -> None:
+    key = f"{engine}:{model}"
+    model_downloads.pop(key, None)
 
 def _dir_size(path: str) -> int:
     total = 0
@@ -673,6 +700,7 @@ async def delete_model(engine: str = Form(...), model: str = Form(...)):
             else:
                 shutil.rmtree(fallback_path, ignore_errors=True)
     _delete_registry_entry(engine, model)
+    _reset_download_state(engine, model)
     return {"status": "deleted", "engine": engine, "model": model}
 
 
