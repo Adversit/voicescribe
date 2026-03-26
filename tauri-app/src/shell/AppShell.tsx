@@ -1,4 +1,5 @@
-﻿import { Layout } from "../components/Layout";
+import { useEffect } from "react";
+import { Layout } from "../components/Layout";
 import { Toast } from "../components/Toast";
 import { useBackendConnection } from "../hooks/useBackendConnection";
 import { useHotkey } from "../hooks/useHotkey";
@@ -24,6 +25,11 @@ export function AppShell() {
   const page = useAppStore((state) => state.currentPage);
   const toast = useAppStore((state) => state.toast);
   const setToast = useAppStore((state) => state.setToast);
+  const hydrateSettings = useAppStore((state) => state.hydrateSettings);
+
+  useEffect(() => {
+    void hydrateSettings();
+  }, [hydrateSettings]);
 
   return (
     <>

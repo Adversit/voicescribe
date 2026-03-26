@@ -1,9 +1,14 @@
-# python-embed placeholder
+ï»¿# python-embed placeholder
 
-½« Windows Ç¶ÈëÊ½ Python ½âÑ¹µ½µ±Ç°Ä¿Â¼£º
-- Ä¿±êÄ¿Â¼£º`tauri-app/src-tauri/resources/python-embed/`
-- Ä¿±êÎÄ¼ş£º`python.exe`
+å°† Windows åµŒå…¥å¼ Python è§£å‹åˆ°å½“å‰ç›®å½•ï¼š
+- ç›®æ ‡ç›®å½•ï¼š`tauri-app/src-tauri/resources/python-embed/`
+- ç›®æ ‡æ–‡ä»¶ï¼š`python.exe`
+- æ¨èç‰ˆæœ¬ï¼šPython 3.11 x64 embeddable package
 
-ÍÆ¼ö°æ±¾£ºPython 3.11 x64 embeddable package¡£
+å‡†å¤‡æ–¹å¼ï¼š
+1. æŠŠå®˜æ–¹ embeddable zip æ”¾åˆ° `tauri-app/src-tauri/resources/python-embed/python-embed.zip`
+2. è¿è¡Œ `scripts/build_embedded_python.bat`
+3. è„šæœ¬ä¼šè‡ªåŠ¨è§£å‹ï¼Œå¹¶å°è¯•æŠŠ `python*._pth` ä¸­çš„ `import site` æ‰“å¼€
+4. å¦‚æœåµŒå…¥å¼è¿è¡Œæ—¶ä¸å…·å¤‡ `venv` èƒ½åŠ›ï¼Œæ¡Œé¢ç«¯é¦–æ¬¡å¯åŠ¨ä¼šè‡ªåŠ¨å›é€€åˆ°ç³»ç»Ÿ Python æ¥åˆ›å»º `backend/venv`
 
-µ±Ç°²Ö¿â²»Ö±½ÓÌá½»¶ş½øÖÆÔËĞĞÊ±£»Ê×´Î³õÊ¼»¯Âß¼­ÒÑ¾­½ÓÈë£¬·ÅÈë `python.exe` ºó»áÓÅÏÈÊ¹ÓÃÕâÀïµÄ½âÊÍÆ÷´´½¨ `backend/venv` ²¢°²×° `requirements-minimal.txt`¡£
+å½“å‰ä»“åº“ä¸ç›´æ¥æäº¤äºŒè¿›åˆ¶è¿è¡Œæ—¶ï¼›é¦–æ¬¡åˆå§‹åŒ–é€»è¾‘å·²ç»æ¥å…¥ï¼Œæ”¾å…¥ `python.exe` åä¼šä¼˜å…ˆæ£€æµ‹è¿™é‡Œçš„è§£é‡Šå™¨ï¼Œå¹¶åœ¨å…·å¤‡ `venv` èƒ½åŠ›æ—¶ä¼˜å…ˆä½¿ç”¨å®ƒå®Œæˆ `backend/venv` å¼•å¯¼ã€‚

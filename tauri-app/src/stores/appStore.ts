@@ -1,4 +1,5 @@
 ﻿import { create } from "zustand";
+import { Store } from "@tauri-apps/plugin-store";
 import * as backendApi from "../api/backend";
 import * as tauriApi from "../api/tauri";
 import type {
@@ -7,11 +8,16 @@ import type {
   EngineInfo,
   SpeakerInfo,
   TranscribeResult,
+  Transcription,
+  TranscriptionSegment,
 } from "../types";
 
 type PageKey = "general" | "engine" | "vocabulary" | "speaker" | "hotkey";
 
 const SETTINGS_KEY = "voicescribe-settings-v1";
+const SETTINGS_STORE_FILE = "voicescribe-settings.json";
+const SETTINGS_STORE_ENTRY = "settings";
+const MAX_TRANSCRIPTION_HISTORY = 20;
 
 const defaultSettings: AppSettings = {
   selectedEngine: "funasr",
@@ -25,7 +31,13 @@ const defaultSettings: AppSettings = {
   hotkeyKeyCode: 82,
 };
 
-function loadSettings(): AppSettings {
+let settingsStorePromise: Promise<Store> | null = null;
+
+function isTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function loadBrowserSettings(): AppSettings {
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY);
     if (!raw) {
@@ -37,13 +49,85 @@ function loadSettings(): AppSettings {
   }
 }
 
-function persistSettings(settings: AppSettings) {
-  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+function persistBrowserSettings(settings: AppSettings) {
+  try {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore browser persistence errors.
+  }
+}
+
+async function getSettingsStore(): Promise<Store | null> {
+  if (!isTauriRuntime()) {
+    return null;
+  }
+
+  if (!settingsStorePromise) {
+    settingsStorePromise = Store.load(SETTINGS_STORE_FILE);
+  }
+
+  try {
+    return await settingsStorePromise;
+  } catch {
+    settingsStorePromise = null;
+    return null;
+  }
+}
+
+async function loadPersistedSettings(): Promise<AppSettings> {
+  const store = await getSettingsStore();
+  if (!store) {
+    return loadBrowserSettings();
+  }
+
+  try {
+    const value = await store.get<Partial<AppSettings>>(SETTINGS_STORE_ENTRY);
+    if (!value) {
+      return defaultSettings;
+    }
+    return { ...defaultSettings, ...value };
+  } catch {
+    return loadBrowserSettings();
+  }
+}
+
+async function persistSettings(settings: AppSettings) {
+  const store = await getSettingsStore();
+  if (!store) {
+    persistBrowserSettings(settings);
+    return;
+  }
+
+  await store.set(SETTINGS_STORE_ENTRY, settings);
+  await store.save();
+}
+
+function createSegmentId(segment: { start: number; end: number }, index: number) {
+  return `${segment.start}-${segment.end}-${index}`;
+}
+
+function createTranscription(result: TranscribeResult, audioPath: string): Transcription {
+  const segments: TranscriptionSegment[] = result.segments.map((segment, index) => ({
+    ...segment,
+    id: createSegmentId(segment, index),
+  }));
+
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    date: new Date().toISOString(),
+    duration: result.duration,
+    text: result.text,
+    segments,
+    engine: result.engine,
+    model: result.model,
+    audioPath,
+  };
 }
 
 interface AppStore {
   currentPage: PageKey;
   settings: AppSettings;
+  settingsHydrated: boolean;
   backendConnected: boolean;
   availableEngines: EngineInfo[];
   backendRuntime: BackendRuntimeStatus | null;
@@ -53,16 +137,19 @@ interface AppStore {
   isTranscribing: boolean;
   recordingCancelled: boolean;
   recordingStartedAt: number | null;
+  recordingDuration: number;
   audioLevel: number;
-  lastResult: TranscribeResult | null;
+  transcriptions: Transcription[];
+  currentTranscription: Transcription | null;
   setPage: (page: PageKey) => void;
+  hydrateSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
   setToast: (message: string | null) => void;
   setRecording: (value: boolean) => void;
   setTranscribing: (value: boolean) => void;
   setRecordingCancelled: (value: boolean) => void;
   setAudioLevel: (value: number) => void;
-  setLastResult: (value: TranscribeResult | null) => void;
+  saveTranscription: (result: TranscribeResult, audioPath: string) => Transcription;
   checkConnection: () => Promise<void>;
   startBackend: () => Promise<void>;
   stopBackend: () => Promise<void>;
@@ -74,7 +161,8 @@ interface AppStore {
 
 export const useAppStore = create<AppStore>((set, get) => ({
   currentPage: "general",
-  settings: loadSettings(),
+  settings: defaultSettings,
+  settingsHydrated: false,
   backendConnected: false,
   availableEngines: [],
   backendRuntime: null,
@@ -84,22 +172,40 @@ export const useAppStore = create<AppStore>((set, get) => ({
   isTranscribing: false,
   recordingCancelled: false,
   recordingStartedAt: null,
+  recordingDuration: 0,
   audioLevel: 0,
-  lastResult: null,
+  transcriptions: [],
+  currentTranscription: null,
   setPage: (page) => set({ currentPage: page }),
+  hydrateSettings: async () => {
+    if (get().settingsHydrated) {
+      return;
+    }
+
+    const settings = await loadPersistedSettings();
+    persistBrowserSettings(settings);
+    set({ settings, settingsHydrated: true });
+  },
   updateSettings: (partial) =>
     set((state) => {
       const next = { ...state.settings, ...partial };
-      persistSettings(next);
+      void persistSettings(next).catch(() => {
+        // Ignore persistence failures and keep in-memory state.
+      });
+      persistBrowserSettings(next);
       return { settings: next };
     }),
   setToast: (message) => set({ toast: message }),
   setRecording: (value) =>
-    set({
+    set((state) => ({
       isRecording: value,
       recordingStartedAt: value ? Date.now() : null,
+      recordingDuration:
+        value || state.recordingStartedAt === null
+          ? 0
+          : Math.max(0, (Date.now() - state.recordingStartedAt) / 1000),
       recordingCancelled: false,
-    }),
+    })),
   setTranscribing: (value) =>
     set({
       isTranscribing: value,
@@ -107,11 +213,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   setRecordingCancelled: (value) => set({ recordingCancelled: value }),
   setAudioLevel: (value) => set({ audioLevel: value }),
-  setLastResult: (value) => set({ lastResult: value }),
+  saveTranscription: (result, audioPath) => {
+    const transcription = createTranscription(result, audioPath);
+    set((state) => ({
+      currentTranscription: transcription,
+      transcriptions: [transcription, ...state.transcriptions].slice(
+        0,
+        MAX_TRANSCRIPTION_HISTORY,
+      ),
+    }));
+    return transcription;
+  },
   checkConnection: async () => {
     const health = await backendApi.healthCheck();
     if (!health) {
-      set({ backendConnected: false });
+      set({ backendConnected: false, availableEngines: [] });
       try {
         const runtime = await tauriApi.backendStatus();
         set({ backendRuntime: runtime });
@@ -138,7 +254,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   stopBackend: async () => {
     const runtime = await tauriApi.stopBackend();
-    set({ backendRuntime: runtime, backendConnected: false });
+    set({ backendRuntime: runtime, backendConnected: false, availableEngines: [] });
   },
   loadSelectedEngine: async () => {
     const { selectedEngine, selectedModel } = get().settings;

@@ -1,4 +1,10 @@
-﻿import { cancelRecording, outputText, startRecording, stopRecording, transcribeAudio } from "../api/tauri";
+﻿import {
+  cancelRecording,
+  outputText,
+  startRecording,
+  stopRecording,
+  transcribeAudio,
+} from "../api/tauri";
 import { useAppStore } from "../stores/appStore";
 
 let cancelResetTimer: number | null = null;
@@ -40,7 +46,7 @@ export async function finishRecordingSession() {
     });
 
     await outputText(settings.outputMode, result.text);
-    useAppStore.getState().setLastResult(result);
+    useAppStore.getState().saveTranscription(result, audioPath);
     useAppStore.getState().setToast("转录完成，结果已输出");
   } finally {
     const nextStore = useAppStore.getState();

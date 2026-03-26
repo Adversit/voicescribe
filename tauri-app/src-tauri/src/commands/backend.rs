@@ -1,4 +1,4 @@
-use crate::state::BackendProcessState;
+﻿use crate::state::BackendProcessState;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -169,6 +169,24 @@ fn resolve_system_python() -> Option<PathBuf> {
     None
 }
 
+fn python_supports_venv(python: &Path) -> bool {
+    Command::new(python)
+        .args(["-c", "import venv"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn resolve_bootstrap_python(app: &AppHandle) -> Option<PathBuf> {
+    if let Some(embedded) = resolve_embedded_python(app) {
+        if python_supports_venv(&embedded) {
+            return Some(embedded);
+        }
+    }
+
+    resolve_system_python().filter(|python| python_supports_venv(python))
+}
+
 fn venv_python_candidates(backend_dir: &Path) -> [PathBuf; 2] {
     [
         backend_dir.join("venv").join("Scripts").join("python.exe"),
@@ -177,10 +195,10 @@ fn venv_python_candidates(backend_dir: &Path) -> [PathBuf; 2] {
 }
 
 fn resolve_python(app: &AppHandle, backend_dir: &Path) -> Option<String> {
-    let embedded = resolve_embedded_python(app);
     let venv_candidates = venv_python_candidates(backend_dir);
+    let embedded = resolve_embedded_python(app);
 
-    for candidate in embedded.into_iter().chain(venv_candidates.into_iter()) {
+    for candidate in venv_candidates.into_iter().chain(embedded.into_iter()) {
         if candidate.exists() {
             return Some(candidate.to_string_lossy().to_string());
         }
@@ -222,7 +240,7 @@ fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path) -> Result<Option<Str
         return Ok(Some(existing.to_string_lossy().to_string()));
     }
 
-    let Some(bootstrap_python) = resolve_embedded_python(app).or_else(resolve_system_python) else {
+    let Some(bootstrap_python) = resolve_bootstrap_python(app) else {
         return Ok(None);
     };
 
@@ -306,7 +324,7 @@ pub fn start_backend(
     let python_cmd = python_path
         .clone()
         .or_else(|| resolve_python(&app, &backend_dir))
-        .ok_or_else(|| "Unable to resolve Python runtime".to_string())?;
+        .ok_or_else(|| "Unable to resolve Python runtime. Prepare python-embed or install system Python with venv support.".to_string())?;
 
     let mut command = Command::new(&python_cmd);
     command.arg(backend_dir.join("server.py"));

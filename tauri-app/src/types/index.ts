@@ -1,3 +1,5 @@
+﻿export type OutputMode = "directInput" | "clipboard" | "both";
+
 export interface EngineInfo {
   name: string;
   models: string[];
@@ -10,6 +12,21 @@ export interface Segment {
   end: number;
   text: string;
   speaker?: string | null;
+}
+
+export interface TranscriptionSegment extends Segment {
+  id: string;
+}
+
+export interface Transcription {
+  id: string;
+  date: string;
+  duration: number;
+  text: string;
+  segments: TranscriptionSegment[];
+  engine: string;
+  model: string;
+  audioPath: string | null;
 }
 
 export interface TranscribeResult {
@@ -40,7 +57,7 @@ export interface AppSettings {
   selectedModel: string;
   language: string;
   enableDiarization: boolean;
-  outputMode: "directInput" | "clipboard" | "both";
+  outputMode: OutputMode;
   hotwords: string;
   enableAIRefine: boolean;
   hotkeyModifiers: number;

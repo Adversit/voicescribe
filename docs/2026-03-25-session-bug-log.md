@@ -83,3 +83,13 @@
 - 表现：桌面应用可以启动，但界面显示“无法访问此页面 / localhost 拒绝连接 / ERR_CONNECTION_REFUSED”。
 - 实际原因：把本地启动链路从 `tauri build` 改成了纯 `cargo build --release` 后，生成的可执行文件没有经过 Tauri 完整的 release 构建流程，前端资源解析语义不正确，窗口退回到 `devUrl=http://localhost:5173` 的开发地址。
 - 后续处理：把 `scripts/start_windows_system.bat` 改为执行 `npx tauri build --no-bundle --ci`，保留 Tauri 正确的 release 构建流程，同时跳过 NSIS bundling。
+
+## 14. `tauri-plugin-store` JS API 初次接入时误用了构造函数
+- 表现：`npm run build` 失败，TypeScript 报错 `Constructor of class 'Store' is private and only accessible within the class declaration`。
+- 实际原因：前端初次接入 `@tauri-apps/plugin-store` 时，误写成了 `new Store(...)`，但 v2 正确用法是 `Store.load(...)` 或 `load(...)`。
+- 后续处理：将设置持久化改为 `Store.load("voicescribe-settings.json")`，重新构建后前端编译通过。
+
+## 15. `lib.rs` 以默认编码写回后变成非 UTF-8，导致 `cargo check` 失败
+- 表现：`cargo check` 失败，Rust 编译器报 `stream did not contain valid UTF-8`，并定位到 `src/lib.rs` 的中文菜单文本。
+- 实际原因：重写 `tauri-app/src-tauri/src/lib.rs` 时使用了 PowerShell 默认编码，文件被写成了非 UTF-8。
+- 后续处理：按 UTF-8 重新写回 `lib.rs`，再次执行 `cargo check` 后通过。
