@@ -2,6 +2,7 @@
 setlocal
 
 set "ROOT=%~dp0.."
+for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "TAURI_DIR=%ROOT%\tauri-app"
 set "RELEASE_DIR=%TAURI_DIR%\src-tauri\target\release"
 set "APP_EXE=%RELEASE_DIR%\voicescribe-desktop.exe"
@@ -16,8 +17,11 @@ if not exist "%TAURI_DIR%\package.json" (
   exit /b 1
 )
 
+call :stop_running_processes
+if errorlevel 1 exit /b 1
+
 if "%SKIP_BUILD%"=="0" (
-  echo [INFO] Building latest Tauri app before launch...
+  echo [INFO] Building latest Tauri desktop executable without bundling installer...
   if not exist "%VSDEVCMD%" (
     echo [ERROR] VS Build Tools not found: %VSDEVCMD%
     exit /b 1
@@ -32,9 +36,9 @@ if "%SKIP_BUILD%"=="0" (
     exit /b 1
   )
 
-  call npm run tauri:build
+  call npx tauri build --no-bundle --ci
   if errorlevel 1 (
-    echo [ERROR] tauri build failed.
+    echo [ERROR] tauri build --no-bundle failed.
     popd
     exit /b 1
   )
@@ -51,4 +55,11 @@ pushd "%RELEASE_DIR%"
 start "" "%APP_EXE%"
 popd
 
+exit /b 0
+
+:stop_running_processes
+echo [INFO] Stopping existing VoiceScribe processes...
+taskkill /IM voicescribe-desktop.exe /F >nul 2>nul
+powershell -NoProfile -Command "$root = '%ROOT%'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -like \"*$root\\backend\\server.py*\" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>nul
+timeout /t 2 /nobreak >nul
 exit /b 0

@@ -73,3 +73,13 @@
 - ���֣�ģ���ļ��Ѿ�ɾ����`available=false`���� `/models` ���Ա�����һ�����غ�� `downloaded_bytes`��
 - ʵ��ԭ��ɾ��ģ��ʱֻ������ע������ļ���û��ͬ������ڴ��е� `model_downloads` ״̬��
 - ������������ `backend/server.py` ɾ���߼��в�������״̬���ã�������֤��ɾ����� `downloaded_bytes` �ѻص� `null`��
+
+## 12. 本地启动脚本误用 `tauri build` 导致 NSIS 打包锁住可执行文件
+- 表现：执行 `scripts/start_windows_system.bat` 时，前端构建与 Rust release 编译能完成，但在 NSIS bundling 阶段报 `另一个程序正在使用此文件，进程无法访问。 (os error 32)`。
+- 实际原因：本地“重建并启动应用”场景误用了 `npm run tauri:build`，它会进入安装包 bundling 流程；该流程会再次操作 `target/release/voicescribe-desktop.exe`，容易与本地运行/扫描中的 exe 发生锁冲突。
+- 后续处理：把 `scripts/start_windows_system.bat` 改成仅用于本地启动，执行顺序调整为 `npm run build` + `cargo build --release` + 直接启动 `voicescribe-desktop.exe`，不再在该脚本里跑 NSIS 打包。
+
+## 13. 本地启动脚本改成 `cargo build --release` 后，桌面窗口退回到 `localhost` 页面
+- 表现：桌面应用可以启动，但界面显示“无法访问此页面 / localhost 拒绝连接 / ERR_CONNECTION_REFUSED”。
+- 实际原因：把本地启动链路从 `tauri build` 改成了纯 `cargo build --release` 后，生成的可执行文件没有经过 Tauri 完整的 release 构建流程，前端资源解析语义不正确，窗口退回到 `devUrl=http://localhost:5173` 的开发地址。
+- 后续处理：把 `scripts/start_windows_system.bat` 改为执行 `npx tauri build --no-bundle --ci`，保留 Tauri 正确的 release 构建流程，同时跳过 NSIS bundling。

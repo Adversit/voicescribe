@@ -54,6 +54,10 @@ pub fn run() {
 
             if let Some(icon) = app.default_window_icon() {
                 tray_builder = tray_builder.icon(icon.clone());
+
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_icon(icon.clone());
+                }
             }
 
             let _tray = tray_builder.build(app)?;
