@@ -2,6 +2,7 @@ use crate::state::BackendProcessState;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -10,7 +11,7 @@ use tauri::{AppHandle, Manager, State};
 const BACKEND_PORT: u16 = 8765;
 const BASE_URL: &str = "http://127.0.0.1:8765";
 
-fn project_root_dir() -> PathBuf {
+fn source_project_root_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -46,24 +47,11 @@ pub struct TranscribeResult {
 }
 
 fn dev_backend_dir() -> PathBuf {
-    project_root_dir().join("backend")
+    source_project_root_dir().join("backend")
 }
 
 fn resource_backend_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path().resource_dir().ok().map(|dir| dir.join("backend"))
-}
-
-fn resolve_backend_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let candidates = [
-        dev_backend_dir(),
-        resource_backend_dir(app).unwrap_or_default(),
-        env::current_dir().map_err(|err| err.to_string())?.join("backend"),
-    ];
-
-    candidates
-        .into_iter()
-        .find(|path| path.join("server.py").exists())
-        .ok_or_else(|| "Unable to locate backend/server.py".to_string())
 }
 
 fn repo_runtime_dir(backend_dir: &Path) -> Option<PathBuf> {
@@ -75,13 +63,13 @@ fn repo_runtime_dir(backend_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-fn resolve_runtime_dir(app: &AppHandle, backend_dir: &Path) -> Result<PathBuf, String> {
-    let project_root = project_root_dir();
+fn resolve_runtime_dir(app: &AppHandle, backend_seed: &Path) -> Result<PathBuf, String> {
+    let project_root = source_project_root_dir();
     if project_root.join("backend").exists() {
         return Ok(project_root);
     }
 
-    if let Some(runtime_dir) = repo_runtime_dir(backend_dir) {
+    if let Some(runtime_dir) = repo_runtime_dir(backend_seed) {
         return Ok(runtime_dir);
     }
 
@@ -96,6 +84,7 @@ fn resolve_runtime_dir(app: &AppHandle, backend_dir: &Path) -> Result<PathBuf, S
 fn ensure_runtime_dirs(runtime_dir: &Path) -> Result<(), String> {
     for path in [
         runtime_dir.to_path_buf(),
+        runtime_dir.join("backend"),
         runtime_dir.join("models"),
         runtime_dir.join("config"),
         runtime_dir.join("data").join("speakers"),
@@ -105,17 +94,91 @@ fn ensure_runtime_dirs(runtime_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_python(app: &AppHandle, backend_dir: &Path) -> Option<String> {
-    let embedded = app
-        .path()
+fn copy_backend_tree(source: &Path, target: &Path) -> Result<(), String> {
+    fn copy_dir_recursive(source: &Path, target: &Path) -> io::Result<()> {
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            let target_path = target.join(entry.file_name());
+            if source_path.is_dir() {
+                let name = entry.file_name();
+                if name == "__pycache__" || name == "venv" {
+                    continue;
+                }
+                copy_dir_recursive(&source_path, &target_path)?;
+            } else {
+                fs::copy(&source_path, &target_path)?;
+            }
+        }
+        Ok(())
+    }
+
+    copy_dir_recursive(source, target).map_err(|err| err.to_string())
+}
+
+fn resolve_backend_dir(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf, String> {
+    let dev_dir = dev_backend_dir();
+    if dev_dir.join("server.py").exists() {
+        return Ok(dev_dir);
+    }
+
+    if let Some(resource_dir) = resource_backend_dir(app) {
+        if resource_dir.join("server.py").exists() {
+            let runtime_backend_dir = runtime_dir.join("backend");
+            copy_backend_tree(&resource_dir, &runtime_backend_dir)?;
+            return Ok(runtime_backend_dir);
+        }
+    }
+
+    let cwd_backend_dir = env::current_dir()
+        .map_err(|err| err.to_string())?
+        .join("backend");
+    if cwd_backend_dir.join("server.py").exists() {
+        return Ok(cwd_backend_dir);
+    }
+
+    Err("Unable to locate backend/server.py".to_string())
+}
+
+fn resolve_embedded_python(app: &AppHandle) -> Option<PathBuf> {
+    app.path()
         .resource_dir()
         .ok()
-        .map(|dir| dir.join("python-embed").join("python.exe"));
+        .map(|dir| dir.join("python-embed").join("python.exe"))
+        .filter(|path| path.exists())
+}
 
-    let venv_candidates = [
+fn resolve_system_python() -> Option<PathBuf> {
+    let candidates = if cfg!(target_os = "windows") {
+        ["python.exe", "python3.exe", "python", "python3"]
+    } else {
+        ["python3", "python", "python3", "python"]
+    };
+
+    for candidate in candidates {
+        if let Some(found) = env::var_os("PATH").and_then(|paths| {
+            env::split_paths(&paths)
+                .map(|dir| dir.join(candidate))
+                .find(|path| path.exists())
+        }) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+fn venv_python_candidates(backend_dir: &Path) -> [PathBuf; 2] {
+    [
         backend_dir.join("venv").join("Scripts").join("python.exe"),
         backend_dir.join("venv").join("bin").join("python"),
-    ];
+    ]
+}
+
+fn resolve_python(app: &AppHandle, backend_dir: &Path) -> Option<String> {
+    let embedded = resolve_embedded_python(app);
+    let venv_candidates = venv_python_candidates(backend_dir);
 
     for candidate in embedded.into_iter().chain(venv_candidates.into_iter()) {
         if candidate.exists() {
@@ -123,11 +186,64 @@ fn resolve_python(app: &AppHandle, backend_dir: &Path) -> Option<String> {
         }
     }
 
-    Some(if cfg!(target_os = "windows") {
-        "python".to_string()
-    } else {
-        "python3".to_string()
-    })
+    resolve_system_python().map(|path| path.to_string_lossy().to_string())
+}
+
+fn install_requirements_command(venv_python: &Path, backend_dir: &Path) -> Result<(), String> {
+    let requirements = backend_dir.join("requirements-minimal.txt");
+
+    let status = Command::new(venv_python)
+        .args(["-m", "pip", "install", "--upgrade", "pip"])
+        .current_dir(backend_dir)
+        .status()
+        .map_err(|err| format!("Failed to upgrade pip: {err}"))?;
+    if !status.success() {
+        return Err("pip upgrade failed".to_string());
+    }
+
+    let status = Command::new(venv_python)
+        .args(["-m", "pip", "install", "-r"])
+        .arg(&requirements)
+        .current_dir(backend_dir)
+        .status()
+        .map_err(|err| format!("Failed to install backend dependencies: {err}"))?;
+    if !status.success() {
+        return Err("pip install -r requirements-minimal.txt failed".to_string());
+    }
+
+    Ok(())
+}
+
+fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path) -> Result<Option<String>, String> {
+    if let Some(existing) = venv_python_candidates(backend_dir)
+        .into_iter()
+        .find(|candidate| candidate.exists())
+    {
+        return Ok(Some(existing.to_string_lossy().to_string()));
+    }
+
+    let Some(bootstrap_python) = resolve_embedded_python(app).or_else(resolve_system_python) else {
+        return Ok(None);
+    };
+
+    let venv_dir = backend_dir.join("venv");
+    let status = Command::new(&bootstrap_python)
+        .args(["-m", "venv"])
+        .arg(&venv_dir)
+        .current_dir(backend_dir)
+        .status()
+        .map_err(|err| format!("Failed to create backend venv: {err}"))?;
+    if !status.success() {
+        return Err("python -m venv backend/venv failed".to_string());
+    }
+
+    let venv_python = venv_python_candidates(backend_dir)
+        .into_iter()
+        .find(|candidate| candidate.exists())
+        .ok_or_else(|| "Backend venv created, but python executable was not found".to_string())?;
+
+    install_requirements_command(&venv_python, backend_dir)?;
+    Ok(Some(venv_python.to_string_lossy().to_string()))
 }
 
 fn snapshot_status(
@@ -155,9 +271,10 @@ pub fn start_backend(
     app: AppHandle,
     state: State<'_, BackendProcessState>,
 ) -> Result<BackendRuntimeStatus, String> {
-    let backend_dir = resolve_backend_dir(&app)?;
-    let runtime_dir = resolve_runtime_dir(&app, &backend_dir)?;
+    let backend_seed = resource_backend_dir(&app).unwrap_or_else(dev_backend_dir);
+    let runtime_dir = resolve_runtime_dir(&app, &backend_seed)?;
     ensure_runtime_dirs(&runtime_dir)?;
+    let backend_dir = resolve_backend_dir(&app, &runtime_dir)?;
 
     {
         let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
@@ -185,18 +302,19 @@ pub fn start_backend(
         }
     }
 
-    let python_path = resolve_python(&app, &backend_dir);
+    let python_path = ensure_backend_venv(&app, &backend_dir)?;
     let python_cmd = python_path
         .clone()
+        .or_else(|| resolve_python(&app, &backend_dir))
         .ok_or_else(|| "Unable to resolve Python runtime".to_string())?;
 
     let mut command = Command::new(&python_cmd);
     command.arg(backend_dir.join("server.py"));
     command.current_dir(&backend_dir);
     command.env("PYTHONUNBUFFERED", "1");
-    command.env("VOICESCRIBE_ROOT", project_root_dir());
+    command.env("VOICESCRIBE_ROOT", runtime_dir.clone());
     command.env("VOICESCRIBE_RUNTIME_DIR", &runtime_dir);
-    command.env("VOICESCRIBE_MODEL_DIR", project_root_dir().join("models"));
+    command.env("VOICESCRIBE_MODEL_DIR", runtime_dir.join("models"));
     command.env("VOICESCRIBE_CONFIG_DIR", runtime_dir.join("config"));
     command.env(
         "VOICESCRIBE_SPEAKER_DIR",
@@ -215,7 +333,7 @@ pub fn start_backend(
                 "starting",
                 &backend_dir,
                 &runtime_dir,
-                python_path,
+                Some(python_cmd),
                 None,
             ))
         }
@@ -230,7 +348,7 @@ pub fn start_backend(
                 "error",
                 &backend_dir,
                 &runtime_dir,
-                python_path,
+                Some(python_cmd),
                 Some(message),
             ))
         }
@@ -242,8 +360,9 @@ pub fn stop_backend(
     app: AppHandle,
     state: State<'_, BackendProcessState>,
 ) -> Result<BackendRuntimeStatus, String> {
-    let backend_dir = resolve_backend_dir(&app)?;
-    let runtime_dir = resolve_runtime_dir(&app, &backend_dir)?;
+    let backend_seed = resource_backend_dir(&app).unwrap_or_else(dev_backend_dir);
+    let runtime_dir = resolve_runtime_dir(&app, &backend_seed)?;
+    let backend_dir = resolve_backend_dir(&app, &runtime_dir)?;
     let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
     if let Some(child) = child_guard.as_mut() {
         let _ = child.kill();
@@ -269,8 +388,9 @@ pub fn backend_status(
     app: AppHandle,
     state: State<'_, BackendProcessState>,
 ) -> Result<BackendRuntimeStatus, String> {
-    let backend_dir = resolve_backend_dir(&app)?;
-    let runtime_dir = resolve_runtime_dir(&app, &backend_dir)?;
+    let backend_seed = resource_backend_dir(&app).unwrap_or_else(dev_backend_dir);
+    let runtime_dir = resolve_runtime_dir(&app, &backend_seed)?;
+    let backend_dir = resolve_backend_dir(&app, &runtime_dir)?;
     let running = {
         let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
         if let Some(child) = child_guard.as_mut() {
@@ -333,7 +453,10 @@ pub async fn transcribe(
         {
             Ok(response) => {
                 if response.status().is_success() {
-                    return response.json::<TranscribeResult>().await.map_err(|err| err.to_string());
+                    return response
+                        .json::<TranscribeResult>()
+                        .await
+                        .map_err(|err| err.to_string());
                 }
 
                 last_error = response
