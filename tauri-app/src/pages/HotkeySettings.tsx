@@ -33,26 +33,25 @@ export function HotkeySettings() {
   const hasModifier = Object.values(currentModifiers).some(Boolean);
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.22em] text-ink/45">Hotkey</p>
-        <h1 className="text-3xl font-semibold">快捷键</h1>
-        <p className="max-w-3xl text-sm leading-6 text-ink/65">
+    <div className="space-y-5">
+      <header className="space-y-1">
+        <h1 className="text-[28px] font-semibold text-ink">快捷键</h1>
+        <p className="max-w-3xl text-sm leading-6 text-ink/60">
           结构与原版一致：先看当前快捷键，再调整修饰键和主键，最后确认录音触发方式。
         </p>
       </header>
 
-      <section className="rounded-[28px] border border-line bg-panel/90 p-5">
-        <div className="text-sm text-ink/55">当前快捷键</div>
-        <div className="mt-2 rounded-2xl bg-white/80 px-4 py-4 font-mono text-2xl font-semibold text-ink">
+      <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
+        <div className="text-base font-semibold text-ink">录音快捷键</div>
+        <div className="mt-3 rounded-2xl border border-[#ddd2c0] bg-white px-4 py-4 font-mono text-2xl font-semibold text-ink">
           {display}
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
           {modifiers.map((modifier) => (
             <label
               key={modifier.key}
-              className="flex items-center justify-between rounded-2xl border border-line bg-white/70 px-4 py-3"
+              className="flex items-center justify-between rounded-2xl border border-[#e4dbc9] bg-white px-4 py-3"
             >
               <span>{modifier.key}</span>
               <input
@@ -70,19 +69,17 @@ export function HotkeySettings() {
           ))}
         </div>
 
-        <label className="mt-5 block text-sm font-medium text-ink/70">
+        <label className="mt-4 block text-sm text-ink/70">
           主键（Virtual Key Code）
           <input
             type="number"
             value={settings.hotkeyKeyCode}
-            onChange={(event) =>
-              updateSettings({ hotkeyKeyCode: Number(event.target.value) || 0 })
-            }
-            className="mt-2 w-full max-w-xs rounded-2xl border border-line bg-white px-4 py-3"
+            onChange={(event) => updateSettings({ hotkeyKeyCode: Number(event.target.value) || 0 })}
+            className="mt-2 w-full max-w-xs rounded-2xl border border-[#ddd2c0] bg-white px-4 py-3"
           />
         </label>
 
-        <div className="mt-6 flex flex-wrap items-center gap-3">
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
             disabled={!hasModifier}
@@ -101,24 +98,22 @@ export function HotkeySettings() {
           >
             应用快捷键
           </button>
-          {!hasModifier ? (
-            <span className="text-sm text-[#a53f1c]">至少需要选择一个修饰键。</span>
-          ) : null}
+          {!hasModifier ? <span className="text-sm text-[#a53f1c]">至少需要选择一个修饰键。</span> : null}
         </div>
       </section>
 
-      <section className="rounded-[28px] border border-line bg-panel/90 p-5">
-        <div className="text-lg font-semibold">使用方式</div>
-        <div className="mt-4 space-y-4 text-sm leading-6 text-ink/70">
-          <div className="rounded-2xl bg-white/75 px-4 py-4">
+      <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
+        <div className="text-base font-semibold text-ink">使用方式</div>
+        <div className="mt-4 space-y-3 text-sm leading-6 text-ink/70">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4">
             <div className="font-semibold text-ink">长按模式</div>
             <div className="mt-1">按住快捷键开始录音，松开后自动停止并转录。</div>
           </div>
-          <div className="rounded-2xl bg-white/75 px-4 py-4">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4">
             <div className="font-semibold text-ink">双击模式</div>
             <div className="mt-1">快速双击开始持续录音，再按一次停止并转录。</div>
           </div>
-          <div className="rounded-2xl bg-white/75 px-4 py-4">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4">
             <div className="font-semibold text-ink">取消录音</div>
             <div className="mt-1">录音过程中按 ESC，或点击悬浮录音窗，可取消当前录音。</div>
           </div>

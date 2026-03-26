@@ -120,8 +120,15 @@
 
 ### P4-01 主窗口结构与原始 app 对齐
 - 当前判断：`部分完成`
+- 当前代码现状：
+  - [Layout.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\Layout.tsx) 已从 dashboard 式布局收口到更接近原版设置窗口的单窗体结构
+  - [ShellHeader.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\ShellHeader.tsx) 已按原版菜单栏语义收口为状态 + 最近转录 + 快捷操作
+  - [GeneralSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\GeneralSettings.tsx)、[EngineSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\EngineSettings.tsx)、[VocabularySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\VocabularySettings.tsx)、[SpeakerSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\SpeakerSettings.tsx)、[HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) 已向原版 `Form + Section` 结构收敛
 - 剩余问题：
-  - 视觉、分组、状态区、录音节奏表达仍需继续收敛
+  - 仍缺一轮人工界面对照验收，确认结构与体验是否达到原版预期
+  - 录音悬浮窗与托盘入口仍未完全做到原版感知一致
+- 已有验证：
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `27`
 - 建议优先级：中
 
 ### P4-02 引擎页统一模型语义
@@ -151,15 +158,26 @@
   - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `16`、`17`、`24`
 
 ### P5-02 GitHub Actions CI/CD
-- 当前判断：`未完成`
+- 当前判断：`部分完成`
+- 当前代码现状：
+  - [.github/workflows/build-windows.yml](D:\learn\AIGC\voicescribe\0324\voicescribe\.github\workflows\build-windows.yml) 已新增 Windows 构建 workflow
+  - 工作流已覆盖 `actions/checkout`、Node、Python、Rust、`npm run tauri:build` 和 NSIS 安装包上传
 - 剩余问题：
-  - 仓库中尚无正式 Windows 构建 workflow
+  - 仍缺 GitHub 远端实际运行一轮的验证
+- 已有验证：
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `25`
 - 建议优先级：中
 
 ### P5-03 Windows 自动启动
-- 当前判断：`未完成`
+- 当前判断：`代码已完成，待人工验收`
+- 当前代码现状：
+  - [lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs) 已接入 `tauri-plugin-autostart`
+  - [appStore.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\stores\appStore.ts) 已补齐 `launchAtLogin` 设置、状态同步与启停方法
+  - [GeneralSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\GeneralSettings.tsx) 已新增开机自启开关
 - 剩余问题：
-  - 仓库中尚无正式 autostart 落地
+  - 仍缺真实 Windows 登录项是否写入成功的系统侧验收
+- 已有验证：
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `26`
 - 建议优先级：中
 
 ## 建议执行顺序
@@ -204,6 +222,10 @@
 - Phase 5 仍有安装态、CI 和自动启动未完成
 
 因此，接下来不应再泛化地说“spec 已完成”，而应以上述状态为准。
+
+
+
+
 
 
 

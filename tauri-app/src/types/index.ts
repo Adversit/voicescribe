@@ -60,6 +60,7 @@ export interface AppSettings {
   outputMode: OutputMode;
   hotwords: string;
   enableAIRefine: boolean;
+  launchAtLogin: boolean;
   hotkeyModifiers: number;
   hotkeyKeyCode: number;
 }

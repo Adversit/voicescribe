@@ -2,6 +2,7 @@
 import { Store } from "@tauri-apps/plugin-store";
 import * as backendApi from "../api/backend";
 import * as tauriApi from "../api/tauri";
+import { getAutostartEnabled, setAutostartEnabled } from "../lib/autostart";
 import type {
   AppSettings,
   BackendRuntimeStatus,
@@ -27,6 +28,7 @@ const defaultSettings: AppSettings = {
   outputMode: "directInput",
   hotwords: "",
   enableAIRefine: false,
+  launchAtLogin: false,
   hotkeyModifiers: 0x3,
   hotkeyKeyCode: 82,
 };
@@ -144,6 +146,8 @@ interface AppStore {
   setPage: (page: PageKey) => void;
   hydrateSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
+  syncAutostart: () => Promise<void>;
+  setLaunchAtLogin: (enabled: boolean) => Promise<void>;
   setToast: (message: string | null) => void;
   setRecording: (value: boolean) => void;
   setTranscribing: (value: boolean) => void;
@@ -185,6 +189,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const settings = await loadPersistedSettings();
     persistBrowserSettings(settings);
     set({ settings, settingsHydrated: true });
+
+    if (isTauriRuntime()) {
+      await get().syncAutostart();
+    }
   },
   updateSettings: (partial) =>
     set((state) => {
@@ -195,6 +203,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
       persistBrowserSettings(next);
       return { settings: next };
     }),
+  syncAutostart: async () => {
+    const enabled = await getAutostartEnabled();
+    const next = { ...get().settings, launchAtLogin: enabled };
+    persistBrowserSettings(next);
+    set({ settings: next });
+    void persistSettings(next).catch(() => {
+      // Ignore persistence failures and keep in-memory state.
+    });
+  },
+  setLaunchAtLogin: async (enabled) => {
+    await setAutostartEnabled(enabled);
+    const next = { ...get().settings, launchAtLogin: enabled };
+    persistBrowserSettings(next);
+    set({ settings: next, toast: enabled ? "已启用开机自启" : "已关闭开机自启" });
+    await persistSettings(next);
+  },
   setToast: (message) => set({ toast: message }),
   setRecording: (value) =>
     set((state) => ({

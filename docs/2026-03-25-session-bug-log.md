@@ -93,3 +93,8 @@
 - 表现：`cargo check` 失败，Rust 编译器报 `stream did not contain valid UTF-8`，并定位到 `src/lib.rs` 的中文菜单文本。
 - 实际原因：重写 `tauri-app/src-tauri/src/lib.rs` 时使用了 PowerShell 默认编码，文件被写成了非 UTF-8。
 - 后续处理：按 UTF-8 重新写回 `lib.rs`，再次执行 `cargo check` 后通过。
+
+## 16. JSON 配置文件被写成带 BOM 的 UTF-8，导致前端和 Tauri 构建同时失败
+- 表现：新增 `autostart` 相关配置后，`npm run build` 报 `package.json is not valid JSON`，`cargo check` 报 `unable to parse JSON Tauri config file`。
+- 实际原因：重写 `tauri-app/package.json` 和 `tauri-app/src-tauri/tauri.conf.json` 时写成了带 BOM 的 UTF-8，Vite 和 Tauri 配置解析都在首字符处失败。
+- 后续处理：将两个 JSON 文件改为无 BOM UTF-8 后，重新执行 `npm run build` 和 `cargo check` 均通过。

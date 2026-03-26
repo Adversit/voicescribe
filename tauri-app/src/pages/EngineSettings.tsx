@@ -39,7 +39,6 @@ export function EngineSettings() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const availableEngines = useAppStore((state) => state.availableEngines);
-  const backendConnected = useAppStore((state) => state.backendConnected);
   const setToast = useAppStore((state) => state.setToast);
   const models = useModelStore((state) => state.models);
   const refreshModels = useModelStore((state) => state.refresh);
@@ -48,7 +47,7 @@ export function EngineSettings() {
 
   useEffect(() => {
     void refreshModels();
-  }, [refreshModels, backendConnected]);
+  }, [refreshModels]);
 
   const selectedEngineInfo = availableEngines.find(
     (engine) => engine.name === settings.selectedEngine,
@@ -60,137 +59,119 @@ export function EngineSettings() {
   );
   const currentEngineModels = selectedEngineInfo?.models ?? [];
   const displayModels = currentEngineModels.map(
-    (model) =>
-      modelStatusMap.get(model) ??
-      getDefaultModelStatus(settings.selectedEngine, model),
+    (model) => modelStatusMap.get(model) ?? getDefaultModelStatus(settings.selectedEngine, model),
   );
-  const supportsDownloads = currentEngineModels.length > 0;
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.22em] text-ink/45">Engine</p>
-        <h1 className="text-3xl font-semibold">引擎与模型</h1>
-        <p className="max-w-3xl text-sm leading-6 text-ink/65">
-          所有模型统一下载到并读取自项目根目录的 <code>models/</code>。可选模型与可下载模型都以同一份后端定义为准，未下载模型也会显示出来。
+    <div className="space-y-5">
+      <header className="space-y-1">
+        <h1 className="text-[28px] font-semibold text-ink">引擎</h1>
+        <p className="max-w-3xl text-sm leading-6 text-ink/60">
+          这里保持原版的两段式结构：上方选择引擎和模型，下方管理当前引擎的可用模型状态。
         </p>
       </header>
 
-      <section className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[28px] border border-line bg-panel/90 p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <label>
-              <div className="text-sm font-semibold">引擎</div>
-              <select
-                value={settings.selectedEngine}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  const match = availableEngines.find((engine) => engine.name === next);
-                  updateSettings({
-                    selectedEngine: next,
-                    selectedModel: match?.models[0] ?? settings.selectedModel,
-                  });
-                }}
-                className="mt-3 w-full rounded-2xl border border-line bg-white px-4 py-3"
-              >
-                {availableEngines.map((engine) => (
-                  <option key={engine.name} value={engine.name}>
-                    {engine.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <div className="text-sm font-semibold">模型</div>
-              <select
-                value={settings.selectedModel}
-                onChange={(event) => updateSettings({ selectedModel: event.target.value })}
-                className="mt-3 w-full rounded-2xl border border-line bg-white px-4 py-3"
-              >
-                {(selectedEngineInfo?.models ?? []).map((model) => (
-                  <option key={model} value={model}>
-                    {model}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <p className="mt-4 text-sm leading-6 text-ink/65">
-            {engineDescriptions[settings.selectedEngine] ?? "当前引擎描述待补充。"}
-          </p>
-
-          <div className="mt-5 flex gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                void loadEngine(settings.selectedEngine, settings.selectedModel)
-                  .then(() => setToast("模型加载成功"))
-                  .catch((error) =>
-                    setToast(error instanceof Error ? error.message : "模型加载失败"),
-                  )
-              }
-              className="rounded-full bg-accent px-4 py-2 text-sm text-white"
+      <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm text-ink/70">
+            选择引擎
+            <select
+              value={settings.selectedEngine}
+              onChange={(event) => {
+                const next = event.target.value;
+                const match = availableEngines.find((engine) => engine.name === next);
+                updateSettings({
+                  selectedEngine: next,
+                  selectedModel: match?.models[0] ?? settings.selectedModel,
+                });
+              }}
+              className="mt-2 w-full rounded-2xl border border-[#ddd2c0] bg-white px-4 py-3"
             >
-              预加载当前模型
-            </button>
-            <button
-              type="button"
-              onClick={() => void refreshModels()}
-              className="rounded-full border border-line px-4 py-2 text-sm text-ink/75"
+              {availableEngines.map((engine) => (
+                <option key={engine.name} value={engine.name}>
+                  {engine.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm text-ink/70">
+            选择模型
+            <select
+              value={settings.selectedModel}
+              onChange={(event) => updateSettings({ selectedModel: event.target.value })}
+              className="mt-2 w-full rounded-2xl border border-[#ddd2c0] bg-white px-4 py-3"
             >
-              刷新模型状态
-            </button>
-          </div>
+              {(selectedEngineInfo?.models ?? []).map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
-        <aside className="rounded-[28px] border border-line bg-panel/90 p-5">
-          <div className="text-sm font-semibold">运行策略</div>
-          <ul className="mt-3 space-y-3 text-sm leading-6 text-ink/65">
-            <li>模型目录固定为项目根目录 <code>models/</code>。</li>
-            <li>后端会从 <code>models/voicescribe_models.json</code> 读取已下载状态。</li>
-            <li>旧注册表里的历史绝对路径会自动 rebasing 到当前 <code>models/</code>。</li>
-            <li>所有引擎都按完整模型清单展示，未下载项会保留下载入口。</li>
-          </ul>
-        </aside>
+        <p className="mt-4 text-sm leading-6 text-ink/60">
+          {engineDescriptions[settings.selectedEngine] ?? "当前引擎描述待补充。"}
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() =>
+              void loadEngine(settings.selectedEngine, settings.selectedModel)
+                .then(() => setToast("模型加载成功"))
+                .catch((error) =>
+                  setToast(error instanceof Error ? error.message : "模型加载失败"),
+                )
+            }
+            className="rounded-full bg-accent px-4 py-2 text-sm text-white"
+          >
+            预加载当前模型
+          </button>
+          <button
+            type="button"
+            onClick={() => void refreshModels()}
+            className="rounded-full border border-[#ddd2c0] bg-white px-4 py-2 text-sm text-ink/75"
+          >
+            刷新模型状态
+          </button>
+        </div>
       </section>
 
-      <section className="rounded-[28px] border border-line bg-panel/90 p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-lg font-semibold">可下载模型状态</div>
-            <div className="mt-1 text-sm text-ink/55">
-              当前引擎：{settings.selectedEngine}
+      <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
+        <div className="text-base font-semibold text-ink">模型管理</div>
+        <p className="mt-1 text-sm leading-6 text-ink/55">
+          所有模型固定下载到并读取自项目根目录的 <code>models/</code>。未下载模型也会显示并保留下载入口。
+        </p>
+
+        <div className="mt-4 space-y-3">
+          {displayModels.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[#ded4c4] bg-white px-4 py-4 text-sm text-ink/55">
+              当前引擎没有可展示的模型列表。
             </div>
-          </div>
-        </div>
-        <div className="mt-5 space-y-3">
-          {supportsDownloads ? (
+          ) : (
             displayModels.map((model) => (
               <div
                 key={`${model.engine}-${model.model}`}
-                className="grid gap-3 rounded-2xl border border-line bg-white/70 px-4 py-4 md:grid-cols-[1fr_auto]"
+                className="flex flex-col gap-3 rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4 md:flex-row md:items-center md:justify-between"
               >
                 <div>
-                  <div className="font-medium">{model.model}</div>
+                  <div className="font-medium text-ink">{model.model}</div>
                   <div className="mt-1 text-sm text-ink/55">
                     状态：{model.downloading ? "下载中" : model.available ? "已就绪" : "未下载"}
                   </div>
                   <div className="mt-1 text-xs text-ink/45">
-                    大小：{formatBytes(model.size_bytes)} · 已下载：
-                    {formatBytes(model.downloaded_bytes)}
+                    大小：{formatBytes(model.size_bytes)} · 已下载：{formatBytes(model.downloaded_bytes)}
                   </div>
-                  {model.error ? (
-                    <div className="mt-2 text-sm text-[#a53f1c]">{model.error}</div>
-                  ) : null}
+                  {model.error ? <div className="mt-2 text-sm text-[#a53f1c]">{model.error}</div> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   {model.available ? (
                     <button
                       type="button"
                       onClick={() => void deleteModel(model.engine, model.model)}
-                      className="rounded-full border border-line px-4 py-2 text-sm text-ink/75"
+                      className="rounded-full border border-[#ddd2c0] bg-white px-4 py-2 text-sm text-ink/75"
                     >
                       删除
                     </button>
@@ -207,10 +188,6 @@ export function EngineSettings() {
                 </div>
               </div>
             ))
-          ) : (
-            <div className="rounded-2xl border border-dashed border-line bg-white/60 px-4 py-5 text-sm leading-6 text-ink/60">
-              当前引擎没有可展示的模型列表。
-            </div>
           )}
         </div>
       </section>

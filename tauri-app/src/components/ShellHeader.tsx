@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+ï»¿import { useEffect, useMemo, useState } from "react";
 import { Copy, Mic, Square, Sparkles } from "lucide-react";
 import { beginRecordingSession, finishRecordingSession } from "../lib/recordingFlow";
 import { copyText } from "../lib/clipboard";
@@ -42,76 +42,86 @@ export function ShellHeader() {
   }, [isRecording, now, recordingStartedAt]);
 
   const statusLabel = isRecording
-    ? `Â¼ÒôÖĞ ${formatDuration(elapsed)}`
+    ? `å½•éŸ³ä¸­ ${formatDuration(elapsed)}`
     : isTranscribing
-      ? "×ªÂ¼ÖĞ"
-      : "´ıÃü";
+      ? "è½¬å½•ä¸­"
+      : "å¾…å‘½";
 
   return (
-    <section className="rounded-[26px] border border-line bg-white/82 px-5 py-5 shadow-panel backdrop-blur">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-3">
+    <section className="rounded-[22px] border border-[#e4dbc9] bg-[#f8f3ea] px-4 py-4">
+      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-start">
+        <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent text-white">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent text-white shadow-[0_10px_24px_rgba(171,91,48,0.24)]">
               <Sparkles className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-2xl font-semibold text-ink">VoiceScribe</h1>
-              <p className="text-sm text-ink/60">ÉèÖÃ¡¢Â¼Òô×´Ì¬Óë×î½ü½á¹ûÍ³Ò»ÔÚÒ»¸ö´°¿ÚÀï¹ÜÀí¡£</p>
+              <h1 className="text-[22px] font-semibold text-ink">VoiceScribe</h1>
+              <p className="text-sm text-ink/60">å½•éŸ³ã€æœ€è¿‘ç»“æœå’Œè®¾ç½®é›†ä¸­åœ¨ä¸€ä¸ªåŸç”Ÿé£æ ¼çª—å£é‡Œã€‚</p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3 text-sm">
-            <div className="rounded-full bg-canvas px-4 py-2 text-ink/75">
-              ºó¶Ë£º{backendConnected ? "ÒÑÁ¬½Ó" : "Î´Á¬½Ó"}
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-ink/40">Backend</div>
+              <div className="mt-1 text-sm font-medium text-ink">
+                {backendConnected ? "å·²è¿æ¥" : "æœªè¿æ¥"}
+              </div>
             </div>
-            <div className="rounded-full bg-canvas px-4 py-2 text-ink/75">
-              µ±Ç°×´Ì¬£º{statusLabel}
+            <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-ink/40">Status</div>
+              <div className="mt-1 text-sm font-medium text-ink">{statusLabel}</div>
             </div>
-            <div className="rounded-full bg-canvas px-4 py-2 text-ink/75">
-              ÀúÊ·×ªÂ¼£º{transcriptionCount} Ìõ
+            <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.16em] text-ink/40">History</div>
+              <div className="mt-1 text-sm font-medium text-ink">{transcriptionCount} æ¡</div>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() =>
-              void (isRecording ? finishRecordingSession() : beginRecordingSession()).catch(
-                (error) => setToast(error instanceof Error ? error.message : "Â¼Òô²Ù×÷Ê§°Ü"),
-              )
-            }
-            className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm text-white"
-          >
-            {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            {isRecording ? "Í£Ö¹²¢×ªÂ¼" : "¿ªÊ¼Â¼Òô"}
-          </button>
-          <button
-            type="button"
-            disabled={!currentTranscription?.text}
-            onClick={() =>
-              void copyText(currentTranscription?.text ?? "")
-                .then(() => setToast("×î½ü½á¹ûÒÑ¸´ÖÆµ½¼ôÌù°å"))
-                .catch((error) =>
-                  setToast(error instanceof Error ? error.message : "¸´ÖÆÊ§°Ü"),
-                )
-            }
-            className="inline-flex items-center gap-2 rounded-full border border-line px-4 py-2 text-sm text-ink/75 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Copy className="h-4 w-4" />
-            ¸´ÖÆ×î½ü½á¹û
-          </button>
-        </div>
-      </div>
+        <div className="rounded-[20px] border border-[#e4dbc9] bg-white px-4 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-ink">æœ€è¿‘è½¬å½•</div>
+              <div className="mt-1 text-xs text-ink/50">è¿™é‡Œå¯¹åº”åŸç‰ˆèœå•æ é‡Œçš„æœ€è¿‘ç»“æœä¸å¿«æ·æ“ä½œã€‚</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  void (isRecording ? finishRecordingSession() : beginRecordingSession()).catch(
+                    (error) => setToast(error instanceof Error ? error.message : "å½•éŸ³æ“ä½œå¤±è´¥"),
+                  )
+                }
+                className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm text-white"
+              >
+                {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                {isRecording ? "åœæ­¢" : "å¼€å§‹å½•éŸ³"}
+              </button>
+              <button
+                type="button"
+                disabled={!currentTranscription?.text}
+                onClick={() =>
+                  void copyText(currentTranscription?.text ?? "")
+                    .then(() => setToast("æœ€è¿‘ç»“æœå·²å¤åˆ¶åˆ°å‰ªè´´æ¿"))
+                    .catch((error) =>
+                      setToast(error instanceof Error ? error.message : "å¤åˆ¶å¤±è´¥"),
+                    )
+                }
+                className="inline-flex items-center gap-2 rounded-full border border-[#ddd2c0] px-4 py-2 text-sm text-ink/75 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Copy className="h-4 w-4" />
+                å¤åˆ¶
+              </button>
+            </div>
+          </div>
 
-      <div className="mt-4 rounded-[22px] border border-line/80 bg-panel/85 px-4 py-4">
-        <div className="text-xs uppercase tracking-[0.18em] text-ink/45">×î½ü×ªÂ¼</div>
-        <p className="mt-2 text-sm leading-6 text-ink/75">
-          {currentTranscription?.text
-            ? `${currentTranscription.text.slice(0, 160)}${currentTranscription.text.length > 160 ? "..." : ""}`
-            : "»¹Ã»ÓĞ×ªÂ¼½á¹û¡£Â¼ÒôÍê³Éºó£¬×î½üÒ»Ìõ½á¹û»áÏÔÊ¾ÔÚÕâÀï£¬±ãÓÚ¿ìËÙ¸´ÖÆºÍ¸´²é¡£"}
-        </p>
+          <p className="mt-3 rounded-2xl bg-[#f8f3ea] px-3 py-3 text-sm leading-6 text-ink/72">
+            {currentTranscription?.text
+              ? `${currentTranscription.text.slice(0, 160)}${currentTranscription.text.length > 160 ? "..." : ""}`
+              : "è¿˜æ²¡æœ‰è½¬å½•ç»“æœã€‚å½•éŸ³å®Œæˆåï¼Œæœ€è¿‘ä¸€æ¡ç»“æœä¼šæ˜¾ç¤ºåœ¨è¿™é‡Œï¼Œä¾¿äºå¿«é€Ÿå¤åˆ¶å’Œå¤æŸ¥ã€‚"}
+          </p>
+        </div>
       </div>
     </section>
   );

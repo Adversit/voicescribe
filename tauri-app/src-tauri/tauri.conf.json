@@ -27,6 +27,7 @@
     }
   },
   "plugins": {
+    "autostart": {},
     "global-shortcut": {},
     "clipboard-manager": {},
     "store": {}
