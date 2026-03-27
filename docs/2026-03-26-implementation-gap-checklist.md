@@ -41,11 +41,11 @@
 - 本地启动脚本改为 `tauri build --no-bundle --ci`
 - `P2-01` Tauri 插件与配置收口
 - `P2-02` TypeScript 类型与默认值映射
-- `P3-01` 到 `P5-03` 的代码主链已全部落地
+- `P3-01` 到 `P5-03` 的代码主链已基本落地
 
 当前剩余的主要是验收而不是新增编码：
 - 热键/录音/文本输出的人机交互验收
-- 主窗口体验继续向原版 `app/` 收敛
+- 主窗口与各设置页继续向原版 `app/` 的高信息密度设置页收敛
 - 安装态 embedded Python 冷启动验收
 - GitHub Actions 远端运行验证
 - Windows 自动启动系统侧验收
@@ -92,7 +92,7 @@
 ## Phase 3 差距项
 
 ### P3-01 后端子进程与 embedded Python 初始化
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 当前代码现状：
   - [backend.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\backend.rs) 已支持运行时准备 venv、最小依赖安装与后端启动，并已验证 release 启动后 `/health` 正常返回
   - `build_embedded_python.bat` 与 `resources/python-embed/README.md` 已存在
@@ -102,19 +102,19 @@
   - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `16`、`17`、`31`
 
 ### P3-02 全局热键完整行为
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 剩余问题：
   - 真实桌面热键交互尚未做完整人工验收
 - 建议优先级：高
 
 ### P3-03 音频录制链路
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 剩余问题：
   - 真实麦克风和生成 WAV 的端到端验收尚未完成
 - 建议优先级：高
 
 ### P3-04 文本输出能力
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 剩余问题：
   - 外部应用注入、焦点恢复、降级回剪贴板等真实桌面行为尚未做完整人工验收
 - 建议优先级：高
@@ -122,18 +122,18 @@
 ## Phase 4 差距项
 
 ### P4-01 主窗口结构与原始 app 对齐
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 当前代码现状：
-  - [Layout.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\Layout.tsx) 已从 dashboard 式布局收口到更接近原版设置窗口的单窗体结构
-  - [ShellHeader.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\ShellHeader.tsx) 已按原版菜单栏语义收口为状态 + 最近转录 + 快捷操作
-  - [GeneralSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\GeneralSettings.tsx)、[EngineSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\EngineSettings.tsx)、[VocabularySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\VocabularySettings.tsx)、[SpeakerSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\SpeakerSettings.tsx)、[HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) 已向原版 `Form + Section` 结构收敛
+  - [Layout.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\Layout.tsx) 已恢复为 plan 要求的“左侧导航 + 右侧内容区”骨架，并收成单层主体窗口
+  - [GeneralSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\GeneralSettings.tsx)、[EngineSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\EngineSettings.tsx)、[VocabularySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\VocabularySettings.tsx)、[SpeakerSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\SpeakerSettings.tsx)、[HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) 已按“高信息密度、尽量单屏可见、长内容局部滚动”的约束开始收紧
+  - [ConnectionStatus.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\ConnectionStatus.tsx) 已压缩为更紧凑的状态条，避免运行时信息把 `General` 页拉成长页面
 - 剩余问题：
-  - 仍缺一轮人工界面对照验收，确认结构与体验是否达到原版预期
+  - 仍缺你对各设置页“默认窗口尺寸下尽量单屏可见”的人工确认
+  - 仍需继续根据真实界面效果微调文字、按钮、分组高度，直到 `General` 页与其他主页面的纵向占用稳定下来
   - [lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs) 已把录音悬浮窗真正接成 `overlay` 窗口，并由 [recordingFlow.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\lib\recordingFlow.ts) 和 [RecordingOverlay.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\RecordingOverlay.tsx) 完成状态桥接；剩余主要是位置、交互和视觉节奏的人工验收
 - 已有验证：
-  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `27`、`30`
-- 建议优先级：中
-
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `27`、`30`、`34`、`35`、`36`、`37`、`38`
+- 建议优先级：高
 ### P4-02 引擎页统一模型语义
 - 当前判断：`已完成`
 - 说明：
@@ -143,7 +143,7 @@
   - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `11`、`12`、`15`
 
 ### P4-03 托盘能力与图标
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 当前代码现状：
   - [lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs) 已补齐托盘菜单项，覆盖显示主窗口、开始录音、停止录音并转录、取消当前录音、复制最近转录和退出
   - [useTrayEvents.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useTrayEvents.ts) 已新增托盘事件桥，复用现有录音流和剪贴板逻辑
@@ -156,7 +156,7 @@
 - 建议优先级：中
 
 ### P5-01 embedded Python 资源与安装态闭环
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 说明：
   - 最小运行闭环已打通
   - [backend.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\backend.rs) 已补上 embedded Python `venv` 能力检测，不再盲目拿 `python-embed` 创建 `backend/venv`
@@ -179,7 +179,7 @@
 - 建议优先级：中
 
 ### P5-03 Windows 自动启动
-- 当前判断：`代码已完成，待人工验收`
+- 当前判断：`部分完成`
 - 当前代码现状：
   - [lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs) 已接入 `tauri-plugin-autostart`
   - [appStore.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\stores\appStore.ts) 已补齐 `launchAtLogin` 设置、状态同步与启停方法
@@ -232,6 +232,17 @@
 - Phase 5 代码层面已完成，仍缺安装态、远端 CI 和自动启动的环境验收
 
 因此，接下来不应再泛化地说“spec 已完成”，而应以上述状态为准。
+
+
+
+
+
+
+
+
+
+
+
 
 
 

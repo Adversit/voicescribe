@@ -1,6 +1,18 @@
 ﻿import { RefreshCw, Server, Square } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 
+function compactPath(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  if (value.length <= 42) {
+    return value;
+  }
+
+  return `${value.slice(0, 18)}...${value.slice(-18)}`;
+}
+
 export function ConnectionStatus() {
   const backendConnected = useAppStore((state) => state.backendConnected);
   const runtime = useAppStore((state) => state.backendRuntime);
@@ -9,9 +21,9 @@ export function ConnectionStatus() {
   const checkConnection = useAppStore((state) => state.checkConnection);
 
   return (
-    <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-3">
+    <section className="rounded-[18px] border border-[#e4dbc9] bg-[#faf6ef] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex min-w-[180px] items-center gap-3">
           <div className={`h-2.5 w-2.5 rounded-full ${backendConnected ? "bg-success" : "bg-accent"}`} />
           <div>
             <div className="text-sm font-semibold text-ink">
@@ -27,7 +39,7 @@ export function ConnectionStatus() {
           <button
             type="button"
             onClick={() => void checkConnection()}
-            className="inline-flex items-center gap-2 rounded-full border border-[#ddd2c0] bg-white px-3 py-2 text-sm text-ink/75"
+            className="inline-flex items-center gap-2 rounded-full border border-[#ddd2c0] bg-white px-3 py-1.5 text-sm text-ink/75"
           >
             <RefreshCw className="h-4 w-4" />
             刷新
@@ -35,7 +47,7 @@ export function ConnectionStatus() {
           <button
             type="button"
             onClick={() => void startBackend()}
-            className="inline-flex items-center gap-2 rounded-full bg-accent px-3 py-2 text-sm text-white"
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-3 py-1.5 text-sm text-white"
           >
             <Server className="h-4 w-4" />
             启动后端
@@ -43,7 +55,7 @@ export function ConnectionStatus() {
           <button
             type="button"
             onClick={() => void stopBackend()}
-            className="inline-flex items-center gap-2 rounded-full border border-[#ddd2c0] bg-white px-3 py-2 text-sm text-ink/75"
+            className="inline-flex items-center gap-2 rounded-full border border-[#ddd2c0] bg-white px-3 py-1.5 text-sm text-ink/75"
           >
             <Square className="h-4 w-4" />
             停止
@@ -52,18 +64,18 @@ export function ConnectionStatus() {
       </div>
 
       {runtime ? (
-        <div className="mt-4 grid gap-3 text-sm text-ink/70 md:grid-cols-3">
-          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-3">
-            <div className="text-xs uppercase tracking-[0.16em] text-ink/45">Runtime</div>
-            <div className="mt-1 break-all font-mono text-xs">{runtime.runtime_dir}</div>
+        <div className="mt-3 grid gap-2 text-xs text-ink/65 md:grid-cols-3">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3 py-2.5">
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink/42">Runtime</div>
+            <div className="mt-1 truncate font-mono">{compactPath(runtime.runtime_dir)}</div>
           </div>
-          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-3">
-            <div className="text-xs uppercase tracking-[0.16em] text-ink/45">Models</div>
-            <div className="mt-1 break-all font-mono text-xs">{runtime.model_dir}</div>
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3 py-2.5">
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink/42">Models</div>
+            <div className="mt-1 truncate font-mono">{compactPath(runtime.model_dir)}</div>
           </div>
-          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-3">
-            <div className="text-xs uppercase tracking-[0.16em] text-ink/45">Backend</div>
-            <div className="mt-1 break-all font-mono text-xs">{runtime.backend_dir}</div>
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3 py-2.5">
+            <div className="text-[11px] uppercase tracking-[0.14em] text-ink/42">Backend</div>
+            <div className="mt-1 truncate font-mono">{compactPath(runtime.backend_dir)}</div>
           </div>
         </div>
       ) : null}

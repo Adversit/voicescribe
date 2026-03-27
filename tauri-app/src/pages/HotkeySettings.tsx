@@ -33,53 +33,60 @@ export function HotkeySettings() {
   const hasModifier = Object.values(currentModifiers).some(Boolean);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3.5">
       <header className="space-y-1">
-        <h1 className="text-[28px] font-semibold text-ink">快捷键</h1>
-        <p className="max-w-3xl text-sm leading-6 text-ink/60">
-          结构与原版一致：先看当前快捷键，再调整修饰键和主键，最后确认录音触发方式。
+        <h1 className="text-[22px] font-semibold text-ink">快捷键</h1>
+        <p className="max-w-3xl text-xs leading-5 text-ink/60">
+          当前值、修饰键、主键和使用方式都尽量压缩在一屏内，减少为阅读说明而整页滚动。
         </p>
       </header>
 
-      <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
-        <div className="text-base font-semibold text-ink">录音快捷键</div>
-        <div className="mt-3 rounded-2xl border border-[#ddd2c0] bg-white px-4 py-4 font-mono text-2xl font-semibold text-ink">
-          {display}
+      <section className="rounded-[18px] border border-[#e4dbc9] bg-[#faf6ef] px-4 py-3">
+        <div className="grid gap-3 xl:grid-cols-[220px_1fr_auto] xl:items-start">
+          <div>
+            <div className="text-[15px] font-semibold text-ink">当前快捷键</div>
+            <div className="mt-2 rounded-2xl border border-[#ddd2c0] bg-white px-4 py-3 font-mono text-xl font-semibold text-ink">
+              {display}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[15px] font-semibold text-ink">修饰键</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {modifiers.map((modifier) => (
+                <label
+                  key={modifier.key}
+                  className="flex items-center justify-between rounded-2xl border border-[#e4dbc9] bg-white px-3 py-2.5"
+                >
+                  <span className="text-sm">{modifier.key}</span>
+                  <input
+                    type="checkbox"
+                    checked={currentModifiers[modifier.key]}
+                    onChange={(event) => {
+                      const nextMask = event.target.checked
+                        ? settings.hotkeyModifiers | modifier.mask
+                        : settings.hotkeyModifiers & ~modifier.mask;
+                      updateSettings({ hotkeyModifiers: nextMask });
+                    }}
+                    className="h-4.5 w-4.5 accent-accent"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="block text-sm text-ink/70 xl:min-w-[180px]">
+            主键
+            <input
+              type="number"
+              value={settings.hotkeyKeyCode}
+              onChange={(event) => updateSettings({ hotkeyKeyCode: Number(event.target.value) || 0 })}
+              className="mt-1.5 w-full rounded-2xl border border-[#ddd2c0] bg-white px-4 py-2.5"
+            />
+          </label>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {modifiers.map((modifier) => (
-            <label
-              key={modifier.key}
-              className="flex items-center justify-between rounded-2xl border border-[#e4dbc9] bg-white px-4 py-3"
-            >
-              <span>{modifier.key}</span>
-              <input
-                type="checkbox"
-                checked={currentModifiers[modifier.key]}
-                onChange={(event) => {
-                  const nextMask = event.target.checked
-                    ? settings.hotkeyModifiers | modifier.mask
-                    : settings.hotkeyModifiers & ~modifier.mask;
-                  updateSettings({ hotkeyModifiers: nextMask });
-                }}
-                className="h-5 w-5 accent-accent"
-              />
-            </label>
-          ))}
-        </div>
-
-        <label className="mt-4 block text-sm text-ink/70">
-          主键（Virtual Key Code）
-          <input
-            type="number"
-            value={settings.hotkeyKeyCode}
-            onChange={(event) => updateSettings({ hotkeyKeyCode: Number(event.target.value) || 0 })}
-            className="mt-2 w-full max-w-xs rounded-2xl border border-[#ddd2c0] bg-white px-4 py-3"
-          />
-        </label>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <button
             type="button"
             disabled={!hasModifier}
@@ -102,20 +109,20 @@ export function HotkeySettings() {
         </div>
       </section>
 
-      <section className="rounded-[22px] border border-[#e4dbc9] bg-[#faf6ef] p-4">
-        <div className="text-base font-semibold text-ink">使用方式</div>
-        <div className="mt-4 space-y-3 text-sm leading-6 text-ink/70">
-          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4">
+      <section className="rounded-[18px] border border-[#e4dbc9] bg-[#faf6ef] px-4 py-3">
+        <div className="text-[15px] font-semibold text-ink">使用方式</div>
+        <div className="mt-3 grid gap-2 xl:grid-cols-3">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3.5 py-3 text-sm leading-5 text-ink/70">
             <div className="font-semibold text-ink">长按模式</div>
-            <div className="mt-1">按住快捷键开始录音，松开后自动停止并转录。</div>
+            <div className="mt-1">按住开始录音，松开后自动停止并转录。</div>
           </div>
-          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3.5 py-3 text-sm leading-5 text-ink/70">
             <div className="font-semibold text-ink">双击模式</div>
-            <div className="mt-1">快速双击开始持续录音，再按一次停止并转录。</div>
+            <div className="mt-1">快速双击开始持续录音，再按一次停止。</div>
           </div>
-          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-4 py-4">
+          <div className="rounded-2xl border border-[#e4dbc9] bg-white px-3.5 py-3 text-sm leading-5 text-ink/70">
             <div className="font-semibold text-ink">取消录音</div>
-            <div className="mt-1">录音过程中按 ESC，或点击悬浮录音窗，可取消当前录音。</div>
+            <div className="mt-1">录音过程中按 ESC，或点击悬浮录音窗取消。</div>
           </div>
         </div>
       </section>
