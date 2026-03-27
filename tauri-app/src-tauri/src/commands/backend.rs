@@ -141,12 +141,99 @@ fn resolve_backend_dir(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf, S
     Err("Unable to locate backend/server.py".to_string())
 }
 
-fn resolve_embedded_python(app: &AppHandle) -> Option<PathBuf> {
-    app.path()
-        .resource_dir()
-        .ok()
-        .map(|dir| dir.join("python-embed").join("python.exe"))
-        .filter(|path| path.exists())
+fn resource_embedded_python_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().resource_dir().ok().map(|dir| dir.join("python-embed"))
+}
+
+fn runtime_embedded_python_dir(runtime_dir: &Path) -> PathBuf {
+    runtime_dir.join("python-embed")
+}
+
+fn embedded_python_executable(dir: &Path) -> PathBuf {
+    dir.join("python.exe")
+}
+
+fn enable_embedded_site_import(dir: &Path) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|err| err.to_string())?;
+
+    for entry in entries {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if !name.starts_with("python") || !name.ends_with("._pth") {
+            continue;
+        }
+
+        let contents = fs::read_to_string(&path).map_err(|err| err.to_string())?;
+        let next = contents.replace("#import site", "import site");
+        if next != contents {
+            fs::write(&path, next).map_err(|err| err.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_embedded_python_zip(zip_file: &Path, target_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(target_dir).map_err(|err| err.to_string())?;
+
+    let command = format!(
+        "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+        zip_file.display(),
+        target_dir.display()
+    );
+
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &command])
+        .status()
+        .map_err(|err| format!("Failed to extract embedded python zip: {err}"))?;
+    if !status.success() {
+        return Err("Expand-Archive for embedded python failed".to_string());
+    }
+
+    enable_embedded_site_import(target_dir)?;
+
+    let python = embedded_python_executable(target_dir);
+    if !python.exists() {
+        return Err("Embedded python zip extracted, but python.exe was not found".to_string());
+    }
+
+    Ok(())
+}
+
+fn resolve_embedded_python(app: &AppHandle, runtime_dir: &Path) -> Option<PathBuf> {
+    if let Some(resource_dir) = resource_embedded_python_dir(app) {
+        let resource_python = embedded_python_executable(&resource_dir);
+        if resource_python.exists() {
+            let _ = enable_embedded_site_import(&resource_dir);
+            return Some(resource_python);
+        }
+    }
+
+    let runtime_python_dir = runtime_embedded_python_dir(runtime_dir);
+    let runtime_python = embedded_python_executable(&runtime_python_dir);
+    if runtime_python.exists() {
+        let _ = enable_embedded_site_import(&runtime_python_dir);
+        return Some(runtime_python);
+    }
+
+    let resource_dir = resource_embedded_python_dir(app)?;
+    let zip_file = resource_dir.join("python-embed.zip");
+    if !zip_file.exists() {
+        return None;
+    }
+
+    if extract_embedded_python_zip(&zip_file, &runtime_python_dir).is_ok() {
+        let python = embedded_python_executable(&runtime_python_dir);
+        if python.exists() {
+            return Some(python);
+        }
+    }
+
+    None
 }
 
 fn resolve_system_python() -> Option<PathBuf> {
@@ -177,8 +264,8 @@ fn python_supports_venv(python: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn resolve_bootstrap_python(app: &AppHandle) -> Option<PathBuf> {
-    if let Some(embedded) = resolve_embedded_python(app) {
+fn resolve_bootstrap_python(app: &AppHandle, runtime_dir: &Path) -> Option<PathBuf> {
+    if let Some(embedded) = resolve_embedded_python(app, runtime_dir) {
         if python_supports_venv(&embedded) {
             return Some(embedded);
         }
@@ -194,9 +281,9 @@ fn venv_python_candidates(backend_dir: &Path) -> [PathBuf; 2] {
     ]
 }
 
-fn resolve_python(app: &AppHandle, backend_dir: &Path) -> Option<String> {
+fn resolve_python(app: &AppHandle, backend_dir: &Path, runtime_dir: &Path) -> Option<String> {
     let venv_candidates = venv_python_candidates(backend_dir);
-    let embedded = resolve_embedded_python(app);
+    let embedded = resolve_embedded_python(app, runtime_dir);
 
     for candidate in venv_candidates.into_iter().chain(embedded.into_iter()) {
         if candidate.exists() {
@@ -232,7 +319,7 @@ fn install_requirements_command(venv_python: &Path, backend_dir: &Path) -> Resul
     Ok(())
 }
 
-fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path) -> Result<Option<String>, String> {
+fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path, runtime_dir: &Path) -> Result<Option<String>, String> {
     if let Some(existing) = venv_python_candidates(backend_dir)
         .into_iter()
         .find(|candidate| candidate.exists())
@@ -240,7 +327,7 @@ fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path) -> Result<Option<Str
         return Ok(Some(existing.to_string_lossy().to_string()));
     }
 
-    let Some(bootstrap_python) = resolve_bootstrap_python(app) else {
+    let Some(bootstrap_python) = resolve_bootstrap_python(app, runtime_dir) else {
         return Ok(None);
     };
 
@@ -320,10 +407,10 @@ pub fn start_backend(
         }
     }
 
-    let python_path = ensure_backend_venv(&app, &backend_dir)?;
+    let python_path = ensure_backend_venv(&app, &backend_dir, &runtime_dir)?;
     let python_cmd = python_path
         .clone()
-        .or_else(|| resolve_python(&app, &backend_dir))
+        .or_else(|| resolve_python(&app, &backend_dir, &runtime_dir))
         .ok_or_else(|| "Unable to resolve Python runtime. Prepare python-embed or install system Python with venv support.".to_string())?;
 
     let mut command = Command::new(&python_cmd);
@@ -492,3 +579,84 @@ pub async fn transcribe(
 
     Err(last_error)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        enable_embedded_site_import, extract_embedded_python_zip, runtime_embedded_python_dir,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_test_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock drift")
+            .as_nanos();
+        std::env::temp_dir().join(format!("voicescribe-{name}-{nanos}"))
+    }
+
+    #[test]
+    fn enable_embedded_site_import_uncomments_python_pth_files() {
+        let dir = temp_test_dir("embed-pth");
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let pth_file = dir.join("python311._pth");
+        fs::write(&pth_file, "python311.zip\n#import site\n").expect("write pth");
+
+        enable_embedded_site_import(&dir).expect("enable import site");
+
+        let updated = fs::read_to_string(&pth_file).expect("read updated pth");
+        assert!(updated.contains("import site"));
+        assert!(!updated.contains("#import site"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn runtime_embedded_python_dir_is_nested_under_runtime_dir() {
+        let runtime_root = PathBuf::from("C:/voicescribe/runtime");
+        assert_eq!(
+            runtime_embedded_python_dir(&runtime_root),
+            runtime_root.join("python-embed")
+        );
+    }
+
+    #[test]
+    fn extract_embedded_python_zip_expands_runtime_and_uncomments_pth() {
+        let root = temp_test_dir("embed-zip");
+        let source_dir = root.join("source");
+        let target_dir = root.join("target");
+        let zip_file = root.join("python-embed.zip");
+        fs::create_dir_all(&source_dir).expect("create source dir");
+        fs::write(source_dir.join("python.exe"), b"fake-python").expect("write python exe");
+        fs::write(
+            source_dir.join("python311._pth"),
+            "python311.zip\n#import site\n",
+        )
+        .expect("write pth");
+
+        let command = format!(
+            "Compress-Archive -Path '{}' -DestinationPath '{}' -Force",
+            source_dir.join("*").display(),
+            zip_file.display()
+        );
+        let status = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &command])
+            .status()
+            .expect("compress archive");
+        assert!(status.success(), "compress archive should succeed");
+
+        extract_embedded_python_zip(&zip_file, &target_dir).expect("extract embedded zip");
+
+        assert!(target_dir.join("python.exe").exists());
+        let updated = fs::read_to_string(target_dir.join("python311._pth"))
+            .expect("read extracted pth");
+        assert!(updated.contains("import site"));
+        assert!(!updated.contains("#import site"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+

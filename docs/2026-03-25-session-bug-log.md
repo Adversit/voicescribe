@@ -98,3 +98,18 @@
 - 表现：新增 `autostart` 相关配置后，`npm run build` 报 `package.json is not valid JSON`，`cargo check` 报 `unable to parse JSON Tauri config file`。
 - 实际原因：重写 `tauri-app/package.json` 和 `tauri-app/src-tauri/tauri.conf.json` 时写成了带 BOM 的 UTF-8，Vite 和 Tauri 配置解析都在首字符处失败。
 - 后续处理：将两个 JSON 文件改为无 BOM UTF-8 后，重新执行 `npm run build` 和 `cargo check` 均通过。
+
+## 17. 托盘事件桥接后 `cargo check` 因缺少 `Emitter` trait import 失败
+- 表现：为托盘菜单补齐“开始录音 / 停止录音 / 取消录音 / 复制最近转录”事件桥后，`cargo check` 报错 `no method named emit found for reference &AppHandle`。
+- 实际原因：`tauri-app/src-tauri/src/lib.rs` 新增了 `app.emit(...)`，但没有同步引入 `tauri::Emitter` trait。
+- 后续处理：补齐 `Emitter` import 后重新执行 `cargo check`，构建通过，并将本轮结果写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 的 `28`。
+
+## 18. 录音悬浮窗窗口化接线时误判了 Tauri builder API 返回类型
+- 表现：把 `overlay` 窗口接入 `lib.rs` 后，`cargo check` 首次失败，分别报 `builder.icon(...)` 返回 `Result` 和 `ensure_overlay_window(app)` 参数类型不匹配。
+- 实际原因：Tauri 2 的 `WebviewWindowBuilder::icon` 不是直接返回 builder，而是返回 `Result<builder, tauri::Error>`；同时 `setup` 闭包里拿到的是 `&mut App`，而辅助函数签名写成了 `&AppHandle`。
+- 后续处理：补上 `icon(...)?` 的错误传播，并在 `setup` 中改用 `app.handle()`，重新执行 `cargo check` 后通过；结果已写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 的 `30`。
+
+## 19. Tauri unit 型插件被错误写成 `{}` 配置，导致 release 启动时逐个插件 panic
+- 表现：`voicescribe-desktop.exe` release 构建成功，但启动即以 `101` 退出；前台运行后依次报出 `plugins.autostart`、`plugins.clipboard-manager` 等配置“invalid type: map, expected unit”。
+- 实际原因：`tauri.conf.json` 里把无配置的 Tauri 插件写成了 `{}`，`cargo check` 不会暴露这个问题，但 release 真正运行时插件初始化会反序列化失败并 panic。
+- 后续处理：清空 [tauri.conf.json](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\tauri.conf.json) 中不需要的 `plugins` 配置对象后，重新构建并启动 release，`/health` 已验证通过；结果已写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 的 `31`。

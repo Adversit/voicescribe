@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "voicescribe-desktop"
 version = "0.2.0"
 description = "VoiceScribe Windows desktop shell"

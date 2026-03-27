@@ -14,6 +14,7 @@ echo        %TARGET%
 
 if not exist "%ZIP_FILE%" (
   echo [WARN] python-embed zip not found. Skipping extraction.
+  echo [WARN] 安装态如果只打包 zip，桌面端会在首次启动时自动解压到 runtime\python-embed。
   exit /b 0
 )
 
@@ -48,3 +49,5 @@ if errorlevel 1 (
 
 echo [INFO] Embedded Python is ready: %TARGET%\python.exe
 exit /b 0
+
+

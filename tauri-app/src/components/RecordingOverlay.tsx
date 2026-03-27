@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { abortRecordingSession } from "../lib/recordingFlow";
-import { useAppStore } from "../stores/appStore";
+import { emit, listen } from "@tauri-apps/api/event";
+import type { OverlayMode, OverlayStatePayload } from "../lib/overlayWindow";
 
 function formatDuration(milliseconds: number | null) {
   if (!milliseconds) {
@@ -33,33 +33,57 @@ function AudioBars({ level, active }: { level: number; active: boolean }) {
 }
 
 export function RecordingOverlay() {
-  const isRecording = useAppStore((state) => state.isRecording);
-  const isTranscribing = useAppStore((state) => state.isTranscribing);
-  const recordingCancelled = useAppStore((state) => state.recordingCancelled);
-  const recordingStartedAt = useAppStore((state) => state.recordingStartedAt);
-  const audioLevel = useAppStore((state) => state.audioLevel);
-  const setToast = useAppStore((state) => state.setToast);
+  const [mode, setMode] = useState<OverlayMode>("idle");
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    if (!isRecording) {
+    let unlistenState: (() => void) | undefined;
+    let unlistenAudio: (() => void) | undefined;
+
+    const bind = async () => {
+      unlistenState = await listen<OverlayStatePayload>("overlay-state", (event) => {
+        const payload = event.payload;
+        setMode(payload.mode);
+        setStartedAt(payload.mode === "recording" ? (payload.startedAt ?? Date.now()) : null);
+        if (payload.mode !== "recording") {
+          setAudioLevel(0);
+        }
+      });
+
+      unlistenAudio = await listen<number>("audio-level", (event) => {
+        setAudioLevel(event.payload ?? 0);
+      });
+    };
+
+    void bind();
+
+    return () => {
+      unlistenState?.();
+      unlistenAudio?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "recording") {
       return;
     }
 
     const timer = window.setInterval(() => setNow(Date.now()), 250);
     return () => window.clearInterval(timer);
-  }, [isRecording]);
+  }, [mode]);
 
   const elapsed = useMemo(() => {
-    if (!isRecording || !recordingStartedAt) {
+    if (mode !== "recording" || !startedAt) {
       return null;
     }
-    return now - recordingStartedAt;
-  }, [isRecording, now, recordingStartedAt]);
+    return now - startedAt;
+  }, [mode, now, startedAt]);
 
-  const backgroundClass = recordingCancelled
+  const backgroundClass = mode === "cancelled"
     ? "bg-[#9a3f1d]/90"
-    : isRecording
+    : mode === "recording"
       ? "bg-[#17100dcc]"
       : "bg-[#1b1512cc]";
 
@@ -68,15 +92,13 @@ export function RecordingOverlay() {
       <button
         type="button"
         onClick={() =>
-          isRecording
-            ? void abortRecordingSession().catch((error) =>
-                setToast(error instanceof Error ? error.message : "取消录音失败"),
-              )
+          mode === "recording"
+            ? void emit("hotkey-cancel")
             : undefined
         }
         className={`flex min-w-[180px] items-center gap-3 rounded-2xl border border-white/25 px-4 py-3 text-left text-white shadow-2xl backdrop-blur ${backgroundClass}`}
       >
-        {recordingCancelled ? (
+        {mode === "cancelled" ? (
           <>
             <span className="inline-flex h-4 w-4 rounded-full bg-[#f1b24a]" />
             <div>
@@ -84,7 +106,7 @@ export function RecordingOverlay() {
               <div className="text-xs text-white/70">本次录音不会进入转录</div>
             </div>
           </>
-        ) : isTranscribing ? (
+        ) : mode === "transcribing" ? (
           <>
             <div className="flex items-center gap-1.5">
               <span className="h-2 w-2 animate-bounce rounded-full bg-white/95 [animation-delay:-0.2s]" />
@@ -99,7 +121,7 @@ export function RecordingOverlay() {
         ) : (
           <>
             <span className="inline-flex h-3.5 w-3.5 animate-pulse rounded-full bg-white" />
-            <AudioBars level={audioLevel} active={isRecording} />
+            <AudioBars level={audioLevel} active={mode === "recording"} />
             <div>
               <div className="text-sm font-semibold">{formatDuration(elapsed)}</div>
               <div className="text-xs text-white/70">点击悬浮窗可取消录音</div>

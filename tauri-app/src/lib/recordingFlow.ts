@@ -5,6 +5,7 @@
   stopRecording,
   transcribeAudio,
 } from "../api/tauri";
+import { hideOverlay, pushOverlayState, showOverlay } from "./overlayWindow";
 import { useAppStore } from "../stores/appStore";
 
 let cancelResetTimer: number | null = null;
@@ -17,6 +18,7 @@ function clearCancelResetTimer() {
 }
 
 export async function beginRecordingSession() {
+  const startedAt = Date.now();
   const store = useAppStore.getState();
   clearCancelResetTimer();
   await startRecording();
@@ -25,12 +27,14 @@ export async function beginRecordingSession() {
   store.setRecordingCancelled(false);
   store.setAudioLevel(0);
   store.setToast("开始录音");
+  await showOverlay({ mode: "recording", startedAt });
 }
 
 export async function finishRecordingSession() {
   const store = useAppStore.getState();
   store.setRecording(false);
   store.setTranscribing(true);
+  await pushOverlayState({ mode: "transcribing", startedAt: null });
 
   try {
     const audioPath = await stopRecording();
@@ -52,6 +56,7 @@ export async function finishRecordingSession() {
     const nextStore = useAppStore.getState();
     nextStore.setTranscribing(false);
     nextStore.setAudioLevel(0);
+    await hideOverlay();
   }
 }
 
@@ -67,10 +72,12 @@ export async function abortRecordingSession() {
     store.setAudioLevel(0);
     store.setRecordingCancelled(true);
     store.setToast("录音已取消");
+    await pushOverlayState({ mode: "cancelled", startedAt: null });
 
     cancelResetTimer = window.setTimeout(() => {
       useAppStore.getState().setRecordingCancelled(false);
       cancelResetTimer = null;
+      void hideOverlay();
     }, 1400);
   }
 }

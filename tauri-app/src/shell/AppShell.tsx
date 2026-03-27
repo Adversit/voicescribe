@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { Layout } from "../components/Layout";
 import { Toast } from "../components/Toast";
 import { useBackendConnection } from "../hooks/useBackendConnection";
 import { useHotkey } from "../hooks/useHotkey";
+import { useTrayEvents } from "../hooks/useTrayEvents";
 import { useAppStore } from "../stores/appStore";
 import { EngineSettings } from "../pages/EngineSettings";
 import { GeneralSettings } from "../pages/GeneralSettings";
@@ -21,6 +22,7 @@ const pageMap = {
 export function AppShell() {
   useBackendConnection();
   useHotkey();
+  useTrayEvents();
 
   const page = useAppStore((state) => state.currentPage);
   const toast = useAppStore((state) => state.toast);

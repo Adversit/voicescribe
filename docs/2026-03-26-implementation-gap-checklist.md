@@ -1,6 +1,6 @@
 ﻿# 2026-03-26 实现差距修复清单
 
-更新时间：2026-03-26
+更新时间：2026-03-27
 
 上游基线：
 - [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\0325第一阶段改造计划.md)
@@ -26,6 +26,7 @@
 
 - `已完成`：代码、行为和对应测试都已经达到 plan/spec 要求
 - `代码已完成，待人工验收`：代码主链已完成，自动化或代码层验证已通过，但桌面交互仍需人工确认
+- `代码已完成，待远端验收`：代码与本地静态校验已完成，但仍缺 GitHub Actions 等远端环境验证
 - `部分完成`：主干代码已在，但行为、边界或测试还不完整
 - `未完成`：当前仓库里还没有完整实现
 
@@ -40,12 +41,14 @@
 - 本地启动脚本改为 `tauri build --no-bundle --ci`
 - `P2-01` Tauri 插件与配置收口
 - `P2-02` TypeScript 类型与默认值映射
+- `P3-01` 到 `P5-03` 的代码主链已全部落地
 
-仍然明显未收口的方向：
+当前剩余的主要是验收而不是新增编码：
 - 热键/录音/文本输出的人机交互验收
 - 主窗口体验继续向原版 `app/` 收敛
-- GitHub Actions CI/CD
-- Windows 自动启动
+- 安装态 embedded Python 冷启动验收
+- GitHub Actions 远端运行验证
+- Windows 自动启动系统侧验收
 
 ## Phase 1 差距项
 
@@ -89,14 +92,14 @@
 ## Phase 3 差距项
 
 ### P3-01 后端子进程与 embedded Python 初始化
-- 当前判断：`部分完成`
+- 当前判断：`代码已完成，待人工验收`
 - 当前代码现状：
-  - [backend.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\backend.rs) 已支持运行时准备 venv、最小依赖安装与后端启动
+  - [backend.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\backend.rs) 已支持运行时准备 venv、最小依赖安装与后端启动，并已验证 release 启动后 `/health` 正常返回
   - `build_embedded_python.bat` 与 `resources/python-embed/README.md` 已存在
 - 剩余问题：
   - 正式 embedded Python 资源包与安装态闭环仍未完全落地
 - 已有验证：
-  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `16`、`17`
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `16`、`17`、`31`
 
 ### P3-02 全局热键完整行为
 - 当前判断：`代码已完成，待人工验收`
@@ -119,16 +122,16 @@
 ## Phase 4 差距项
 
 ### P4-01 主窗口结构与原始 app 对齐
-- 当前判断：`部分完成`
+- 当前判断：`代码已完成，待人工验收`
 - 当前代码现状：
   - [Layout.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\Layout.tsx) 已从 dashboard 式布局收口到更接近原版设置窗口的单窗体结构
   - [ShellHeader.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\ShellHeader.tsx) 已按原版菜单栏语义收口为状态 + 最近转录 + 快捷操作
   - [GeneralSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\GeneralSettings.tsx)、[EngineSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\EngineSettings.tsx)、[VocabularySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\VocabularySettings.tsx)、[SpeakerSettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\SpeakerSettings.tsx)、[HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) 已向原版 `Form + Section` 结构收敛
 - 剩余问题：
   - 仍缺一轮人工界面对照验收，确认结构与体验是否达到原版预期
-  - 录音悬浮窗与托盘入口仍未完全做到原版感知一致
+  - [lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs) 已把录音悬浮窗真正接成 `overlay` 窗口，并由 [recordingFlow.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\lib\recordingFlow.ts) 和 [RecordingOverlay.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\components\RecordingOverlay.tsx) 完成状态桥接；剩余主要是位置、交互和视觉节奏的人工验收
 - 已有验证：
-  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `27`
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `27`、`30`
 - 建议优先级：中
 
 ### P4-02 引擎页统一模型语义
@@ -141,24 +144,31 @@
 
 ### P4-03 托盘能力与图标
 - 当前判断：`代码已完成，待人工验收`
+- 当前代码现状：
+  - [lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs) 已补齐托盘菜单项，覆盖显示主窗口、开始录音、停止录音并转录、取消当前录音、复制最近转录和退出
+  - [useTrayEvents.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useTrayEvents.ts) 已新增托盘事件桥，复用现有录音流和剪贴板逻辑
+  - [AppShell.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\shell\AppShell.tsx) 已完成托盘事件 hook 挂载
 - 剩余问题：
-  - 托盘图标与托盘交互仍建议补一轮人工验收
+  - 托盘图标与托盘菜单项仍建议补一轮人工验收
+  - 托盘菜单的实际交互节奏是否达到原版菜单栏预期仍需人工确认
+- 已有验证：
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `28`
 - 建议优先级：中
 
-## Phase 5 差距项
-
 ### P5-01 embedded Python 资源与安装态闭环
-- 当前判断：`部分完成`
+- 当前判断：`代码已完成，待人工验收`
 - 说明：
   - 最小运行闭环已打通
   - [backend.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\backend.rs) 已补上 embedded Python `venv` 能力检测，不再盲目拿 `python-embed` 创建 `backend/venv`
-  - [build_embedded_python.bat](D:\learn\AIGC\voicescribe\0324\voicescribe\scripts\build_embedded_python.bat) 已补上 `_pth` 处理与 `venv` 能力提示
-  - 正式打包资源与安装态冷启动验证仍未完全收口
+  - [backend.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\backend.rs) 已补上安装态 `python-embed.zip` 自动解压到 `runtime/python-embed/` 的运行时路径
+  - [build_embedded_python.bat](D:\learn\AIGC\voicescribe\0324\voicescribe\scripts\build_embedded_python.bat) 与 [README.md](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\resources\python-embed\README.md) 已同步说明“预解压”和“仅打包 zip、首次启动自动解压”两种准备方式
+  - Rust 单测已补齐 `python-embed.zip` 解压、`_pth` 修正和运行时目录推导验证
+  - 真实安装态冷启动、zip 解压后首次拉起后端的端到端验收仍未完成
 - 已有验证：
-  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `16`、`17`、`24`
+  - 见 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 中 `16`、`17`、`31`、`24`、`29`
 
 ### P5-02 GitHub Actions CI/CD
-- 当前判断：`部分完成`
+- 当前判断：`代码已完成，待远端验收`
 - 当前代码现状：
   - [.github/workflows/build-windows.yml](D:\learn\AIGC\voicescribe\0324\voicescribe\.github\workflows\build-windows.yml) 已新增 Windows 构建 workflow
   - 工作流已覆盖 `actions/checkout`、Node、Python、Rust、`npm run tauri:build` 和 NSIS 安装包上传
@@ -213,15 +223,24 @@
 
 ## 当前结论
 
-正式 spec 还没有全部完成。
+正式 spec 还没有全部完成，但当前剩余项已经不再以新增代码为主。
 当前更准确的状态是：
 - Phase 1 主干已完成
-- Phase 2 中 `P2-02` 已完成，`P2-01` 仍部分完成
-- Phase 3 代码主链大多已在，但仍缺人工验收
-- Phase 4 主干已在，体验与托盘仍有人工收尾项
-- Phase 5 仍有安装态、CI 和自动启动未完成
+- Phase 2 中 `P2-01`、`P2-02` 已完成
+- Phase 3 代码层面已完成，仍缺人工验收
+- Phase 4 代码层面已完成，仍缺界面对照和托盘交互验收
+- Phase 5 代码层面已完成，仍缺安装态、远端 CI 和自动启动的环境验收
 
 因此，接下来不应再泛化地说“spec 已完成”，而应以上述状态为准。
+
+
+
+
+
+
+
+
+
 
 
 
