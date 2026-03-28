@@ -48,3 +48,5 @@ config/
 # Temporary files
 *.tmp
 *.temp
+.packaged-runtime/
+.superpowers/

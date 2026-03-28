@@ -58,13 +58,25 @@ SPEAKER_DATA_DIR = Path(
     os.environ.get("VOICESCRIBE_SPEAKER_DIR", str(RUNTIME_ROOT / "data" / "speakers"))
 ).expanduser().resolve()
 
+HISTORY_DATA_DIR = Path(
+    os.environ.get("VOICESCRIBE_HISTORY_DIR", str(RUNTIME_ROOT / "data" / "history"))
+).expanduser().resolve()
+
+HISTORY_STORAGE_PATH = HISTORY_DATA_DIR / "history.json"
+
 CONFIG_DIR = Path(
     os.environ.get("VOICESCRIBE_CONFIG_DIR", str(RUNTIME_ROOT / "config"))
 ).expanduser().resolve()
 
 
 def ensure_dirs() -> None:
-    for path in [MODEL_CACHE_DIR, WHISPER_CPP_MODEL_DIR, SPEAKER_DATA_DIR, CONFIG_DIR]:
+    for path in [
+        MODEL_CACHE_DIR,
+        WHISPER_CPP_MODEL_DIR,
+        SPEAKER_DATA_DIR,
+        HISTORY_DATA_DIR,
+        CONFIG_DIR,
+    ]:
         path.mkdir(parents=True, exist_ok=True)
 
 

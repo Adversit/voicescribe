@@ -1,12 +1,14 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 import clsx from "clsx";
-import { Cpu, Keyboard, PersonStanding, Settings2, TextCursorInput } from "lucide-react";
+import { Cpu, History, Keyboard, PersonStanding, Radio, Settings2, TextCursorInput } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 
 const items = [
   { key: "general", label: "通用", icon: Settings2 },
   { key: "engine", label: "引擎", icon: Cpu },
-  { key: "vocabulary", label: "词汇", icon: TextCursorInput },
+  { key: "realtime", label: "实时转录", icon: Radio },
+  { key: "history", label: "历史记录", icon: History },
+  { key: "vocabulary", label: "热词", icon: TextCursorInput },
   { key: "speaker", label: "说话人", icon: PersonStanding },
   { key: "hotkey", label: "快捷键", icon: Keyboard },
 ] as const;

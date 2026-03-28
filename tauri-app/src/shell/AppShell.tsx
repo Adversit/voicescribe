@@ -7,13 +7,17 @@ import { useTrayEvents } from "../hooks/useTrayEvents";
 import { useAppStore } from "../stores/appStore";
 import { EngineSettings } from "../pages/EngineSettings";
 import { GeneralSettings } from "../pages/GeneralSettings";
+import { HistoryPage } from "../pages/HistoryPage";
 import { HotkeySettings } from "../pages/HotkeySettings";
+import { RealtimeTranscriptionPage } from "../pages/RealtimeTranscriptionPage";
 import { SpeakerSettings } from "../pages/SpeakerSettings";
 import { VocabularySettings } from "../pages/VocabularySettings";
 
 const pageMap = {
   general: <GeneralSettings />,
   engine: <EngineSettings />,
+  realtime: <RealtimeTranscriptionPage />,
+  history: <HistoryPage />,
   vocabulary: <VocabularySettings />,
   speaker: <SpeakerSettings />,
   hotkey: <HotkeySettings />,
@@ -28,10 +32,14 @@ export function AppShell() {
   const toast = useAppStore((state) => state.toast);
   const setToast = useAppStore((state) => state.setToast);
   const hydrateSettings = useAppStore((state) => state.hydrateSettings);
+  const refreshHistory = useAppStore((state) => state.refreshHistory);
 
   useEffect(() => {
     void hydrateSettings();
-  }, [hydrateSettings]);
+    void refreshHistory().catch(() => {
+      // History may not be available until backend is running.
+    });
+  }, [hydrateSettings, refreshHistory]);
 
   return (
     <>

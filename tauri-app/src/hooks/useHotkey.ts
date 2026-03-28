@@ -6,6 +6,7 @@ import {
   beginRecordingSession,
   finishRecordingSession,
 } from "../lib/recordingFlow";
+import { pushRealtimeAudioChunk } from "../lib/realtimeStream";
 
 export function useHotkey() {
   const setAudioLevel = useAppStore((state) => state.setAudioLevel);
@@ -16,6 +17,7 @@ export function useHotkey() {
     let unlistenStop: (() => void) | undefined;
     let unlistenCancel: (() => void) | undefined;
     let unlistenAudio: (() => void) | undefined;
+    let unlistenChunk: (() => void) | undefined;
 
     const bind = async () => {
       unlistenStart = await listen("hotkey-start-recording", async () => {
@@ -45,6 +47,12 @@ export function useHotkey() {
       unlistenAudio = await listen<number>("audio-level", (event) => {
         setAudioLevel(event.payload ?? 0);
       });
+
+      unlistenChunk = await listen<string>("audio-chunk", (event) => {
+        if (typeof event.payload === "string") {
+          pushRealtimeAudioChunk(event.payload);
+        }
+      });
     };
 
     void bind();
@@ -54,6 +62,7 @@ export function useHotkey() {
       unlistenStop?.();
       unlistenCancel?.();
       unlistenAudio?.();
+      unlistenChunk?.();
     };
   }, [setAudioLevel, setToast]);
 }

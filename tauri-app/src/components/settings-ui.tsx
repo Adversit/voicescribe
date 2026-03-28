@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 import clsx from "clsx";
 
 export const inputClassName = "settings-input";
@@ -97,15 +97,18 @@ export function SettingsField({
 export function ToggleSwitch({
   checked,
   onChange,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={clsx("toggle-switch", checked && "is-on")}
     >

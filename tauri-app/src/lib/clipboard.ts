@@ -1,4 +1,4 @@
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+﻿import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 export async function copyText(text: string): Promise<void> {
   if (!text) {
@@ -17,5 +17,5 @@ export async function copyText(text: string): Promise<void> {
     return;
   }
 
-  throw new Error("????????");
+  throw new Error("当前环境无法写入剪贴板");
 }

@@ -32,6 +32,19 @@ HOTWORD_REPLACEMENT_PROMPT = """语音识别经常把专有名词误识别为发
 直接输出修正后的文本，不要解释。如果没有需要修正的，原样输出。"""
 
 
+SUMMARY_PROMPT = """你是一个会议摘要助手。请基于以下实时转录内容，输出简洁的中文摘要：
+
+要求：
+1. 只保留关键信息，不要逐句复述。
+2. 尽量压缩成 2 到 4 句。
+3. 不要补充原文没有的信息。
+4. 直接输出摘要正文，不要加标题。
+
+实时转录内容：
+{text}
+"""
+
+
 class AIRefiner:
     def __init__(self):
         self.config_dir = CONFIG_DIR
@@ -106,3 +119,27 @@ class AIRefiner:
         except Exception as e:
             print(f"[AIRefiner] Hotword replacement error: {e}")
             return text
+
+    def summarize(self, text: str, timeout: int = 30) -> str:
+        if not text or not text.strip():
+            return ""
+
+        prompt = SUMMARY_PROMPT.format(text=text.strip())
+
+        try:
+            result = subprocess.run(
+                ["claude", "--model", "haiku", "--print", prompt],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception as e:
+            print(f"[AIRefiner] Summary error: {e}")
+
+        condensed = " ".join(text.split())
+        if len(condensed) <= 120:
+            return condensed
+        return condensed[:117].rstrip() + "..."

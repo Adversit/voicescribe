@@ -1,5 +1,7 @@
 ﻿use crate::commands::text_input::{clear_previous_window, remember_foreground_window};
 use crate::state::RecordingState;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use hound::{SampleFormat as HoundSampleFormat, WavSpec, WavWriter};
@@ -56,6 +58,20 @@ pub fn recording_active() -> bool {
 fn emit_level(app: &AppHandle, level: f32) {
     AUDIO_LEVEL_BITS.store(level.to_bits(), Ordering::SeqCst);
     let _ = app.emit("audio-level", level);
+}
+
+fn emit_chunk(app: &AppHandle, samples: &[i16]) {
+    if samples.is_empty() {
+        return;
+    }
+
+    let mut bytes = Vec::with_capacity(samples.len() * 2);
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+
+    let payload = BASE64.encode(bytes);
+    let _ = app.emit("audio-chunk", payload);
 }
 
 fn select_config(device: &cpal::Device) -> Result<(SampleFormat, StreamConfig), String> {
@@ -170,6 +186,7 @@ fn build_stream(
                     let level = level_from_i16(&mono);
                     write_samples(&writer, &mono);
                     emit_level(&app, level);
+                    emit_chunk(&app, &mono);
                 },
                 error_handler,
                 None,
@@ -183,6 +200,7 @@ fn build_stream(
                     let level = level_from_i16(&mono);
                     write_samples(&writer, &mono);
                     emit_level(&app, level);
+                    emit_chunk(&app, &mono);
                 },
                 error_handler,
                 None,
@@ -196,6 +214,7 @@ fn build_stream(
                     let level = level_from_i16(&mono);
                     write_samples(&writer, &mono);
                     emit_level(&app, level);
+                    emit_chunk(&app, &mono);
                 },
                 error_handler,
                 None,
@@ -361,6 +380,15 @@ pub fn cancel_recording(state: State<'_, RecordingState>) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub fn delete_audio_file(path: String) -> Result<(), String> {
+    let file_path = PathBuf::from(path);
+    if file_path.exists() {
+        std::fs::remove_file(file_path).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_recording_status(state: State<'_, RecordingState>) -> Result<RecordingStatus, String> {
     let is_recording = *state
         .is_recording
@@ -380,5 +408,3 @@ pub fn get_recording_status(state: State<'_, RecordingState>) -> Result<Recordin
         audio_level,
     })
 }
-
-

@@ -1,4 +1,5 @@
 ﻿export type OutputMode = "directInput" | "clipboard" | "both";
+export type HistoryMode = "stream" | "non-stream";
 
 export interface EngineInfo {
   name: string;
@@ -52,6 +53,61 @@ export interface SpeakerInfo {
   name: string;
 }
 
+export interface HistorySpeakerEntry {
+  speaker: string | null;
+  text: string;
+  timestamp: string | null;
+}
+
+export interface HistoryRecord {
+  id: string;
+  created_at: string;
+  mode: HistoryMode;
+  text: string;
+  duration: number;
+  engine: string;
+  model: string;
+  speaker_entries: HistorySpeakerEntry[];
+  summary: string | null;
+  retain_audio: boolean;
+  audio_path: string | null;
+}
+
+export interface RealtimeEntry {
+  id: string;
+  speaker: string | null;
+  text: string;
+  timestamp: string | null;
+}
+
+export interface RealtimeSummary {
+  id: string;
+  createdAt: string;
+  text: string;
+}
+
+export interface RealtimeSessionState {
+  status: "idle" | "recording" | "streaming" | "completed" | "error";
+  entries: RealtimeEntry[];
+  summaries: RealtimeSummary[];
+  error: string | null;
+}
+
+export interface HotkeyModifiersDetailed {
+  ctrl: boolean;
+  shift: boolean;
+  win: boolean;
+  altLeft: boolean;
+  altRight: boolean;
+}
+
+export interface HotkeyBinding {
+  primaryCode: string;
+  primaryKeyCode: number;
+  display: string;
+  modifiers: HotkeyModifiersDetailed;
+}
+
 export interface AppSettings {
   selectedEngine: string;
   selectedModel: string;
@@ -60,9 +116,13 @@ export interface AppSettings {
   outputMode: OutputMode;
   hotwords: string;
   enableAIRefine: boolean;
+  enableStreaming: boolean;
+  enableAISummary: boolean;
+  retainAudio: boolean;
   launchAtLogin: boolean;
   hotkeyModifiers: number;
   hotkeyKeyCode: number;
+  hotkeyBinding: HotkeyBinding;
 }
 
 export interface BackendRuntimeStatus {

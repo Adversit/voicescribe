@@ -2,9 +2,9 @@
 mod state;
 
 use commands::{
-    audio::{cancel_recording, get_recording_status, start_recording, stop_recording},
+    audio::{cancel_recording, delete_audio_file, get_recording_status, start_recording, stop_recording},
     backend::{backend_status, start_backend, stop_backend, transcribe},
-    hotkey::{get_hotkey_display, register_hotkey, unregister_hotkey},
+    hotkey::{get_hotkey_display, register_hotkey, register_hotkey_binding, unregister_hotkey},
     text_input::output_text,
 };
 use state::{BackendProcessState, HotkeyState, RecordingState};
@@ -46,24 +46,20 @@ fn ensure_overlay_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String
         return Ok(window);
     }
 
-    let mut builder = WebviewWindowBuilder::new(
-        app,
-        OVERLAY_LABEL,
-        WebviewUrl::App("overlay.html".into()),
-    )
-    .title("VoiceScribe Overlay")
-    .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
-    .resizable(false)
-    .maximizable(false)
-    .minimizable(false)
-    .closable(false)
-    .decorations(false)
-    .visible(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .focused(false);
+    let mut builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
+        .title("VoiceScribe Overlay")
+        .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(false)
+        .decorations(false)
+        .visible(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false);
 
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone()).map_err(|err| err.to_string())?;
@@ -101,24 +97,13 @@ pub fn run() {
         .manage(RecordingState::default())
         .setup(|app| {
             let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
-            let start_recording =
-                MenuItemBuilder::with_id("start-recording", "开始录音").build(app)?;
-            let stop_recording =
-                MenuItemBuilder::with_id("stop-recording", "停止录音并转录").build(app)?;
-            let cancel_recording =
-                MenuItemBuilder::with_id("cancel-recording", "取消当前录音").build(app)?;
-            let copy_latest =
-                MenuItemBuilder::with_id("copy-latest", "复制最近转录").build(app)?;
+            let start_recording = MenuItemBuilder::with_id("start-recording", "开始录音").build(app)?;
+            let stop_recording = MenuItemBuilder::with_id("stop-recording", "停止录音并转录").build(app)?;
+            let cancel_recording = MenuItemBuilder::with_id("cancel-recording", "取消当前录音").build(app)?;
+            let copy_latest = MenuItemBuilder::with_id("copy-latest", "复制最近转录").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "退出 VoiceScribe").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[
-                    &show,
-                    &start_recording,
-                    &stop_recording,
-                    &cancel_recording,
-                    &copy_latest,
-                    &quit,
-                ])
+                .items(&[&show, &start_recording, &stop_recording, &cancel_recording, &copy_latest, &quit])
                 .build()?;
 
             let mut tray_builder = TrayIconBuilder::with_id("main-tray")
@@ -155,24 +140,21 @@ pub fn run() {
 
             let _tray = tray_builder.build(app)?;
             let _ = ensure_overlay_window(app.handle());
-
             Ok(())
         })
-        .on_window_event(|window, event| {
-            match (window.label(), event) {
-                ("main", WindowEvent::CloseRequested { api, .. }) => {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-                ("main", WindowEvent::Destroyed) => {
-                    window.app_handle().exit(0);
-                }
-                (OVERLAY_LABEL, WindowEvent::CloseRequested { api, .. }) => {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-                _ => {}
+        .on_window_event(|window, event| match (window.label(), event) {
+            ("main", WindowEvent::CloseRequested { api, .. }) => {
+                api.prevent_close();
+                let _ = window.hide();
             }
+            ("main", WindowEvent::Destroyed) => {
+                window.app_handle().exit(0);
+            }
+            (OVERLAY_LABEL, WindowEvent::CloseRequested { api, .. }) => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             start_backend,
@@ -180,11 +162,13 @@ pub fn run() {
             backend_status,
             transcribe,
             register_hotkey,
+            register_hotkey_binding,
             unregister_hotkey,
             get_hotkey_display,
             start_recording,
             stop_recording,
             cancel_recording,
+            delete_audio_file,
             get_recording_status,
             output_text,
             show_overlay,
@@ -193,4 +177,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

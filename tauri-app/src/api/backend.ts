@@ -1,4 +1,9 @@
-import type { EngineInfo, ModelStatus, SpeakerInfo } from "../types";
+﻿import type {
+  EngineInfo,
+  HistoryRecord,
+  ModelStatus,
+  SpeakerInfo,
+} from "../types";
 
 const BASE_URL = "http://127.0.0.1:8765";
 
@@ -7,6 +12,10 @@ async function ensureOk(response: Response) {
     const text = await response.text();
     throw new Error(text || `HTTP ${response.status}`);
   }
+}
+
+export function getBaseUrl() {
+  return BASE_URL;
 }
 
 export async function healthCheck(): Promise<boolean> {
@@ -71,10 +80,7 @@ export async function deleteSpeaker(speakerId: string): Promise<void> {
   await ensureOk(response);
 }
 
-export async function registerSpeakerSample(
-  name: string,
-  file: File,
-): Promise<SpeakerInfo> {
+export async function registerSpeakerSample(name: string, file: File): Promise<SpeakerInfo> {
   const form = new FormData();
   form.set("name", name);
   form.set("audio", file, file.name);
@@ -85,4 +91,67 @@ export async function registerSpeakerSample(
   });
   await ensureOk(response);
   return response.json();
+}
+
+export async function listHistory(): Promise<HistoryRecord[]> {
+  const response = await fetch(`${BASE_URL}/history`);
+  await ensureOk(response);
+  const payload = (await response.json()) as { records: HistoryRecord[] };
+  return payload.records;
+}
+
+export async function saveHistory(record: HistoryRecord): Promise<void> {
+  const response = await fetch(`${BASE_URL}/history`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(record),
+  });
+  await ensureOk(response);
+}
+
+export async function deleteHistoryRecord(recordId: string): Promise<void> {
+  const response = await fetch(`${BASE_URL}/history/${recordId}`, {
+    method: "DELETE",
+  });
+  await ensureOk(response);
+}
+
+export async function clearHistory(): Promise<void> {
+  const response = await fetch(`${BASE_URL}/history`, {
+    method: "DELETE",
+  });
+  await ensureOk(response);
+}
+
+async function downloadBlob(url: string, filename: string) {
+  const response = await fetch(url);
+  await ensureOk(response);
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(blobUrl);
+}
+
+export async function downloadHistoryText(recordId: string) {
+  await downloadBlob(`${BASE_URL}/history/${recordId}/download/text`, `voicescribe-history-${recordId}.txt`);
+}
+
+export async function downloadHistoryAudio(recordId: string, fallbackName?: string) {
+  await downloadBlob(`${BASE_URL}/history/${recordId}/download/audio`, fallbackName ?? `voicescribe-history-${recordId}.wav`);
+}
+
+export async function requestSummary(text: string): Promise<string> {
+  const response = await fetch(`${BASE_URL}/summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  await ensureOk(response);
+  const payload = (await response.json()) as { summary: string };
+  return payload.summary;
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 VoiceScribe Backend Server
 本地语音转文字服务
@@ -17,8 +17,9 @@ import os
 import sys
 import tempfile
 import asyncio
+import wave
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 import argparse
 import importlib.util
@@ -27,6 +28,7 @@ import json
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 import uvicorn
 from config import (
@@ -37,6 +39,7 @@ from config import (
     WHISPER_CPP_MODEL_DIR,
     ensure_dirs,
     find_whisper_cli,
+    HISTORY_STORAGE_PATH,
 )
 
 def _module_available(name: str) -> bool:
@@ -282,6 +285,130 @@ def _iter_engine_models():
         for model_name in model_names:
             yield engine, model_name
 
+
+def _load_history_records() -> List[dict]:
+    try:
+        if HISTORY_STORAGE_PATH.exists():
+            with HISTORY_STORAGE_PATH.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                records = payload.get("records", [])
+                if isinstance(records, list):
+                    return records
+            if isinstance(payload, list):
+                return payload
+    except Exception as e:
+        print(f"[History] Failed to read history: {e}")
+    return []
+
+
+def _sort_history_records(records: List[dict]) -> List[dict]:
+    return sorted(records, key=lambda item: item.get("created_at", ""), reverse=True)
+
+
+def _save_history_records(records: List[dict]) -> None:
+    HISTORY_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with HISTORY_STORAGE_PATH.open("w", encoding="utf-8") as f:
+        json.dump({"records": _sort_history_records(records)}, f, ensure_ascii=False, indent=2)
+
+
+def _find_history_record(record_id: str) -> Optional[dict]:
+    for record in _load_history_records():
+        if record.get("id") == record_id:
+            return record
+    return None
+
+
+def _history_export_text(record: dict) -> str:
+    lines = [
+        f"时间: {record.get('created_at', '')}",
+        f"模式: {record.get('mode', '')}",
+        f"引擎: {record.get('engine', '')}",
+        f"模型: {record.get('model', '')}",
+        f"时长: {record.get('duration', 0)}",
+        "",
+        "正文:",
+        record.get("text", ""),
+    ]
+
+    summary = record.get("summary")
+    if summary:
+        lines.extend(["", "AI 摘要:", summary])
+
+    speaker_entries = record.get("speaker_entries") or []
+    if speaker_entries:
+        lines.extend(["", "说话人片段:"])
+        for entry in speaker_entries:
+            speaker = entry.get("speaker") or "说话人"
+            timestamp = entry.get("timestamp") or ""
+            prefix = f"[{timestamp}] " if timestamp else ""
+            lines.append(f"{prefix}{speaker}: {entry.get('text') or ''}")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _delete_history_audio_file(record: dict) -> None:
+    audio_path = record.get("audio_path")
+    if not record.get("retain_audio") or not audio_path:
+        return
+
+    path = Path(audio_path)
+    if path.exists() and path.is_file():
+        try:
+            path.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"[History] Failed to delete audio file: {e}")
+
+
+def _fallback_summary(text: str) -> str:
+    condensed = " ".join(text.split())
+    if len(condensed) <= 120:
+        return condensed
+    return condensed[:117].rstrip() + "..."
+
+
+def _write_pcm16_wav(audio_bytes: bytes) -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        with wave.open(tmp, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(16000)
+            wav_file.writeframes(audio_bytes)
+        return tmp.name
+
+
+def _realtime_entries_from_result(result: dict) -> List[dict]:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    segments = result.get("segments") or []
+    entries = []
+
+    if segments:
+        for index, segment in enumerate(segments):
+            text = (segment.get("text") or "").strip()
+            if not text:
+                continue
+            entries.append(
+                {
+                    "id": f"{timestamp}-{index}",
+                    "speaker": segment.get("speaker") or "说话人",
+                    "text": text,
+                    "timestamp": timestamp,
+                }
+            )
+        return entries
+
+    text = (result.get("text") or "").strip()
+    if text:
+        entries.append(
+            {
+                "id": f"{timestamp}-0",
+                "speaker": "说话人",
+                "text": text,
+                "timestamp": timestamp,
+            }
+        )
+    return entries
+
 # Speaker diarization 是可选的
 DIARIZATION_AVAILABLE = False
 try:
@@ -382,6 +509,38 @@ class ModelStatus(BaseModel):
     size_bytes: Optional[int] = None
     downloaded_bytes: Optional[int] = None
     error: Optional[str] = None
+
+
+class HistorySpeakerEntry(BaseModel):
+    speaker: Optional[str] = None
+    text: str
+    timestamp: Optional[str] = None
+
+
+class HistoryRecordPayload(BaseModel):
+    id: str
+    created_at: str
+    mode: Literal["stream", "non-stream"]
+    text: str
+    duration: float
+    engine: str
+    model: str
+    speaker_entries: List[HistorySpeakerEntry] = []
+    summary: Optional[str] = None
+    retain_audio: bool = False
+    audio_path: Optional[str] = None
+
+
+class HistoryResponse(BaseModel):
+    records: List[HistoryRecordPayload]
+
+
+class SummaryRequest(BaseModel):
+    text: str
+
+
+class SummaryResponse(BaseModel):
+    summary: str
 
 
 @app.get("/")
@@ -704,6 +863,94 @@ async def delete_model(engine: str = Form(...), model: str = Form(...)):
     return {"status": "deleted", "engine": engine, "model": model}
 
 
+@app.get("/history")
+async def list_history() -> HistoryResponse:
+    records = [HistoryRecordPayload(**record) for record in _sort_history_records(_load_history_records())]
+    return HistoryResponse(records=records)
+
+
+@app.post("/history")
+async def upsert_history(record: HistoryRecordPayload):
+    records = _load_history_records()
+    next_records = [item for item in records if item.get("id") != record.id]
+    payload = record.model_dump() if hasattr(record, "model_dump") else record.dict()
+    next_records.append(payload)
+    _save_history_records(next_records)
+    return {"status": "saved", "id": record.id}
+
+
+@app.delete("/history/{record_id}")
+async def delete_history(record_id: str):
+    records = _load_history_records()
+    target = None
+    next_records = []
+    for item in records:
+        if item.get("id") == record_id:
+            target = item
+        else:
+            next_records.append(item)
+    if len(next_records) == len(records):
+        raise HTTPException(404, f"History record {record_id} not found")
+    if target:
+        _delete_history_audio_file(target)
+    _save_history_records(next_records)
+    return {"status": "deleted", "id": record_id}
+
+
+@app.delete("/history")
+async def clear_history():
+    for record in _load_history_records():
+        _delete_history_audio_file(record)
+    _save_history_records([])
+    return {"status": "cleared"}
+
+
+@app.get("/history/{record_id}/download/text")
+async def download_history_text(record_id: str):
+    record = _find_history_record(record_id)
+    if not record:
+        raise HTTPException(404, f"History record {record_id} not found")
+
+    filename = f"voicescribe-history-{record_id}.txt"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return PlainTextResponse(_history_export_text(record), headers=headers)
+
+
+@app.get("/history/{record_id}/download/audio")
+async def download_history_audio(record_id: str):
+    record = _find_history_record(record_id)
+    if not record:
+        raise HTTPException(404, f"History record {record_id} not found")
+
+    audio_path = record.get("audio_path")
+    retain_audio = bool(record.get("retain_audio"))
+    if not retain_audio or not audio_path:
+        raise HTTPException(404, "Audio not retained for this history record")
+
+    path = Path(audio_path)
+    if not path.exists() or not path.is_file():
+        raise HTTPException(404, "Audio file not found")
+
+    return FileResponse(path, filename=path.name)
+
+
+@app.post("/summary")
+async def summarize_text(payload: SummaryRequest) -> SummaryResponse:
+    text = (payload.text or "").strip()
+    if not text:
+        return SummaryResponse(summary="")
+
+    if AI_REFINE_AVAILABLE:
+        try:
+            refiner = AIRefiner()
+            if hasattr(refiner, "summarize"):
+                return SummaryResponse(summary=refiner.summarize(text))
+        except Exception as e:
+            print(f"[Summary] AI summary failed, falling back: {e}")
+
+    return SummaryResponse(summary=_fallback_summary(text))
+
+
 @app.post("/load")
 async def load_engine(
     engine: Optional[str] = Form(None),
@@ -901,18 +1148,21 @@ async def transcribe(
 
 @app.websocket("/stream")
 async def stream_transcribe(websocket: WebSocket):
-    """实时流式转录（用于长时间录音）"""
+    """实时流式转录，接收 16kHz / 16-bit / mono PCM 数据块。"""
     await websocket.accept()
     
     if MOCK_MODE:
-        # Mock 模式：简单回显
         try:
             while True:
-                data = await websocket.receive_bytes()
+                await websocket.receive_bytes()
                 await websocket.send_json({
-                    "type": "partial",
-                    "text": "[Mock] 正在录音...",
-                    "segments": []
+                    "type": "entry",
+                    "entry": {
+                        "id": datetime.now().strftime("%H:%M:%S"),
+                        "speaker": "说话人",
+                        "text": "[Mock] 正在实时转录...",
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    },
                 })
         except Exception:
             pass
@@ -929,9 +1179,8 @@ async def stream_transcribe(websocket: WebSocket):
         return
     
     engine_name = "whisper"
-    model = "base"  # 流式用小模型，速度优先
+    model = "base"
     
-    # 确保引擎已加载
     if engine_name not in engines:
         eng = WhisperEngine()
         eng.load(model)
@@ -939,39 +1188,46 @@ async def stream_transcribe(websocket: WebSocket):
     
     eng = engines[engine_name]["engine"]
     
-    buffer = b""
-    chunk_duration = 30  # 每 30 秒处理一次
+    buffer = bytearray()
+    chunk_duration = 8
     sample_rate = 16000
-    chunk_size = chunk_duration * sample_rate * 2  # 16-bit audio
+    chunk_size = chunk_duration * sample_rate * 2
     
     try:
         while True:
             data = await websocket.receive_bytes()
-            buffer += data
+            buffer.extend(data)
             
             if len(buffer) >= chunk_size:
-                # 处理当前块
-                chunk = buffer[:chunk_size]
-                buffer = buffer[chunk_size:]
-                
-                # 保存临时文件
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                    tmp.write(chunk)
-                    tmp_path = tmp.name
+                chunk = bytes(buffer[:chunk_size])
+                del buffer[:chunk_size]
+                tmp_path = _write_pcm16_wav(chunk)
                 
                 try:
                     result = eng.transcribe(tmp_path, language="zh")
-                    await websocket.send_json({
-                        "type": "partial",
-                        "text": result["text"],
-                        "segments": result.get("segments", [])
-                    })
+                    entries = _realtime_entries_from_result(result)
+                    for entry in entries:
+                        await websocket.send_json({"type": "entry", "entry": entry})
                 finally:
                     os.unlink(tmp_path)
     
     except Exception as e:
         await websocket.send_json({"type": "error", "message": str(e)})
     finally:
+        if buffer:
+            try:
+                tmp_path = _write_pcm16_wav(bytes(buffer))
+                result = eng.transcribe(tmp_path, language="zh")
+                entries = _realtime_entries_from_result(result)
+                for entry in entries:
+                    await websocket.send_json({"type": "entry", "entry": entry})
+            except Exception as e:
+                await websocket.send_json({"type": "error", "message": str(e)})
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
         await websocket.close()
 
 
@@ -1075,19 +1331,19 @@ def main():
 
     if MOCK_MODE:
         print("=" * 50)
-        print("🎭 Running in MOCK MODE")
+        print("Running in MOCK MODE")
         print("   No ASR engines loaded, returning mock results")
         print("   Install whisper-cpp via: brew install whisper-cpp")
         print("=" * 50)
     else:
         print("=" * 50)
-        print("🎤 VoiceScribe Backend Server")
-        print(f"   Whisper:     {'✓' if WHISPER_AVAILABLE else '✗'}")
-        print(f"   Whisper.cpp: {'✓' if WHISPERCPP_AVAILABLE else '✗'}")
-        print(f"   FunASR:      {'✓' if FUNASR_AVAILABLE else '✗'}")
-        print(f"   Parakeet:    {'✓' if PARAKEET_AVAILABLE else '✗'}")
-        print(f"   Diarization: {'✓' if DIARIZATION_AVAILABLE else '✗'}")
-        print(f"   AI Refine:   {'✓' if AI_REFINE_AVAILABLE else '✗'}")
+        print("VoiceScribe Backend Server")
+        print(f"   Whisper:     {'OK' if WHISPER_AVAILABLE else 'NO'}")
+        print(f"   Whisper.cpp: {'OK' if WHISPERCPP_AVAILABLE else 'NO'}")
+        print(f"   FunASR:      {'OK' if FUNASR_AVAILABLE else 'NO'}")
+        print(f"   Parakeet:    {'OK' if PARAKEET_AVAILABLE else 'NO'}")
+        print(f"   Diarization: {'OK' if DIARIZATION_AVAILABLE else 'NO'}")
+        print(f"   AI Refine:   {'OK' if AI_REFINE_AVAILABLE else 'NO'}")
         print("=" * 50)
     
     uvicorn.run(app, host=args.host, port=args.port)
@@ -1095,3 +1351,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

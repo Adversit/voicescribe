@@ -1,5 +1,5 @@
 ﻿import { invoke } from "@tauri-apps/api/core";
-import type { BackendRuntimeStatus, TranscribeResult } from "../types";
+import type { BackendRuntimeStatus, HotkeyBinding, TranscribeResult } from "../types";
 
 export async function startBackend(): Promise<BackendRuntimeStatus> {
   return invoke("start_backend");
@@ -13,11 +13,12 @@ export async function backendStatus(): Promise<BackendRuntimeStatus> {
   return invoke("backend_status");
 }
 
-export async function registerHotkey(
-  modifiers: number,
-  keyCode: number,
-): Promise<void> {
+export async function registerHotkey(modifiers: number, keyCode: number): Promise<void> {
   await invoke("register_hotkey", { modifiers, keyCode });
+}
+
+export async function registerHotkeyBinding(binding: HotkeyBinding): Promise<void> {
+  await invoke("register_hotkey_binding", { binding });
 }
 
 export async function getHotkeyDisplay(): Promise<string> {
@@ -34,6 +35,10 @@ export async function stopRecording(): Promise<string> {
 
 export async function cancelRecording(): Promise<void> {
   await invoke("cancel_recording");
+}
+
+export async function deleteAudioFile(path: string): Promise<void> {
+  await invoke("delete_audio_file", { path });
 }
 
 export async function transcribeAudio(payload: {

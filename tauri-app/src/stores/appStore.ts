@@ -1,4 +1,4 @@
-import { create } from "zustand";
+﻿import { create } from "zustand";
 import { Store } from "@tauri-apps/plugin-store";
 import * as backendApi from "../api/backend";
 import * as tauriApi from "../api/tauri";
@@ -7,18 +7,42 @@ import type {
   AppSettings,
   BackendRuntimeStatus,
   EngineInfo,
+  HistoryRecord,
+  HotkeyBinding,
+  RealtimeEntry,
+  RealtimeSessionState,
   SpeakerInfo,
   TranscribeResult,
   Transcription,
   TranscriptionSegment,
 } from "../types";
 
-type PageKey = "general" | "engine" | "vocabulary" | "speaker" | "hotkey";
+export type PageKey =
+  | "general"
+  | "engine"
+  | "realtime"
+  | "history"
+  | "vocabulary"
+  | "speaker"
+  | "hotkey";
 
 const SETTINGS_KEY = "voicescribe-settings-v1";
 const SETTINGS_STORE_FILE = "voicescribe-settings.json";
 const SETTINGS_STORE_ENTRY = "settings";
 const MAX_TRANSCRIPTION_HISTORY = 20;
+
+const defaultHotkeyBinding: HotkeyBinding = {
+  primaryCode: "KeyR",
+  primaryKeyCode: 82,
+  display: "Ctrl+Shift+R",
+  modifiers: {
+    ctrl: true,
+    shift: true,
+    win: false,
+    altLeft: false,
+    altRight: false,
+  },
+};
 
 const defaultSettings: AppSettings = {
   selectedEngine: "funasr",
@@ -28,9 +52,13 @@ const defaultSettings: AppSettings = {
   outputMode: "directInput",
   hotwords: "",
   enableAIRefine: false,
+  enableStreaming: false,
+  enableAISummary: false,
+  retainAudio: false,
   launchAtLogin: false,
   hotkeyModifiers: 0x3,
   hotkeyKeyCode: 82,
+  hotkeyBinding: defaultHotkeyBinding,
 };
 
 let settingsStorePromise: Promise<Store> | null = null;
@@ -40,13 +68,28 @@ function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
+  const next = { ...defaultSettings, ...(value ?? {}) };
+  next.hotkeyBinding = value?.hotkeyBinding
+    ? {
+        ...defaultHotkeyBinding,
+        ...value.hotkeyBinding,
+        modifiers: {
+          ...defaultHotkeyBinding.modifiers,
+          ...(value.hotkeyBinding.modifiers ?? {}),
+        },
+      }
+    : defaultHotkeyBinding;
+  return next;
+}
+
 function loadBrowserSettings(): AppSettings {
   try {
     const raw = window.localStorage.getItem(SETTINGS_KEY);
     if (!raw) {
       return defaultSettings;
     }
-    return { ...defaultSettings, ...(JSON.parse(raw) as Partial<AppSettings>) };
+    return normalizeSettings(JSON.parse(raw) as Partial<AppSettings>);
   } catch {
     return defaultSettings;
   }
@@ -85,10 +128,7 @@ async function loadPersistedSettings(): Promise<AppSettings> {
 
   try {
     const value = await store.get<Partial<AppSettings>>(SETTINGS_STORE_ENTRY);
-    if (!value) {
-      return defaultSettings;
-    }
-    return { ...defaultSettings, ...value };
+    return normalizeSettings(value);
   } catch {
     return loadBrowserSettings();
   }
@@ -109,7 +149,7 @@ function createSegmentId(segment: { start: number; end: number }, index: number)
   return `${segment.start}-${segment.end}-${index}`;
 }
 
-function createTranscription(result: TranscribeResult, audioPath: string): Transcription {
+function createTranscription(result: TranscribeResult, audioPath: string | null): Transcription {
   const segments: TranscriptionSegment[] = result.segments.map((segment, index) => ({
     ...segment,
     id: createSegmentId(segment, index),
@@ -126,6 +166,13 @@ function createTranscription(result: TranscribeResult, audioPath: string): Trans
     audioPath,
   };
 }
+
+const defaultRealtimeState: RealtimeSessionState = {
+  status: "idle",
+  entries: [],
+  summaries: [],
+  error: null,
+};
 
 interface AppStore {
   currentPage: PageKey;
@@ -144,6 +191,9 @@ interface AppStore {
   audioLevel: number;
   transcriptions: Transcription[];
   currentTranscription: Transcription | null;
+  historyRecords: HistoryRecord[];
+  selectedHistoryId: string | null;
+  realtime: RealtimeSessionState;
   setPage: (page: PageKey) => void;
   hydrateSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
@@ -154,7 +204,17 @@ interface AppStore {
   setTranscribing: (value: boolean) => void;
   setRecordingCancelled: (value: boolean) => void;
   setAudioLevel: (value: number) => void;
-  saveTranscription: (result: TranscribeResult, audioPath: string) => Transcription;
+  saveTranscription: (result: TranscribeResult, audioPath: string | null) => Transcription;
+  refreshHistory: () => Promise<void>;
+  upsertHistoryRecord: (record: HistoryRecord) => Promise<void>;
+  deleteHistoryRecord: (recordId: string) => Promise<void>;
+  clearHistoryRecords: () => Promise<void>;
+  selectHistoryRecord: (recordId: string | null) => void;
+  resetRealtimeSession: () => void;
+  setRealtimeStatus: (status: RealtimeSessionState["status"]) => void;
+  pushRealtimeEntry: (entry: RealtimeEntry) => void;
+  pushRealtimeSummary: (text: string) => void;
+  setRealtimeError: (message: string | null) => void;
   checkConnection: () => Promise<void>;
   startBackend: () => Promise<void>;
   stopBackend: () => Promise<void>;
@@ -181,6 +241,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   audioLevel: 0,
   transcriptions: [],
   currentTranscription: null,
+  historyRecords: [],
+  selectedHistoryId: null,
+  realtime: defaultRealtimeState,
   setPage: (page) => set({ currentPage: page }),
   hydrateSettings: async () => {
     if (get().settingsHydrated) {
@@ -197,7 +260,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   updateSettings: (partial) =>
     set((state) => {
-      const next = { ...state.settings, ...partial };
+      const next = normalizeSettings({ ...state.settings, ...partial });
+      if (!next.enableStreaming) {
+        next.enableAISummary = false;
+      }
       void persistSettings(next).catch(() => {
         // Ignore persistence failures and keep in-memory state.
       });
@@ -231,24 +297,80 @@ export const useAppStore = create<AppStore>((set, get) => ({
           : Math.max(0, (Date.now() - state.recordingStartedAt) / 1000),
       recordingCancelled: false,
     })),
-  setTranscribing: (value) =>
-    set({
-      isTranscribing: value,
-      recordingCancelled: value ? false : get().recordingCancelled,
-    }),
+  setTranscribing: (value) => set({ isTranscribing: value }),
   setRecordingCancelled: (value) => set({ recordingCancelled: value }),
   setAudioLevel: (value) => set({ audioLevel: value }),
   saveTranscription: (result, audioPath) => {
     const transcription = createTranscription(result, audioPath);
     set((state) => ({
       currentTranscription: transcription,
-      transcriptions: [transcription, ...state.transcriptions].slice(
-        0,
-        MAX_TRANSCRIPTION_HISTORY,
-      ),
+      transcriptions: [transcription, ...state.transcriptions].slice(0, MAX_TRANSCRIPTION_HISTORY),
     }));
     return transcription;
   },
+  refreshHistory: async () => {
+    const records = await backendApi.listHistory();
+    set((state) => ({
+      historyRecords: records,
+      selectedHistoryId:
+        state.selectedHistoryId && records.some((item) => item.id === state.selectedHistoryId)
+          ? state.selectedHistoryId
+          : records[0]?.id ?? null,
+    }));
+  },
+  upsertHistoryRecord: async (record) => {
+    await backendApi.saveHistory(record);
+    await get().refreshHistory();
+  },
+  deleteHistoryRecord: async (recordId) => {
+    await backendApi.deleteHistoryRecord(recordId);
+    await get().refreshHistory();
+    set({ toast: "历史记录已删除" });
+  },
+  clearHistoryRecords: async () => {
+    await backendApi.clearHistory();
+    set({ historyRecords: [], selectedHistoryId: null, toast: "历史记录已清空" });
+  },
+  selectHistoryRecord: (recordId) => set({ selectedHistoryId: recordId }),
+  resetRealtimeSession: () => set({ realtime: defaultRealtimeState }),
+  setRealtimeStatus: (status) =>
+    set((state) => ({
+      realtime: {
+        ...state.realtime,
+        status,
+        error: status === "error" ? state.realtime.error : null,
+      },
+    })),
+  pushRealtimeEntry: (entry) =>
+    set((state) => ({
+      realtime: {
+        ...state.realtime,
+        status: "streaming",
+        entries: [...state.realtime.entries, entry],
+      },
+    })),
+  pushRealtimeSummary: (text) =>
+    set((state) => ({
+      realtime: {
+        ...state.realtime,
+        summaries: [
+          ...state.realtime.summaries,
+          {
+            id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            createdAt: new Date().toISOString(),
+            text,
+          },
+        ],
+      },
+    })),
+  setRealtimeError: (message) =>
+    set((state) => ({
+      realtime: {
+        ...state.realtime,
+        status: message ? "error" : state.realtime.status,
+        error: message,
+      },
+    })),
   checkConnection: async () => {
     const health = await backendApi.healthCheck();
     if (!health) {

@@ -1,6 +1,6 @@
 # VoiceScribe Windows 迁移正式 Spec
 
-更新时间：2026-03-28
+更新时间：2026-03-29
 
 基线文档：
 - [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
@@ -9,6 +9,7 @@
 - 界面专项计划 [2026-03-27-ui-imitation-plan.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-27-ui-imitation-plan.md)
 - 专题需求文档 [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
 - 专题 Spec [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+- 专题测试报告 [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
 
 本文档是当前唯一正式 spec。如与当前代码、临时说明或旧版 spec 冲突，一律以 [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md) 与本文档为准。
 
@@ -105,6 +106,7 @@
 3. `启用流式传输` 开启后，历史记录需要自动记录流式和非流式结果。
 4. `AI 摘要总结` 只有在 `启用流式传输` 开启时才可开启，并且只作用于流式结果。
 5. 快捷键页必须从手工输入 keycode 迁移到真实按键录制能力，支持单键、组合键，并区分左右 `Alt`。
+6. 本专题的自动化测试结果必须额外写入专题测试报告，再回写主测试文档与主 checklist。
 
 ## 6. Phase 4: UI 实现
 
@@ -195,3 +197,4 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 - Plan/Spec 一致性核对： [2026-03-26-plan-spec-consistency-check.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\2026-03-26-plan-spec-consistency-check.md)
 - 实时转录专题需求： [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
 - 实时转录专题 Spec： [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+- 实时转录专题测试报告： [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
