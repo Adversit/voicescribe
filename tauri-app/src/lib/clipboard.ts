@@ -17,5 +17,5 @@ export async function copyText(text: string): Promise<void> {
     return;
   }
 
-  throw new Error("¸´ÖÆµ½¼ôÌù°åÊ§°Ü");
+  throw new Error("????????");
 }

@@ -1,115 +1,119 @@
 # 2026-03-25 Session Bug Log
 
-更新时间：2026-03-25
+更新时间：2026-03-28
 
 本文档记录本次会话中，由用户指出、而非首次实现即正确完成的问题。
 
 ## 1. Cargo 在终端中不可用
-
 - 表现：`cargo --version` 在 PowerShell 中报 `CommandNotFoundException`。
-- 实际原因：Rust 已安装，但当前 PowerShell 会话的 `PATH` 没有包含 Rust 安装目录。
-- 后续处理：通过临时补 PATH、安装 MSVC Build Tools、补 PowerShell profile 解决。
+- 原因：Rust 已安装，但当前 PowerShell 会话的 `PATH` 没有包含 Rust 安装目录。
+- 处理：通过临时补 PATH、安装 MSVC Build Tools、补 PowerShell profile 解决。
 
 ## 2. 重启后界面没有更新
-
-- 表现：代码已修改，但用户看到的桌面应用界面没有变化。
-- 实际原因：旧进程没有完全清理，导致用户看到的不是最新构建后的运行态。
-- 后续处理：补强重启流程，先清理旧的桌面端、旧的 `python server.py` 和端口占用进程，再启动新版本。
+- 表现：代码已修改，但桌面应用界面没有变化。
+- 原因：旧进程没有完全清理，看到的不是最新构建产物。
+- 处理：补强重启流程，先清理旧桌面端、旧 Python 后端和端口占用，再启动新版本。
 
 ## 3. 应用没有最小化到托盘
-
-- 表现：关闭主窗口时没有进入托盘，而是直接退出或没有托盘行为。
-- 实际原因：最初只完成了窗口启动，没有补完整的关闭转托盘逻辑。
-- 后续处理：补充 Tauri 托盘菜单、关闭隐藏、托盘恢复主窗口逻辑。
+- 表现：关闭主窗口时没有进入托盘。
+- 原因：最初只完成了窗口启动，没有补完整的关闭转托盘逻辑。
+- 处理：补全托盘菜单、关闭隐藏、托盘恢复主窗口逻辑。
 
 ## 4. 托盘没有图标
-
 - 表现：托盘有行为但没有显示图标。
-- 实际原因：托盘逻辑先完成，但没有把应用图标资源正确绑定到托盘。
-- 后续处理：补充托盘图标绑定与资源配置。
+- 原因：托盘逻辑先完成，但图标资源没有正确绑定。
+- 处理：补充托盘图标资源绑定与配置。
 
 ## 5. FunASR 模型列表前后端口径不一致
-
 - 表现：引擎页中 FunASR 的“可选模型”和“可下载模型”数量不一致。
-- 实际原因：`/engines` 与 `/models` 的模型清单没有统一来源。
-- 后续处理：统一 FunASR 模型列表为 4 个，并让前后端基于同一模型清单渲染。
+- 原因：`/engines` 与 `/models` 的模型清单没有统一来源。
+- 处理：统一 FunASR 模型列表，并让前后端基于同一模型清单渲染。
 
 ## 6. 本地 `models/` 目录没有被正确识别
-
 - 表现：项目根目录已有模型，但系统未显示为已下载。
-- 实际原因：桌面端后端启动时曾读取其他运行时目录；同时注册表文件里保留了旧绝对路径。
-- 后续处理：统一回项目根目录 `models/`，并增加旧路径 rebasing。
+- 原因：桌面端曾读取其他运行时目录，且注册表中保留旧绝对路径。
+- 处理：统一收口到项目根目录 `models/`，并增加旧路径 rebasing。
 
 ## 7. 模型目录口径不统一
-
-- 表现：系统并非严格只认项目根目录 `models/`，还可能读取其他路径。
-- 实际原因：后端配置、桌面端启动参数和注册表路径没有完全收口。
-- 后续处理：明确口径为“下载到 `models/`、读取也只从 `models/`、旧路径 rebasing 到当前 `models/`”。
+- 表现：系统并非严格只认项目根目录 `models/`。
+- 原因：后端配置、桌面端启动参数和注册表路径没有完全收口。
+- 处理：明确口径为“下载到 `models/`、读取也只从 `models/`、旧路径 rebasing 到当前 `models/`”。
 
 ## 8. 原有“未下载模型展示 + 下载入口”功能丢失
-
-- 表现：引擎页只显示已下载模型，没有显示未下载模型，也没有对应下载入口。
-- 实际原因：第一次修模型页时只对已下载状态做了对齐，没有保留完整模型清单补全逻辑。
-- 后续处理：前端改为先拿完整模型清单，再叠加状态，未下载模型默认显示为“未下载”。
+- 表现：引擎页只显示已下载模型，没有显示未下载模型，也没有下载入口。
+- 原因：第一次修模型页时只对齐了已下载状态，没有保留完整模型清单补全逻辑。
+- 处理：前端改为先取完整模型清单，再叠加状态，未下载模型默认显示为“未下载”。
 
 ## 9. 只有 FunASR 做了完整模型状态补全
-
 - 表现：FunASR 能显示未下载状态，但其他引擎没有同样行为。
-- 实际原因：前端当时只给 `funasr` 做了特判，其他引擎仍只依赖 `/models` 现有返回。
-- 后续处理：去掉前端对 FunASR 的特判，改为所有引擎统一按完整模型清单补全状态。
+- 原因：前端当时只给 `funasr` 做了特判。
+- 处理：去掉前端对 FunASR 的特判，改为所有引擎统一按完整模型清单补全状态。
 
 ## 10. 其他引擎没有下载和删除逻辑
+- 表现：Whisper、WhisperCpp、Parakeet 没有与 FunASR 一样的下载和删除能力。
+- 原因：后端 `/models/download` 和 `/models/delete` 起初只支持 FunASR。
+- 处理：扩展后端模型状态与下载删除逻辑，覆盖所有引擎。
 
-- 表现：Whisper、WhisperCpp、Parakeet 没有像 FunASR 一样的下载和删除能力。
-- 实际原因：后端 `/models/download` 和 `/models/delete` 起初只支持 FunASR。
-- 后续处理：扩展后端模型状态与下载删除逻辑，让 `/models` 覆盖所有引擎，并补全对应下载入口。
+## 11. 模型删除后 `/models` 仍残留上次 `downloaded_bytes`
+- 表现：模型文件已删除，`available=false`，但 `/models` 仍保留旧的 `downloaded_bytes`。
+- 原因：删除模型时只清理了注册表和文件，没有同步清空内存中的下载状态。
+- 处理：在 `backend/server.py` 删除逻辑中补了下载状态重置。
 
-## 备注
+## 12. 本地启动脚本误用 `tauri build` 导致 NSIS 锁住可执行文件
+- 表现：本地启动时在 NSIS bundling 阶段报 `os error 32`。
+- 原因：本地“重建并启动应用”场景误用了 `npm run tauri:build`。
+- 处理：把 `scripts/start_windows_system.bat` 改成本地启动脚本，不再走 NSIS 打包。
 
-- 本文档记录的是“本次会话中由用户指出的问题”，不是完整缺陷清单。
-- 部分问题之间存在因果关系，例如“界面未更新”与“旧进程未清理”是同一链路上的不同表现。
+## 13. 本地启动脚本改成 `cargo build --release` 后退回 `localhost` 页面
+- 表现：桌面应用启动后显示 `ERR_CONNECTION_REFUSED` 的 localhost 页面。
+- 原因：纯 `cargo build --release` 没有走完整的 Tauri release 构建语义。
+- 处理：改为 `npx tauri build --no-bundle --ci`。
 
-## 11. ģ��ɾ���� `/models` �Բ����ϴ� `downloaded_bytes`
-- ���֣�ģ���ļ��Ѿ�ɾ����`available=false`���� `/models` ���Ա�����һ�����غ�� `downloaded_bytes`��
-- ʵ��ԭ��ɾ��ģ��ʱֻ������ע������ļ���û��ͬ������ڴ��е� `model_downloads` ״̬��
-- ������������ `backend/server.py` ɾ���߼��в�������״̬���ã�������֤��ɾ����� `downloaded_bytes` �ѻص� `null`��
+## 14. `tauri-plugin-store` JS API 首次接入时误用了构造函数
+- 表现：`npm run build` 失败，TypeScript 报 `Store` 构造器私有。
+- 原因：误写成 `new Store(...)`。
+- 处理：改为 `Store.load(...)`。
 
-## 12. 本地启动脚本误用 `tauri build` 导致 NSIS 打包锁住可执行文件
-- 表现：执行 `scripts/start_windows_system.bat` 时，前端构建与 Rust release 编译能完成，但在 NSIS bundling 阶段报 `另一个程序正在使用此文件，进程无法访问。 (os error 32)`。
-- 实际原因：本地“重建并启动应用”场景误用了 `npm run tauri:build`，它会进入安装包 bundling 流程；该流程会再次操作 `target/release/voicescribe-desktop.exe`，容易与本地运行/扫描中的 exe 发生锁冲突。
-- 后续处理：把 `scripts/start_windows_system.bat` 改成仅用于本地启动，执行顺序调整为 `npm run build` + `cargo build --release` + 直接启动 `voicescribe-desktop.exe`，不再在该脚本里跑 NSIS 打包。
+## 15. `lib.rs` 被错误编码写回，导致 `cargo check` 失败
+- 表现：Rust 报 `stream did not contain valid UTF-8`。
+- 原因：用错误编码重写了 `lib.rs`。
+- 处理：按 UTF-8 重新写回 `lib.rs`。
 
-## 13. 本地启动脚本改成 `cargo build --release` 后，桌面窗口退回到 `localhost` 页面
-- 表现：桌面应用可以启动，但界面显示“无法访问此页面 / localhost 拒绝连接 / ERR_CONNECTION_REFUSED”。
-- 实际原因：把本地启动链路从 `tauri build` 改成了纯 `cargo build --release` 后，生成的可执行文件没有经过 Tauri 完整的 release 构建流程，前端资源解析语义不正确，窗口退回到 `devUrl=http://localhost:5173` 的开发地址。
-- 后续处理：把 `scripts/start_windows_system.bat` 改为执行 `npx tauri build --no-bundle --ci`，保留 Tauri 正确的 release 构建流程，同时跳过 NSIS bundling。
-
-## 14. `tauri-plugin-store` JS API 初次接入时误用了构造函数
-- 表现：`npm run build` 失败，TypeScript 报错 `Constructor of class 'Store' is private and only accessible within the class declaration`。
-- 实际原因：前端初次接入 `@tauri-apps/plugin-store` 时，误写成了 `new Store(...)`，但 v2 正确用法是 `Store.load(...)` 或 `load(...)`。
-- 后续处理：将设置持久化改为 `Store.load("voicescribe-settings.json")`，重新构建后前端编译通过。
-
-## 15. `lib.rs` 以默认编码写回后变成非 UTF-8，导致 `cargo check` 失败
-- 表现：`cargo check` 失败，Rust 编译器报 `stream did not contain valid UTF-8`，并定位到 `src/lib.rs` 的中文菜单文本。
-- 实际原因：重写 `tauri-app/src-tauri/src/lib.rs` 时使用了 PowerShell 默认编码，文件被写成了非 UTF-8。
-- 后续处理：按 UTF-8 重新写回 `lib.rs`，再次执行 `cargo check` 后通过。
-
-## 16. JSON 配置文件被写成带 BOM 的 UTF-8，导致前端和 Tauri 构建同时失败
-- 表现：新增 `autostart` 相关配置后，`npm run build` 报 `package.json is not valid JSON`，`cargo check` 报 `unable to parse JSON Tauri config file`。
-- 实际原因：重写 `tauri-app/package.json` 和 `tauri-app/src-tauri/tauri.conf.json` 时写成了带 BOM 的 UTF-8，Vite 和 Tauri 配置解析都在首字符处失败。
-- 后续处理：将两个 JSON 文件改为无 BOM UTF-8 后，重新执行 `npm run build` 和 `cargo check` 均通过。
+## 16. JSON 配置文件被写成带 BOM 的 UTF-8
+- 表现：`package.json` 与 `tauri.conf.json` 同时解析失败。
+- 原因：重写 JSON 文件时写成了带 BOM 的 UTF-8。
+- 处理：改为无 BOM UTF-8。
 
 ## 17. 托盘事件桥接后 `cargo check` 因缺少 `Emitter` trait import 失败
-- 表现：为托盘菜单补齐“开始录音 / 停止录音 / 取消录音 / 复制最近转录”事件桥后，`cargo check` 报错 `no method named emit found for reference &AppHandle`。
-- 实际原因：`tauri-app/src-tauri/src/lib.rs` 新增了 `app.emit(...)`，但没有同步引入 `tauri::Emitter` trait。
-- 后续处理：补齐 `Emitter` import 后重新执行 `cargo check`，构建通过，并将本轮结果写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 的 `28`。
+- 表现：Rust 报 `no method named emit found for reference &AppHandle`。
+- 原因：新增 `app.emit(...)` 时未导入 `tauri::Emitter`。
+- 处理：补齐 import。
 
 ## 18. 录音悬浮窗窗口化接线时误判了 Tauri builder API 返回类型
-- 表现：把 `overlay` 窗口接入 `lib.rs` 后，`cargo check` 首次失败，分别报 `builder.icon(...)` 返回 `Result` 和 `ensure_overlay_window(app)` 参数类型不匹配。
-- 实际原因：Tauri 2 的 `WebviewWindowBuilder::icon` 不是直接返回 builder，而是返回 `Result<builder, tauri::Error>`；同时 `setup` 闭包里拿到的是 `&mut App`，而辅助函数签名写成了 `&AppHandle`。
-- 后续处理：补上 `icon(...)?` 的错误传播，并在 `setup` 中改用 `app.handle()`，重新执行 `cargo check` 后通过；结果已写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 的 `30`。
+- 表现：`cargo check` 首次失败。
+- 原因：`icon(...)` 返回 `Result`，以及 `setup` 中 `App` / `AppHandle` 使用不匹配。
+- 处理：补 `?` 传播并统一传递 `app.handle()`。
 
-## 19. Tauri unit 型插件被错误写成 `{}` 配置，导致 release 启动时逐个插件 panic
-- 表现：`voicescribe-desktop.exe` release 构建成功，但启动即以 `101` 退出；前台运行后依次报出 `plugins.autostart`、`plugins.clipboard-manager` 等配置“invalid type: map, expected unit”。
-- 实际原因：`tauri.conf.json` 里把无配置的 Tauri 插件写成了 `{}`，`cargo check` 不会暴露这个问题，但 release 真正运行时插件初始化会反序列化失败并 panic。
-- 后续处理：清空 [tauri.conf.json](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\tauri.conf.json) 中不需要的 `plugins` 配置对象后，重新构建并启动 release，`/health` 已验证通过；结果已写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\第一阶段测试.md) 的 `31`。
+## 19. Tauri unit 型插件被错误写成 `{}` 配置，导致 release 启动 panic
+- 表现：release 程序启动即异常退出。
+- 原因：`tauri.conf.json` 中把无配置插件写成了对象。
+- 处理：清理不需要的插件配置对象。
+
+## 20. 界面源码中文看似正常，但前端 bundle 实际已经乱码
+- 表现：界面中文显示为乱码。
+- 原因：此前通过 PowerShell 重写文件时没有强制无 BOM UTF-8，导致构建产物带入错误编码文本。
+- 处理：统一按 UTF-8 无 BOM 重写前端界面文件并重新构建。
+
+## 21. 主窗口被实现成“底板 + 中间壳”的网页式双层结构
+- 表现：窗口放大后能看到明显的底层背景板，通用页也偏 dashboard 风格。
+- 原因：`Layout.tsx` 和全局样式用了错误的 shell/panel 布局模型。
+- 处理：把布局模型改成“单层主表面 + 侧边栏固定 + 内容扩展”，并把通用页收回单列 `Form + Section` 风格。
+
+## 22. Windows PowerShell 的默认读取方式误导了编码判断
+- 表现：`Get-Content` 看到的是 `閫氱敤` 一类乱码，导致误以为源码仍然损坏。
+- 原因：Windows PowerShell 对 UTF-8 文件的显示和此前的混合编码文件一起造成了误判；同时真正损坏的文档文件与已经修复好的源码文件混在一起。
+- 处理：改用 Python 按 `utf-8` 直接校验文件内容，确认源码与新文档已恢复正常；对仍损坏的文档文件执行整文件重写。
+
+## 备注
+- 本文档记录的是“本次会话中由用户指出的问题”，不是完整缺陷清单。
+- 后续如果再出现“没有一次做对”的问题，应继续把原因和修复结果追加到本文件。

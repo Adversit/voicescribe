@@ -1,5 +1,14 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { loadEngine } from "../api/backend";
+import {
+  SettingsField,
+  SettingsPage,
+  SettingsSection,
+  dangerButtonClassName,
+  primaryButtonClassName,
+  secondaryButtonClassName,
+  selectClassName,
+} from "../components/settings-ui";
 import { useAppStore } from "../stores/appStore";
 import { useModelStore } from "../stores/modelStore";
 import type { ModelStatus } from "../types";
@@ -63,18 +72,36 @@ export function EngineSettings() {
   );
 
   return (
-    <div className="space-y-3.5">
-      <header className="space-y-1">
-        <h1 className="text-[22px] font-semibold text-ink">引擎</h1>
-        <p className="max-w-3xl text-xs leading-5 text-ink/60">
-          上方切换引擎和模型，下方用局部列表管理可下载状态，避免整页被模型列表拉长。
-        </p>
-      </header>
-
-      <section className="rounded-[18px] border border-[#e4dbc9] bg-[#faf6ef] px-4 py-3">
-        <div className="grid gap-3 xl:grid-cols-[1fr_1fr_auto] xl:items-end">
-          <label className="block text-sm text-ink/70">
-            选择引擎
+    <SettingsPage
+      title="引擎"
+      description="保持原生设置页的上紧下松结构：上面选引擎和模型，下面用局部列表管理下载状态。"
+    >
+      <SettingsSection
+        title="引擎与模型"
+        description="先决定引擎和默认模型，再按需预加载。"
+        actions={
+          <>
+            <button type="button" onClick={() => void refreshModels()} className={secondaryButtonClassName}>
+              刷新
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void loadEngine(settings.selectedEngine, settings.selectedModel)
+                  .then(() => setToast("模型加载成功"))
+                  .catch((error) =>
+                    setToast(error instanceof Error ? error.message : "模型加载失败"),
+                  )
+              }
+              className={primaryButtonClassName}
+            >
+              预加载
+            </button>
+          </>
+        }
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <SettingsField label="选择引擎" hint={engineDescriptions[settings.selectedEngine] ?? "当前引擎描述待补充。"}>
             <select
               value={settings.selectedEngine}
               onChange={(event) => {
@@ -85,7 +112,7 @@ export function EngineSettings() {
                   selectedModel: match?.models[0] ?? settings.selectedModel,
                 });
               }}
-              className="mt-1.5 w-full rounded-2xl border border-[#ddd2c0] bg-white px-4 py-2.5"
+              className={selectClassName}
             >
               {availableEngines.map((engine) => (
                 <option key={engine.name} value={engine.name}>
@@ -93,14 +120,13 @@ export function EngineSettings() {
                 </option>
               ))}
             </select>
-          </label>
+          </SettingsField>
 
-          <label className="block text-sm text-ink/70">
-            选择模型
+          <SettingsField label="选择模型">
             <select
               value={settings.selectedModel}
               onChange={(event) => updateSettings({ selectedModel: event.target.value })}
-              className="mt-1.5 w-full rounded-2xl border border-[#ddd2c0] bg-white px-4 py-2.5"
+              className={selectClassName}
             >
               {(selectedEngineInfo?.models ?? []).map((model) => (
                 <option key={model} value={model}>
@@ -108,94 +134,63 @@ export function EngineSettings() {
                 </option>
               ))}
             </select>
-          </label>
-
-          <div className="flex flex-wrap gap-2 xl:justify-end">
-            <button
-              type="button"
-              onClick={() =>
-                void loadEngine(settings.selectedEngine, settings.selectedModel)
-                  .then(() => setToast("模型加载成功"))
-                  .catch((error) =>
-                    setToast(error instanceof Error ? error.message : "模型加载失败"),
-                  )
-              }
-              className="rounded-full bg-accent px-4 py-2 text-sm text-white"
-            >
-              预加载
-            </button>
-            <button
-              type="button"
-              onClick={() => void refreshModels()}
-              className="rounded-full border border-[#ddd2c0] bg-white px-4 py-2 text-sm text-ink/75"
-            >
-              刷新
-            </button>
-          </div>
+          </SettingsField>
         </div>
+      </SettingsSection>
 
-        <p className="mt-3 text-xs leading-5 text-ink/60">
-          {engineDescriptions[settings.selectedEngine] ?? "当前引擎描述待补充。"}
-        </p>
-      </section>
-
-      <section className="rounded-[18px] border border-[#e4dbc9] bg-[#faf6ef] px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[15px] font-semibold text-ink">模型管理</div>
-            <p className="mt-1 text-xs leading-5 text-ink/55">
-              固定下载到并读取自 <code>models/</code>。长列表限制在局部滚动区域内。
-            </p>
-          </div>
-          <div className="text-xs text-ink/45">{displayModels.length} 个模型</div>
-        </div>
-
-        <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+      <SettingsSection
+        title="模型管理"
+        description="固定下载到并读取自 models/。列表只在本区滚动，不拉长整页。"
+        actions={<span className="app-chip">{displayModels.length} 个模型</span>}
+      >
+        <div className="list-scroll space-y-2">
           {displayModels.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[#ded4c4] bg-white px-4 py-3 text-sm text-ink/55">
+            <div className="rounded-[12px] border border-dashed border-line bg-panel px-4 py-3 text-sm text-ink/55">
               当前引擎没有可展示的模型列表。
             </div>
           ) : (
             displayModels.map((model) => (
               <div
                 key={`${model.engine}-${model.model}`}
-                className="flex flex-col gap-2 rounded-2xl border border-[#e4dbc9] bg-white px-3.5 py-3 md:flex-row md:items-center md:justify-between"
+                className="rounded-[12px] border border-line bg-panel px-3.5 py-3"
               >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-ink">{model.model}</div>
-                  <div className="mt-0.5 text-xs text-ink/55">
-                    状态：{model.downloading ? "下载中" : model.available ? "已就绪" : "未下载"}
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-ink">{model.model}</div>
+                    <div className="mt-1 text-xs text-ink/58">
+                      状态：{model.downloading ? "下载中" : model.available ? "已就绪" : "未下载"}
+                    </div>
+                    <div className="mt-0.5 text-xs text-ink/46">
+                      大小：{formatBytes(model.size_bytes)} · 已下载：{formatBytes(model.downloaded_bytes)}
+                    </div>
+                    {model.error ? <div className="mt-1 text-xs text-[#9c4221]">{model.error}</div> : null}
                   </div>
-                  <div className="mt-0.5 text-xs text-ink/45">
-                    大小：{formatBytes(model.size_bytes)} · 已下载：{formatBytes(model.downloaded_bytes)}
+                  <div className="flex items-center gap-2">
+                    {model.available ? (
+                      <button
+                        type="button"
+                        onClick={() => void deleteModel(model.engine, model.model)}
+                        className={dangerButtonClassName}
+                      >
+                        删除
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void startDownload(model.engine, model.model)}
+                        className={primaryButtonClassName}
+                        disabled={model.downloading}
+                      >
+                        {model.downloading ? "下载中" : "下载"}
+                      </button>
+                    )}
                   </div>
-                  {model.error ? <div className="mt-1 text-xs text-[#a53f1c]">{model.error}</div> : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  {model.available ? (
-                    <button
-                      type="button"
-                      onClick={() => void deleteModel(model.engine, model.model)}
-                      className="rounded-full border border-[#ddd2c0] bg-white px-3.5 py-1.5 text-sm text-ink/75"
-                    >
-                      删除
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void startDownload(model.engine, model.model)}
-                      className="rounded-full bg-accent px-3.5 py-1.5 text-sm text-white"
-                      disabled={model.downloading}
-                    >
-                      {model.downloading ? "下载中" : "下载"}
-                    </button>
-                  )}
                 </div>
               </div>
             ))
           )}
         </div>
-      </section>
-    </div>
+      </SettingsSection>
+    </SettingsPage>
   );
 }
