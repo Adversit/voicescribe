@@ -100,8 +100,9 @@ class FunASREngine:
         # 多次执行以处理连续空格
         text = re.sub(r'([\u4e00-\u9fff])\s+([\u4e00-\u9fff])', r'\1\2', text)
         # 去除中文和标点之间的空格
-        text = re.sub(r'([\u4e00-\u9fff])\s+([，。！？、；：""''（）])', r'\1\2', text)
-        text = re.sub(r'([，。！？、；：""''（）])\s+([\u4e00-\u9fff])', r'\1\2', text)
+        punctuation = '，。！？、；：""\'\'（）'
+        text = re.sub(rf'([\u4e00-\u9fff])\s+([{punctuation}])', r'\1\2', text)
+        text = re.sub(rf'([{punctuation}])\s+([\u4e00-\u9fff])', r'\1\2', text)
         return text.strip()
     
     def transcribe(

@@ -1,4 +1,4 @@
-﻿import { create } from "zustand";
+import { create } from "zustand";
 import { Store } from "@tauri-apps/plugin-store";
 import * as backendApi from "../api/backend";
 import * as tauriApi from "../api/tauri";
@@ -34,6 +34,7 @@ const defaultSettings: AppSettings = {
 };
 
 let settingsStorePromise: Promise<Store> | null = null;
+let startBackendPromise: Promise<void> | null = null;
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -272,9 +273,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
   startBackend: async () => {
-    const runtime = await tauriApi.startBackend();
-    set({ backendRuntime: runtime });
-    await get().checkConnection();
+    if (startBackendPromise) {
+      return startBackendPromise;
+    }
+
+    startBackendPromise = (async () => {
+      try {
+        const runtime = await tauriApi.startBackend();
+        set({ backendRuntime: runtime });
+        await get().checkConnection();
+      } finally {
+        startBackendPromise = null;
+      }
+    })();
+
+    return startBackendPromise;
   },
   stopBackend: async () => {
     const runtime = await tauriApi.stopBackend();

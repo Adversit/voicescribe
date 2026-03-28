@@ -1,8 +1,10 @@
-﻿use crate::state::BackendProcessState;
+use crate::state::BackendProcessState;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io;
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -10,6 +12,9 @@ use tauri::{AppHandle, Manager, State};
 
 const BACKEND_PORT: u16 = 8765;
 const BASE_URL: &str = "http://127.0.0.1:8765";
+const BACKEND_SYNC_STAMP_FILENAME: &str = ".bundle-version";
+const BACKEND_DEPS_STAMP_FILENAME: &str = ".deps-installed";
+const BACKEND_START_LOCK_FILENAME: &str = ".startup.lock";
 
 fn source_project_root_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -50,8 +55,25 @@ fn dev_backend_dir() -> PathBuf {
     source_project_root_dir().join("backend")
 }
 
+fn current_exe_resource_dir(relative: &str) -> Option<PathBuf> {
+    let current_exe = env::current_exe().ok()?;
+    let parent = current_exe.parent()?;
+    Some(parent.join("resources").join(relative))
+}
+
+fn resource_subdir(app: &AppHandle, relative: &str) -> Option<PathBuf> {
+    if let Ok(dir) = app.path().resource_dir() {
+        let resource_dir = dir.join(relative);
+        if resource_dir.exists() {
+            return Some(resource_dir);
+        }
+    }
+
+    current_exe_resource_dir(relative).filter(|path| path.exists())
+}
+
 fn resource_backend_dir(app: &AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok().map(|dir| dir.join("backend"))
+    resource_subdir(app, "backend")
 }
 
 fn repo_runtime_dir(backend_dir: &Path) -> Option<PathBuf> {
@@ -63,9 +85,77 @@ fn repo_runtime_dir(backend_dir: &Path) -> Option<PathBuf> {
     }
 }
 
+fn truthy_env(name: &str) -> bool {
+    env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn runtime_override_dir() -> Option<PathBuf> {
+    env::var_os("VOICESCRIBE_RUNTIME_OVERRIDE_DIR").map(PathBuf::from)
+}
+
+fn canonical_path(path: &Path) -> Option<PathBuf> {
+    fs::canonicalize(path).ok()
+}
+
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    let Some(path) = canonical_path(path) else {
+        return false;
+    };
+    let Some(root) = canonical_path(root) else {
+        return false;
+    };
+
+    path.starts_with(root)
+}
+
+fn should_use_dev_project_tree_for_paths(
+    current_exe: &Path,
+    source_root: &Path,
+    force_dev_mode: bool,
+    force_packaged_mode: bool,
+) -> bool {
+    if force_dev_mode {
+        return true;
+    }
+    if force_packaged_mode {
+        return false;
+    }
+
+    source_root.join("backend").exists() && path_is_within_root(current_exe, source_root)
+}
+
+fn should_use_dev_project_tree() -> bool {
+    let source_root = source_project_root_dir();
+    let force_dev_mode = truthy_env("VOICESCRIBE_FORCE_DEV_MODE");
+    let force_packaged_mode =
+        truthy_env("VOICESCRIBE_FORCE_INSTALL_MODE") || truthy_env("VOICESCRIBE_FORCE_PACKAGED_MODE");
+
+    let Some(current_exe) = env::current_exe().ok() else {
+        return source_root.join("backend").exists() && !force_packaged_mode;
+    };
+
+    should_use_dev_project_tree_for_paths(
+        &current_exe,
+        &source_root,
+        force_dev_mode,
+        force_packaged_mode,
+    )
+}
+
 fn resolve_runtime_dir(app: &AppHandle, backend_seed: &Path) -> Result<PathBuf, String> {
+    if let Some(runtime_dir) = runtime_override_dir() {
+        return Ok(runtime_dir);
+    }
+
     let project_root = source_project_root_dir();
-    if project_root.join("backend").exists() {
+    if should_use_dev_project_tree() {
         return Ok(project_root);
     }
 
@@ -117,16 +207,116 @@ fn copy_backend_tree(source: &Path, target: &Path) -> Result<(), String> {
     copy_dir_recursive(source, target).map_err(|err| err.to_string())
 }
 
+fn backend_sync_stamp_path(target: &Path) -> PathBuf {
+    target.join(BACKEND_SYNC_STAMP_FILENAME)
+}
+
+fn backend_deps_stamp_path(target: &Path) -> PathBuf {
+    target.join(BACKEND_DEPS_STAMP_FILENAME)
+}
+
+fn backend_dependencies_ready(backend_dir: &Path) -> bool {
+    backend_deps_stamp_path(backend_dir).exists()
+}
+
+fn mark_backend_dependencies_ready(backend_dir: &Path) -> Result<(), String> {
+    fs::write(backend_deps_stamp_path(backend_dir), b"ready").map_err(|err| err.to_string())
+}
+
+fn backend_start_lock_path(backend_dir: &Path) -> PathBuf {
+    backend_dir.join(BACKEND_START_LOCK_FILENAME)
+}
+
+fn backend_start_locked(backend_dir: &Path) -> bool {
+    backend_start_lock_path(backend_dir).exists()
+}
+
+fn acquire_backend_start_lock(backend_dir: &Path) -> Result<bool, String> {
+    let lock_path = backend_start_lock_path(backend_dir);
+    match OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+        Ok(_) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn release_backend_start_lock(backend_dir: &Path) {
+    let _ = fs::remove_file(backend_start_lock_path(backend_dir));
+}
+
+fn backend_port_is_open() -> bool {
+    TcpStream::connect_timeout(
+        &SocketAddr::from(([127, 0, 0, 1], BACKEND_PORT)),
+        Duration::from_millis(250),
+    )
+    .is_ok()
+}
+
+fn kill_backend_processes(backend_dir: &Path) -> Result<(), String> {
+    let server_path = backend_dir.join("server.py");
+    let escaped = server_path.to_string_lossy().replace("'", "''");
+    let command = format!(
+        "Get-CimInstance Win32_Process | Where-Object {{ .Name -eq 'python.exe' -and .CommandLine -and .CommandLine -like '*{escaped}*' }} | ForEach-Object {{ Stop-Process -Id .ProcessId -Force -ErrorAction SilentlyContinue }}"
+    );
+
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &command])
+        .status()
+        .map_err(|err| format!("Failed to stop backend processes: {err}"))?;
+    if !status.success() {
+        return Err("Failed to stop backend processes via PowerShell".to_string());
+    }
+
+    Ok(())
+}
+
+fn backend_bundle_version(app: &AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+fn backend_bundle_sync_required_for_version(
+    target: &Path,
+    bundle_version: &str,
+    force_sync: bool,
+) -> bool {
+    if force_sync {
+        return true;
+    }
+
+    let server_file = target.join("server.py");
+    let stamp_file = backend_sync_stamp_path(target);
+    if !server_file.exists() || !stamp_file.exists() {
+        return true;
+    }
+
+    fs::read_to_string(stamp_file)
+        .map(|value| value.trim() != bundle_version)
+        .unwrap_or(true)
+}
+
+fn sync_backend_bundle(app: &AppHandle, source: &Path, target: &Path) -> Result<(), String> {
+    let bundle_version = backend_bundle_version(app);
+    let force_sync = truthy_env("VOICESCRIBE_FORCE_BACKEND_SYNC");
+
+    if backend_bundle_sync_required_for_version(target, &bundle_version, force_sync) {
+        copy_backend_tree(source, target)?;
+        let _ = fs::remove_file(backend_deps_stamp_path(target));
+        fs::write(backend_sync_stamp_path(target), bundle_version).map_err(|err| err.to_string())?;
+    }
+
+    Ok(())
+}
+
 fn resolve_backend_dir(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf, String> {
     let dev_dir = dev_backend_dir();
-    if dev_dir.join("server.py").exists() {
+    if should_use_dev_project_tree() && dev_dir.join("server.py").exists() {
         return Ok(dev_dir);
     }
 
     if let Some(resource_dir) = resource_backend_dir(app) {
         if resource_dir.join("server.py").exists() {
             let runtime_backend_dir = runtime_dir.join("backend");
-            copy_backend_tree(&resource_dir, &runtime_backend_dir)?;
+            sync_backend_bundle(app, &resource_dir, &runtime_backend_dir)?;
             return Ok(runtime_backend_dir);
         }
     }
@@ -142,7 +332,7 @@ fn resolve_backend_dir(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf, S
 }
 
 fn resource_embedded_python_dir(app: &AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok().map(|dir| dir.join("python-embed"))
+    resource_subdir(app, "python-embed")
 }
 
 fn runtime_embedded_python_dir(runtime_dir: &Path) -> PathBuf {
@@ -324,6 +514,11 @@ fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path, runtime_dir: &Path) 
         .into_iter()
         .find(|candidate| candidate.exists())
     {
+        if !backend_dependencies_ready(backend_dir) {
+            let _ = fs::remove_file(backend_deps_stamp_path(backend_dir));
+            install_requirements_command(&existing, backend_dir)?;
+            mark_backend_dependencies_ready(backend_dir)?;
+        }
         return Ok(Some(existing.to_string_lossy().to_string()));
     }
 
@@ -347,7 +542,9 @@ fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path, runtime_dir: &Path) 
         .find(|candidate| candidate.exists())
         .ok_or_else(|| "Backend venv created, but python executable was not found".to_string())?;
 
+    let _ = fs::remove_file(backend_deps_stamp_path(backend_dir));
     install_requirements_command(&venv_python, backend_dir)?;
+    mark_backend_dependencies_ready(backend_dir)?;
     Ok(Some(venv_python.to_string_lossy().to_string()))
 }
 
@@ -381,6 +578,23 @@ pub fn start_backend(
     ensure_runtime_dirs(&runtime_dir)?;
     let backend_dir = resolve_backend_dir(&app, &runtime_dir)?;
 
+    if backend_port_is_open() {
+        release_backend_start_lock(&backend_dir);
+        let last_error = state
+            .last_error
+            .lock()
+            .map_err(|_| "Backend mutex poisoned")?
+            .clone();
+        return Ok(snapshot_status(
+            true,
+            "running",
+            &backend_dir,
+            &runtime_dir,
+            None,
+            last_error,
+        ));
+    }
+
     {
         let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
         if let Some(child) = child_guard.as_mut() {
@@ -407,57 +621,117 @@ pub fn start_backend(
         }
     }
 
-    let python_path = ensure_backend_venv(&app, &backend_dir, &runtime_dir)?;
-    let python_cmd = python_path
-        .clone()
-        .or_else(|| resolve_python(&app, &backend_dir, &runtime_dir))
-        .ok_or_else(|| "Unable to resolve Python runtime. Prepare python-embed or install system Python with venv support.".to_string())?;
+    if backend_start_locked(&backend_dir) {
+        let last_error = state
+            .last_error
+            .lock()
+            .map_err(|_| "Backend mutex poisoned")?
+            .clone();
+        return Ok(snapshot_status(
+            false,
+            "starting",
+            &backend_dir,
+            &runtime_dir,
+            None,
+            last_error,
+        ));
+    }
 
-    let mut command = Command::new(&python_cmd);
-    command.arg(backend_dir.join("server.py"));
-    command.current_dir(&backend_dir);
-    command.env("PYTHONUNBUFFERED", "1");
-    command.env("VOICESCRIBE_ROOT", runtime_dir.clone());
-    command.env("VOICESCRIBE_RUNTIME_DIR", &runtime_dir);
-    command.env("VOICESCRIBE_MODEL_DIR", runtime_dir.join("models"));
-    command.env("VOICESCRIBE_CONFIG_DIR", runtime_dir.join("config"));
-    command.env(
-        "VOICESCRIBE_SPEAKER_DIR",
-        runtime_dir.join("data").join("speakers"),
-    );
-
-    match command.spawn() {
-        Ok(child) => {
-            *state.child.lock().map_err(|_| "Backend mutex poisoned")? = Some(child);
-            *state
+    {
+        let mut starting_guard = state.starting.lock().map_err(|_| "Backend mutex poisoned")?;
+        if *starting_guard {
+            let last_error = state
                 .last_error
                 .lock()
-                .map_err(|_| "Backend mutex poisoned")? = None;
-            Ok(snapshot_status(
-                true,
+                .map_err(|_| "Backend mutex poisoned")?
+                .clone();
+            return Ok(snapshot_status(
+                false,
                 "starting",
                 &backend_dir,
                 &runtime_dir,
-                Some(python_cmd),
                 None,
-            ))
+                last_error,
+            ));
         }
-        Err(err) => {
-            let message = format!("Failed to start backend: {err}");
-            *state
-                .last_error
-                .lock()
-                .map_err(|_| "Backend mutex poisoned")? = Some(message.clone());
-            Ok(snapshot_status(
-                false,
-                "error",
-                &backend_dir,
-                &runtime_dir,
-                Some(python_cmd),
-                Some(message),
-            ))
-        }
+        *starting_guard = true;
     }
+
+    let lock_acquired = acquire_backend_start_lock(&backend_dir)?;
+    if !lock_acquired {
+        *state.starting.lock().map_err(|_| "Backend mutex poisoned")? = false;
+        let last_error = state
+            .last_error
+            .lock()
+            .map_err(|_| "Backend mutex poisoned")?
+            .clone();
+        return Ok(snapshot_status(
+            false,
+            "starting",
+            &backend_dir,
+            &runtime_dir,
+            None,
+            last_error,
+        ));
+    }
+
+    let start_result = (|| {
+        let python_path = ensure_backend_venv(&app, &backend_dir, &runtime_dir)?;
+        let python_cmd = python_path
+            .clone()
+            .or_else(|| resolve_python(&app, &backend_dir, &runtime_dir))
+            .ok_or_else(|| "Unable to resolve Python runtime. Prepare python-embed or install system Python with venv support.".to_string())?;
+
+        let mut command = Command::new(&python_cmd);
+        command.arg(backend_dir.join("server.py"));
+        command.current_dir(&backend_dir);
+        command.env("PYTHONUNBUFFERED", "1");
+        command.env("VOICESCRIBE_ROOT", runtime_dir.clone());
+        command.env("VOICESCRIBE_RUNTIME_DIR", &runtime_dir);
+        command.env("VOICESCRIBE_MODEL_DIR", runtime_dir.join("models"));
+        command.env("VOICESCRIBE_CONFIG_DIR", runtime_dir.join("config"));
+        command.env(
+            "VOICESCRIBE_SPEAKER_DIR",
+            runtime_dir.join("data").join("speakers"),
+        );
+
+        match command.spawn() {
+            Ok(child) => {
+                *state.child.lock().map_err(|_| "Backend mutex poisoned")? = Some(child);
+                *state
+                    .last_error
+                    .lock()
+                    .map_err(|_| "Backend mutex poisoned")? = None;
+                Ok(snapshot_status(
+                    true,
+                    "starting",
+                    &backend_dir,
+                    &runtime_dir,
+                    Some(python_cmd),
+                    None,
+                ))
+            }
+            Err(err) => {
+                release_backend_start_lock(&backend_dir);
+                let message = format!("Failed to start backend: {err}");
+                *state
+                    .last_error
+                    .lock()
+                    .map_err(|_| "Backend mutex poisoned")? = Some(message.clone());
+                Ok(snapshot_status(
+                    false,
+                    "error",
+                    &backend_dir,
+                    &runtime_dir,
+                    Some(python_cmd),
+                    Some(message),
+                ))
+            }
+        }
+    })();
+
+    *state.starting.lock().map_err(|_| "Backend mutex poisoned")? = false;
+    start_result
 }
 
 #[tauri::command]
@@ -473,7 +747,10 @@ pub fn stop_backend(
         let _ = child.kill();
         let _ = child.wait();
     }
+    let _ = kill_backend_processes(&backend_dir);
     *child_guard = None;
+    *state.starting.lock().map_err(|_| "Backend mutex poisoned")? = false;
+    release_backend_start_lock(&backend_dir);
     Ok(snapshot_status(
         false,
         "stopped",
@@ -496,18 +773,23 @@ pub fn backend_status(
     let backend_seed = resource_backend_dir(&app).unwrap_or_else(dev_backend_dir);
     let runtime_dir = resolve_runtime_dir(&app, &backend_seed)?;
     let backend_dir = resolve_backend_dir(&app, &runtime_dir)?;
-    let running = {
-        let mut child_guard = state.child.lock().map_err(|_| "Backend mutex poisoned")?;
-        if let Some(child) = child_guard.as_mut() {
-            matches!(child.try_wait(), Ok(None))
-        } else {
-            false
-        }
-    };
+    let running = backend_port_is_open();
+    let starting = backend_start_locked(&backend_dir)
+        || *state.starting.lock().map_err(|_| "Backend mutex poisoned")?;
+
+    if running {
+        release_backend_start_lock(&backend_dir);
+    }
 
     Ok(snapshot_status(
         running,
-        if running { "running" } else { "idle" },
+        if running {
+            "running"
+        } else if starting {
+            "starting"
+        } else {
+            "idle"
+        },
         &backend_dir,
         &runtime_dir,
         None,
@@ -583,7 +865,9 @@ pub async fn transcribe(
 #[cfg(test)]
 mod tests {
     use super::{
-        enable_embedded_site_import, extract_embedded_python_zip, runtime_embedded_python_dir,
+        backend_bundle_sync_required_for_version, enable_embedded_site_import,
+        extract_embedded_python_zip, runtime_embedded_python_dir,
+        should_use_dev_project_tree_for_paths,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -657,6 +941,57 @@ mod tests {
         assert!(!updated.contains("#import site"));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dev_tree_detection_prefers_source_root_when_executable_is_inside_repo() {
+        let root = temp_test_dir("dev-tree");
+        let exe = root
+            .join("tauri-app")
+            .join("src-tauri")
+            .join("target")
+            .join("release")
+            .join("voicescribe-desktop.exe");
+
+        fs::create_dir_all(root.join("backend")).expect("create backend dir");
+        fs::create_dir_all(exe.parent().expect("exe parent")).expect("create exe parent");
+        fs::write(&exe, b"fake-exe").expect("write exe");
+
+        assert!(should_use_dev_project_tree_for_paths(&exe, &root, false, false));
+        assert!(!should_use_dev_project_tree_for_paths(&exe, &root, false, true));
+        assert!(should_use_dev_project_tree_for_paths(&exe, &root, true, true));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dev_tree_detection_rejects_executable_outside_source_tree() {
+        let root = temp_test_dir("packaged-root");
+        let packaged_dir = temp_test_dir("packaged-exe");
+        let packaged = packaged_dir.join("VoiceScribe.exe");
+
+        fs::create_dir_all(root.join("backend")).expect("create backend dir");
+        fs::create_dir_all(&packaged_dir).expect("create packaged parent");
+        fs::write(&packaged, b"fake-exe").expect("write packaged exe");
+
+        assert!(!should_use_dev_project_tree_for_paths(&packaged, &root, false, false));
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&packaged_dir);
+    }
+
+    #[test]
+    fn backend_bundle_sync_required_respects_stamp_file() {
+        let dir = temp_test_dir("bundle-stamp");
+        fs::create_dir_all(&dir).expect("create dir");
+        fs::write(dir.join("server.py"), b"print('ok')").expect("write server");
+        fs::write(dir.join(".bundle-version"), "0.2.0").expect("write stamp");
+
+        assert!(!backend_bundle_sync_required_for_version(&dir, "0.2.0", false));
+        assert!(backend_bundle_sync_required_for_version(&dir, "0.2.1", false));
+        assert!(backend_bundle_sync_required_for_version(&dir, "0.2.0", true));
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 

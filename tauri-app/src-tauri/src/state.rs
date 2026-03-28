@@ -5,6 +5,7 @@ use std::sync::Mutex;
 #[derive(Default)]
 pub struct BackendProcessState {
     pub child: Mutex<Option<Child>>,
+    pub starting: Mutex<bool>,
     pub last_error: Mutex<Option<String>>,
 }
 
