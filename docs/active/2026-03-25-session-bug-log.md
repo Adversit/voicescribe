@@ -127,3 +127,31 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
 - 原因：后端只收口了 `MODEL_CACHE_DIR` 与部分显式下载接口；`FunASR AutoModel`、`modelscope`、`datasets`、`huggingface_hub` 的默认缓存环境变量没有在足够早的阶段统一覆盖，且说话人链路仍直接把模型 ID 交给第三方库自行解析。
 - 处理：需要把运行时缓存根前置收口到项目内目录，并让 FunASR / 说话人链路优先使用仓库 `models/` 下的显式本地模型路径。
 - 当前状态：已补齐运行时缓存环境变量并改为优先解析仓库 `models/` 下的本地模型路径；实测本轮加载期间 `C:\Users\DingK\.cache\modelscope` 与 `C:\Users\DingK\.cache\huggingface` 时间戳未继续变化，活动写入落在仓库 `models/`。仓库内仍存在 `models\models\...` 的冗余层级，这是 ModelScope 内部依赖模型的本地嵌套路径，不是回退到 C 盘默认缓存。
+
+## 46. 录音时间过短时，悬浮窗会卡在“正在转录”
+- 表现：点击快捷键开始后立刻停止，UI 会进入“正在转录”并停住，未及时收口。
+- 原因：前端 `finishRecordingSession()` 在停止后无条件先切到 `transcribing`，没有把“过短录音”作为可前置拦截的失败态处理。
+- 处理：补充最短有效录音时长判断；过短时直接取消本次录音、关闭悬浮窗并提示，而不是继续进入转录链路。
+
+## 47. 录音悬浮窗仍残留米色底板，且录音态操作图标不符合参考
+- 表现：overlay 页面仍会出现整块米色背景；录音态右侧操作仍不是用户要求的完成对勾。
+- 原因：overlay 页面复用了主界面的全局 `body` 背景色；录音态按钮图标仍沿用停止方块语义，没有按参考图收口。
+- 处理：将 overlay 页面背景改为完全透明，录音态改为黑色胶囊、左侧叉号、右侧对勾，仅保留中间真实波纹。
+
+## 48. 应用打开后偶发出现 `Failed to fetch`
+- 表现：桌面端打开后，界面会直接提示 `Failed to fetch`，影响启动体验。
+- 原因：前端在后端尚未完全 ready 时就开始请求 `/health`、`/models`、`/speakers` 等接口，浏览器层原始网络错误被直接透传到 UI。
+- 处理：需要补充启动后的后端 ready 轮询，并把原始 `Failed to fetch` 统一映射成明确的中文提示；页面侧的模型/说话人/历史请求也应避免在 `backendConnected=false` 时抢跑。
+
+## 49. `jieba.cache` 仍写入 `%LOCALAPPDATA%\Temp`，与“模型和缓存统一归仓库 models/”约束冲突
+- 表现：FunASR 加载时日志显示 `Loading model from cache C:\Users\DingK\AppData\Local\Temp\jieba.cache`。
+- 影响：即使主模型目录已收口到仓库 `models/`，运行时分词缓存仍会持续占用 C 盘空间，且不满足“所有模型相关缓存统一归仓库目录”的约束。
+- 原因：当前只收口了 `modelscope` / `huggingface` / `transformers` / `torch` 相关环境变量，没有显式重定向 `jieba` 的缓存文件位置。
+- 处理：在后端启动阶段显式把 `jieba` 缓存目录重定向到仓库 `models/jieba/`，并迁移历史 `%LOCALAPPDATA%\Temp\jieba.cache`；同时清点并迁移历史 `C:\Users\DingK\.cache\modelscope` 与 `C:\Users\DingK\.cache\huggingface` 后再清理 C 盘残留缓存。
+- 当前状态：已完成历史 C 盘缓存迁移与清理；当前 `jieba` 已从仓库 `models/jieba/jieba.cache` 加载，`C:\Users\DingK\.cache\modelscope`、`C:\Users\DingK\.cache\huggingface` 与 `%LOCALAPPDATA%\Temp\jieba.cache` 均已不存在。
+
+## 50. 冷启动后可能同时出现系统 Python 与 venv 两个 `server.py` 进程
+- 表现：清空 8765 后重新走 `scripts/start_windows_system.bat --skip-build`，进程列表中会同时出现 `backend\venv\Scripts\python.exe ... server.py` 与 `D:\Anaconda3\python.exe ... server.py`；实际监听 8765 的是系统 Python 进程。
+- 影响：虽然当前缓存迁移与模型目录逻辑已经跟随仓库代码生效，但后端进程来源不唯一，会给“到底由哪套 Python 运行时提供服务”带来不确定性。
+- 原因：待查。初步现象说明桌面端启动链中仍存在 system Python 回退或重复拉起后端的路径。
+- 处理：后续需要单独收口“桌面端只保留一份后端进程，且优先使用 `backend/venv` 或明确指定运行时”的逻辑。

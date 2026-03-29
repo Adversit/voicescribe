@@ -1,6 +1,7 @@
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +52,12 @@ HUGGINGFACE_HUB_CACHE = (HF_HOME_DIR / "hub").resolve()
 HF_DATASETS_CACHE = (HF_HOME_DIR / "datasets").resolve()
 TRANSFORMERS_CACHE_DIR = (HF_HOME_DIR / "transformers").resolve()
 TORCH_CACHE_DIR = (MODEL_CACHE_DIR / "torch").resolve()
+JIEBA_CACHE_DIR = (MODEL_CACHE_DIR / "jieba").resolve()
+JIEBA_CACHE_FILE = (JIEBA_CACHE_DIR / "jieba.cache").resolve()
+
+LEGACY_MODELSCOPE_CACHE_DIR = (Path.home() / ".cache" / "modelscope").resolve()
+LEGACY_HF_CACHE_DIR = (Path.home() / ".cache" / "huggingface").resolve()
+LEGACY_JIEBA_CACHE_FILE = (Path(tempfile.gettempdir()) / "jieba.cache").resolve()
 
 WHISPER_CPP_MODEL_DIR = Path(
     os.environ.get(
@@ -81,6 +88,8 @@ def ensure_runtime_env() -> None:
     os.environ.setdefault("HF_DATASETS_CACHE", str(HF_DATASETS_CACHE))
     os.environ.setdefault("TRANSFORMERS_CACHE", str(TRANSFORMERS_CACHE_DIR))
     os.environ.setdefault("TORCH_HOME", str(TORCH_CACHE_DIR))
+    os.environ.setdefault("VOICESCRIBE_JIEBA_CACHE_DIR", str(JIEBA_CACHE_DIR))
+    os.environ.setdefault("VOICESCRIBE_JIEBA_CACHE_FILE", str(JIEBA_CACHE_FILE))
 
 
 def resolve_modelscope_model_dir(model: str, revision: Optional[str] = None) -> str:
@@ -112,11 +121,108 @@ def ensure_dirs() -> None:
         HF_DATASETS_CACHE,
         TRANSFORMERS_CACHE_DIR,
         TORCH_CACHE_DIR,
+        JIEBA_CACHE_DIR,
         SPEAKER_DATA_DIR,
         HISTORY_DATA_DIR,
         CONFIG_DIR,
     ]:
         path.mkdir(parents=True, exist_ok=True)
+
+
+def _merge_move_tree(source: Path, target: Path) -> list[str]:
+    messages: list[str] = []
+    if not source.exists():
+        return messages
+
+    target.mkdir(parents=True, exist_ok=True)
+    for entry in source.iterdir():
+        destination = target / entry.name
+        if entry.is_dir():
+            if destination.exists() and destination.is_dir():
+                messages.extend(_merge_move_tree(entry, destination))
+                if entry.exists():
+                    try:
+                        next(entry.iterdir())
+                    except StopIteration:
+                        entry.rmdir()
+            elif destination.exists():
+                messages.append(f"skip_conflict={entry}->{destination}")
+            else:
+                shutil.move(str(entry), str(destination))
+                messages.append(f"move_dir={entry}->{destination}")
+        else:
+            if destination.exists():
+                if entry.name == ".msc":
+                    entry.unlink()
+                    messages.append(f"drop_legacy_manifest={entry}")
+                    continue
+
+                same_size = False
+                try:
+                    same_size = destination.stat().st_size == entry.stat().st_size
+                except OSError:
+                    same_size = False
+
+                if same_size:
+                    entry.unlink()
+                    messages.append(f"drop_duplicate_file={entry}")
+                else:
+                    messages.append(f"skip_conflict={entry}->{destination}")
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(entry), str(destination))
+                messages.append(f"move_file={entry}->{destination}")
+
+    if source.exists():
+        try:
+            next(source.iterdir())
+        except StopIteration:
+            source.rmdir()
+
+    return messages
+
+
+def migrate_legacy_caches() -> list[str]:
+    ensure_dirs()
+    messages: list[str] = []
+    messages.extend(_merge_move_tree(LEGACY_MODELSCOPE_CACHE_DIR, MODEL_CACHE_DIR))
+    messages.extend(_merge_move_tree(LEGACY_HF_CACHE_DIR, HF_HOME_DIR))
+
+    if LEGACY_JIEBA_CACHE_FILE.exists():
+        JIEBA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        if JIEBA_CACHE_FILE.exists():
+            same_size = JIEBA_CACHE_FILE.stat().st_size == LEGACY_JIEBA_CACHE_FILE.stat().st_size
+            if same_size:
+                LEGACY_JIEBA_CACHE_FILE.unlink()
+                messages.append(f"drop_duplicate_file={LEGACY_JIEBA_CACHE_FILE}")
+            else:
+                backup = JIEBA_CACHE_DIR / "jieba.legacy.cache"
+                shutil.move(str(LEGACY_JIEBA_CACHE_FILE), str(backup))
+                messages.append(f"move_file={LEGACY_JIEBA_CACHE_FILE}->{backup}")
+        else:
+            shutil.move(str(LEGACY_JIEBA_CACHE_FILE), str(JIEBA_CACHE_FILE))
+            messages.append(f"move_file={LEGACY_JIEBA_CACHE_FILE}->{JIEBA_CACHE_FILE}")
+
+    return messages
+
+
+def configure_jieba_cache() -> None:
+    ensure_dirs()
+    try:
+        import jieba
+
+        jieba.dt.tmp_dir = str(JIEBA_CACHE_DIR)
+        jieba.dt.cache_file = str(JIEBA_CACHE_FILE)
+
+        try:
+            import jieba.posseg as posseg
+
+            posseg.dt.tmp_dir = str(JIEBA_CACHE_DIR)
+            posseg.dt.cache_file = str(JIEBA_CACHE_FILE)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 def find_whisper_cli() -> Optional[str]:

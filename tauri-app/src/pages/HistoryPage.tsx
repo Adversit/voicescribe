@@ -21,13 +21,18 @@ export function HistoryPage() {
   const deleteHistoryRecord = useAppStore((state) => state.deleteHistoryRecord);
   const clearHistoryRecords = useAppStore((state) => state.clearHistoryRecords);
   const setToast = useAppStore((state) => state.setToast);
+  const backendConnected = useAppStore((state) => state.backendConnected);
   const [filter, setFilter] = useState<"all" | HistoryMode>("all");
 
   useEffect(() => {
+    if (!backendConnected) {
+      return;
+    }
+
     void refreshHistory().catch((error) => {
       setToast(error instanceof Error ? error.message : "加载历史记录失败");
     });
-  }, [refreshHistory, setToast]);
+  }, [backendConnected, refreshHistory, setToast]);
 
   const filteredRecords = useMemo(() => {
     if (filter === "all") {

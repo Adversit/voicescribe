@@ -32,6 +32,15 @@ body {
   background: var(--surface-bg);
   color: var(--text);
 }
+body.overlay-window {
+  background: transparent !important;
+  color: #ffffff;
+  overflow: hidden;
+}
+body.overlay-window #overlay-root {
+  min-height: 100vh;
+  background: transparent;
+}
 button,
 input,
 select,

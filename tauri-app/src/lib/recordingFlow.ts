@@ -1,7 +1,8 @@
-﻿import * as backendApi from "../api/backend";
+import * as backendApi from "../api/backend";
 import {
   cancelRecording,
   deleteAudioFile,
+  getRecordingStatus,
   outputText,
   debugHotkeyLog,
   startRecording,
@@ -14,12 +15,29 @@ import { useAppStore } from "../stores/appStore";
 import type { HistoryRecord, HistorySpeakerEntry, TranscribeResult } from "../types";
 
 let cancelResetTimer: number | null = null;
+const MIN_RECORDING_DURATION_MS_BY_ENGINE: Partial<Record<string, number>> = {
+  funasr: 1000,
+};
+const TOO_SHORT_RECORDING_MESSAGE = "录音时间过短，请至少录制 1 秒后再停止";
+const TOO_SHORT_RECORDING_PATTERNS = [
+  /too short/i,
+  /sampling_points.*short/i,
+  /audio.*short/i,
+  /recording.*short/i,
+  /duration.*short/i,
+  /录音时间过短/,
+  /时长过短/,
+];
 
 function clearCancelResetTimer() {
   if (cancelResetTimer !== null) {
     window.clearTimeout(cancelResetTimer);
     cancelResetTimer = null;
   }
+}
+
+function isTooShortRecordingError(message: string) {
+  return TOO_SHORT_RECORDING_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 function createSpeakerEntries(result: TranscribeResult): HistorySpeakerEntry[] {
@@ -136,6 +154,24 @@ export async function beginRecordingSession() {
 
 export async function finishRecordingSession() {
   const store = useAppStore.getState();
+  const settings = store.settings;
+  const minRecordingDurationMs = MIN_RECORDING_DURATION_MS_BY_ENGINE[settings.selectedEngine] ?? 0;
+  const status = minRecordingDurationMs > 0
+    ? await getRecordingStatus().catch(() => null)
+    : null;
+
+  if (status && status.duration * 1000 < minRecordingDurationMs) {
+    await cancelRecording().catch(() => undefined);
+    cancelRealtimeStreamSession();
+    store.setRecording(false);
+    store.setTranscribing(false);
+    store.setRecordingCancelled(false);
+    store.setAudioLevel(0);
+    store.setToast(TOO_SHORT_RECORDING_MESSAGE);
+    await hideOverlay();
+    return;
+  }
+
   store.setRecording(false);
   store.setTranscribing(true);
   await pushOverlayState({
@@ -148,11 +184,10 @@ export async function finishRecordingSession() {
 
   try {
     const audioPath = await stopRecording();
-    if (useAppStore.getState().settings.enableStreaming) {
+    if (settings.enableStreaming) {
       await stopRealtimeStreamSession();
     }
 
-    const settings = useAppStore.getState().settings;
     const result = await transcribeAudio({
       audioPath,
       engine: settings.selectedEngine,
@@ -173,6 +208,13 @@ export async function finishRecordingSession() {
         selectedHistoryId: records[0]?.id ?? null,
       });
     });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isTooShortRecordingError(message)) {
+      useAppStore.getState().setToast(TOO_SHORT_RECORDING_MESSAGE);
+      return;
+    }
+    throw error;
   } finally {
     const nextStore = useAppStore.getState();
     nextStore.setTranscribing(false);
@@ -180,7 +222,6 @@ export async function finishRecordingSession() {
     await hideOverlay();
   }
 }
-
 export async function abortRecordingSession() {
   clearCancelResetTimer();
 

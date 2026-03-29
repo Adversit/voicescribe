@@ -1,6 +1,13 @@
 import { useEffect } from "react";
 import { useAppStore } from "../stores/appStore";
 
+const BACKEND_READY_TIMEOUT_MS = 15000;
+const BACKEND_READY_POLL_MS = 500;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function useBackendConnection() {
   const checkConnection = useAppStore((state) => state.checkConnection);
   const startBackend = useAppStore((state) => state.startBackend);
@@ -8,6 +15,18 @@ export function useBackendConnection() {
 
   useEffect(() => {
     let disposed = false;
+
+    const waitForBackendReady = async () => {
+      const deadline = Date.now() + BACKEND_READY_TIMEOUT_MS;
+      while (!disposed && Date.now() < deadline) {
+        await checkConnection().catch(() => undefined);
+        if (useAppStore.getState().backendConnected) {
+          return true;
+        }
+        await sleep(BACKEND_READY_POLL_MS);
+      }
+      return false;
+    };
 
     const bootstrap = async () => {
       try {
@@ -24,6 +43,10 @@ export function useBackendConnection() {
       if (!connected) {
         try {
           await startBackend();
+          const ready = await waitForBackendReady();
+          if (!ready && !disposed) {
+            setToast("后端启动中，请稍后再试");
+          }
         } catch (error) {
           setToast(
             error instanceof Error ? error.message : "后端启动失败，请检查 Python 环境",

@@ -839,7 +839,8 @@ pub async fn transcribe(
             .await
         {
             Ok(response) => {
-                if response.status().is_success() {
+                let status = response.status();
+                if status.is_success() {
                     return response
                         .json::<TranscribeResult>()
                         .await
@@ -850,6 +851,13 @@ pub async fn transcribe(
                     .text()
                     .await
                     .unwrap_or_else(|_| "backend returned error".to_string());
+
+                if status.is_client_error()
+                    && status != reqwest::StatusCode::REQUEST_TIMEOUT
+                    && status != reqwest::StatusCode::TOO_MANY_REQUESTS
+                {
+                    return Err(last_error);
+                }
             }
             Err(err) => {
                 last_error = err.to_string();

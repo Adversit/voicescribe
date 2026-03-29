@@ -16,12 +16,19 @@ export function SpeakerSettings() {
   const removeSpeaker = useAppStore((state) => state.removeSpeaker);
   const addSpeaker = useAppStore((state) => state.addSpeaker);
   const setToast = useAppStore((state) => state.setToast);
+  const backendConnected = useAppStore((state) => state.backendConnected);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
-    void refreshSpeakers();
-  }, [refreshSpeakers]);
+    if (!backendConnected) {
+      return;
+    }
+
+    void refreshSpeakers().catch((error) => {
+      setToast(error instanceof Error ? error.message : "加载说话人列表失败");
+    });
+  }, [backendConnected, refreshSpeakers, setToast]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();

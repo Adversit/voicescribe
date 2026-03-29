@@ -33,9 +33,13 @@ from pydantic import BaseModel
 import uvicorn
 from config import (
     CONFIG_DIR,
+    configure_jieba_cache,
+    HF_HOME_DIR,
+    JIEBA_CACHE_FILE,
     MODEL_CACHE_DIR,
     MODEL_REGISTRY_PATH,
     MODELSCOPE_CACHE,
+    migrate_legacy_caches,
     WHISPER_CPP_MODEL_DIR,
     ensure_dirs,
     ensure_runtime_env,
@@ -43,6 +47,15 @@ from config import (
     HISTORY_STORAGE_PATH,
 )
 from runtime_probe import prepare_windows_runtime, probe_funasr_runtime, probe_torch_runtime
+
+ensure_runtime_env()
+ensure_dirs()
+prepare_windows_runtime()
+MIGRATION_MESSAGES = migrate_legacy_caches()
+configure_jieba_cache()
+if MIGRATION_MESSAGES:
+    for message in MIGRATION_MESSAGES:
+        print(f"[CacheMigration] {message}")
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -105,8 +118,6 @@ except ImportError as e:
 ensure_runtime_env()
 os.environ.setdefault("MODELSCOPE_CACHE", MODELSCOPE_CACHE)
 os.environ.setdefault("VOICESCRIBE_CONFIG_DIR", str(CONFIG_DIR))
-ensure_dirs()
-prepare_windows_runtime()
 
 # 下载状态缓存
 model_downloads = {}
@@ -1412,6 +1423,12 @@ async def health_check():
             "torch": TORCH_RUNTIME,
             "funasr": FUNASR_RUNTIME,
         },
+        "cache_paths": {
+            "model_root": str(MODEL_CACHE_DIR),
+            "huggingface_root": str(HF_HOME_DIR),
+            "jieba_cache_file": str(JIEBA_CACHE_FILE),
+        },
+        "cache_migration": MIGRATION_MESSAGES[-20:],
     }
 
 
@@ -1448,4 +1465,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

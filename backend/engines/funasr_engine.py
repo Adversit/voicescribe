@@ -5,7 +5,7 @@ FunASR Engine
 
 from typing import Dict, Any, Optional
 
-from config import ensure_runtime_env, resolve_modelscope_model_dir
+from config import configure_jieba_cache, ensure_runtime_env, resolve_modelscope_model_dir
 from runtime_probe import prepare_windows_runtime
 
 
@@ -33,6 +33,7 @@ class FunASREngine:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self.MODELS.keys())}")
 
         ensure_runtime_env()
+        configure_jieba_cache()
         prepare_windows_runtime()
         from funasr import AutoModel
 

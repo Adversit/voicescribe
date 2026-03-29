@@ -1,4 +1,4 @@
-﻿import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { BackendRuntimeStatus, HotkeyBinding, TranscribeResult } from "../types";
 
 export async function startBackend(): Promise<BackendRuntimeStatus> {
@@ -39,6 +39,14 @@ export async function stopRecording(): Promise<string> {
 
 export async function cancelRecording(): Promise<void> {
   await invoke("cancel_recording");
+}
+
+export async function getRecordingStatus(): Promise<{
+  is_recording: boolean;
+  duration: number;
+  audio_level: number;
+}> {
+  return invoke("get_recording_status");
 }
 
 export async function deleteAudioFile(path: string): Promise<void> {

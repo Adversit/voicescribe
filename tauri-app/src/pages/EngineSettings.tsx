@@ -49,14 +49,21 @@ export function EngineSettings() {
   const updateSettings = useAppStore((state) => state.updateSettings);
   const availableEngines = useAppStore((state) => state.availableEngines);
   const setToast = useAppStore((state) => state.setToast);
+  const backendConnected = useAppStore((state) => state.backendConnected);
   const models = useModelStore((state) => state.models);
   const refreshModels = useModelStore((state) => state.refresh);
   const startDownload = useModelStore((state) => state.startDownload);
   const deleteModel = useModelStore((state) => state.deleteModel);
 
   useEffect(() => {
-    void refreshModels();
-  }, [refreshModels]);
+    if (!backendConnected) {
+      return;
+    }
+
+    void refreshModels().catch((error) => {
+      setToast(error instanceof Error ? error.message : "加载模型列表失败");
+    });
+  }, [backendConnected, refreshModels, setToast]);
 
   const selectedEngineInfo = availableEngines.find(
     (engine) => engine.name === settings.selectedEngine,

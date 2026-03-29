@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { emitTo, listen } from "@tauri-apps/api/event";
-import { LoaderCircle, Square, X } from "lucide-react";
+import { Check, LoaderCircle, X } from "lucide-react";
 import type { OverlayMode, OverlayStatePayload } from "../lib/overlayWindow";
 
 const HISTORY_SIZE = 13;
 const IDLE_LEVEL = 0.08;
 const CANCEL_LABEL = "取消录音";
-const STOP_LABEL = "停止录音";
+const STOP_LABEL = "完成录音";
 const TRANSCRIBING_LABEL = "正在转录";
 const CANCELLED_LABEL = "已取消录音";
 
@@ -71,7 +71,7 @@ function IconButton(props: {
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={`inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] transition ${baseClass} ${disabled ? "cursor-not-allowed opacity-35" : ""}`}
+      className={`inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] transition ${baseClass} ${disabled ? "cursor-not-allowed opacity-35" : ""}`}
     >
       {children}
     </button>
@@ -161,12 +161,12 @@ export function RecordingOverlay() {
   return (
     <div className="pointer-events-none flex min-h-screen items-end justify-center bg-transparent px-4 pb-8">
       {mode === "recording" ? (
-        <div className="pointer-events-auto flex min-w-[290px] items-center gap-3 rounded-full border border-white/10 bg-[rgba(10,10,10,0.96)] px-3 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+        <div className="pointer-events-auto flex min-w-[248px] items-center gap-2.5 rounded-full border border-white/10 bg-black px-2.5 py-2.5 text-white shadow-[0_16px_36px_rgba(0,0,0,0.34)]">
           <IconButton label={CANCEL_LABEL} disabled={!canCancel} variant="muted" onClick={handleCancel}>
             <X className="h-5 w-5" strokeWidth={2.3} />
           </IconButton>
 
-          <div className="flex min-w-[118px] flex-1 flex-col items-center justify-center gap-1">
+          <div className="flex min-w-[112px] flex-1 flex-col items-center justify-center gap-1">
             <RealWaveform levels={levels} />
             <div className="text-[10px] font-medium tracking-[0.24em] text-white/58">
               {formatDuration(elapsed)}
@@ -174,18 +174,18 @@ export function RecordingOverlay() {
           </div>
 
           <IconButton label={STOP_LABEL} disabled={!canStop} variant="light" onClick={handleStop}>
-            <Square className="h-[18px] w-[18px] fill-current" strokeWidth={1.8} />
+            <Check className="h-5 w-5" strokeWidth={2.8} />
           </IconButton>
         </div>
       ) : mode === "transcribing" ? (
-        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-white/10 bg-[rgba(12,12,12,0.95)] px-5 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.30)] backdrop-blur-xl">
+        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-white/10 bg-black px-5 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.30)]">
           <LoaderCircle className="h-4 w-4 animate-spin text-white/78" strokeWidth={2.2} />
           <div className="text-sm font-medium tracking-[0.06em] text-white/86">{TRANSCRIBING_LABEL}</div>
         </div>
       ) : (
-        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[#b56d2f]/30 bg-[rgba(40,24,8,0.94)] px-4 py-2.5 text-[#ffd7ae] shadow-[0_14px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#ffb25c]" />
-          <div className="text-sm font-medium">{CANCELLED_LABEL}</div>
+        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-black px-4 py-2.5 text-white shadow-[0_14px_30px_rgba(0,0,0,0.28)]">
+          <X className="h-4 w-4 text-white/78" strokeWidth={2.4} />
+          <div className="text-sm font-medium text-white/86">{CANCELLED_LABEL}</div>
         </div>
       )}
     </div>

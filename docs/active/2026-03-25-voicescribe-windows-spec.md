@@ -168,6 +168,13 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 - `cargo check`
 - `npm run tauri:build`
 - `/health`
+
+## 2026-03-29 模型与运行时缓存目录补充
+
+1. 运行期所有与模型相关的下载、加载、索引、词典和推理缓存，统一落在仓库根 `models/` 下。
+2. 不允许继续把 `modelscope`、`huggingface`、`transformers`、`torch`、`jieba` 等缓存写到 `C:\Users\<user>\.cache`、`%LOCALAPPDATA%\Temp` 或其他用户目录默认路径。
+3. 若历史运行已在 C 盘默认缓存目录生成模型文件，启动时应优先迁移到仓库 `models/` 下的对应目录，再清理 C 盘残留缓存。
+4. `/health`、日志与人工测试记录需要能证明当前运行链路已从仓库 `models/` 读取，不再依赖 C 盘默认缓存。
 - `/engines`
 - `/models`
 - 真实下载/删除主链路
