@@ -242,8 +242,23 @@ class SpeakerDiarizer:
 
         processed_audio_path, temp_audio_path = self._prepare_diarization_audio(audio_path)
         try:
+            audio_data, sr = self._read_audio_mono(processed_audio_path)
+            duration = (len(audio_data) / sr) if sr else 0.0
+            rms = float(np.sqrt(np.mean(np.square(audio_data)))) if len(audio_data) else 0.0
+            if duration < 0.5 or rms < 1e-4:
+                print(
+                    f"[Speaker] Skip diarization: duration={duration:.3f}s rms={rms:.6f} is too short or silent"
+                )
+                return []
+
             if self.diarization_backend == "modelscope_segmentation_clustering":
-                result = self.diarization_model(processed_audio_path)
+                try:
+                    result = self.diarization_model(processed_audio_path)
+                except AssertionError as e:
+                    if "effective audio duration is too short" in str(e).lower():
+                        print(f"[Speaker] Skip diarization: {e}")
+                        return []
+                    raise
                 raw_segments = result.get("text") if isinstance(result, dict) else result
                 results = []
                 if isinstance(raw_segments, list):
@@ -276,7 +291,6 @@ class SpeakerDiarizer:
                     os.remove(temp_audio_path)
                 except Exception:
                     pass
-
     def extract_embedding(self, audio_path: str) -> np.ndarray:
         """提取音频的声纹特征"""
         if self.sv_model is None:

@@ -222,3 +222,27 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
 - 现象：ackend/diarization/speaker.py 在 self.diarization_model(processed_audio_path) 处抛出 AssertionError: modelscope error: The effective audio duration is too short.，随后 /transcribe 返回 500，前端热键日志持续出现多次 ackend transcribe attempt -> response_error 500。
 - 结论：当前空录音或没有有效语音内容时，后端没有把“说话人分离最短有效音频长度不足”收口成可预期分支，而是直接炸成 500；前端又把它当成可重试错误，造成重复循环。
 - 下一步：在 speaker.py 和 server.py 把“空音频/过短音频/无语音内容”降级成跳过 diarization 或用户可理解的失败，不再返回 500。
+## 64. 快捷键首次成功后，后续同一物理键经常失配，表现为“要连按很多次才再次生效”
+- 现象：应用冷启动后，第一次使用当前录制保存的热键可以正常开始/停止录音；但完成一次录音后，后续再次按同一物理键时，往往需要连续按很多次才会再次命中热键。
+- 日志：`voicescribe-hotkey.log` 已确认第一次成功链路会出现 `matches_hotkey -> beginRecordingSession startRecording success -> hotkey-stop-recording -> /transcribe 200`；后续失效按键则大量表现为 `raw_modifier_event vk=164 scan=56 flags=32/128`，只有 `hotkey_candidate`，没有 `matches_hotkey`。
+- 结论：当前不是“默认热键回退”或“录音状态未复位”，而是“设置页保存的 `primaryCode=AltRight / primaryKeyCode=165`”与运行时低层 hook 收到的物理键事件并不稳定一致；现有 `hotkey.rs` 仍按裸 `vk == primary_key_code` 判断，无法稳定覆盖该物理键的后续事件形态。
+- 处理：下一步在 `tauri-app/src-tauri/src/commands/hotkey.rs` 把热键匹配从“仅看 vk”收口为“按保存的 primaryCode + scanCode/extended flag 识别物理键”，并保留当前日志，避免再靠猜测修改。
+
+## 65. 空录音 / 无有效语音进入说话人分离时仍会炸成 500，且前端会重复重试
+- 现象：用户打开录音后未说话或有效语音极短时，后端 `backend/diarization/speaker.py` 在 `self.diarization_model(processed_audio_path)` 处抛出 `AssertionError: modelscope error: The effective audio duration is too short.`，随后 `/transcribe` 返回 `500 Internal Server Error`；前端 Rust `transcribe` 命令把这类 500 当作可重试错误，日志里会连续出现多次 `backend transcribe attempt -> response_error 500`。
+- 结论：当前系统还没有把“空录音 / 过短录音 / 无有效语音”作为正常业务分支处理，而是直接落入 diarization 模型异常，既影响结果，也制造了无意义的重复请求。
+- 处理：下一步在 `backend/diarization/speaker.py` 增加音频时长与有效能量预检查，并在 `backend/server.py` 中把“无文本 / 过短音频 / diarization 最小时长不满足”降级为跳过说话人分离或返回可理解结果，不再返回 500。
+
+## 66. 空录音 / 无有效语音进入说话人分离的 500 已降级为正常返回
+- 处理：`backend/diarization/speaker.py` 现在会在进入 diarization 前先检查音频时长与 RMS；对静音、过短音频，以及 ModelScope 明确抛出的 `effective audio duration is too short`，统一跳过说话人分离并返回空分段，而不是继续抛异常。
+- 同时：`backend/server.py` 在 `enable_diarization=true` 时，如果转录结果为空文本/空 segments，会直接跳过 diarization；外部分离返回空 speaker segments 时，也不再抛 500。
+- 验证：已重启系统，并用 `.tmp-tests/silence-6s.wav` 执行 `POST /transcribe(engine=funasr, model=seaco-paraformer, enable_diarization=true)`；当前返回 `200`，结果为 `{\"text\":\"\",\"segments\":[],\"duration\":0.0,...}`，不再出现 500 循环。
+
+## 67. 热键运行时命中逻辑已开始从“旧 vk 精确匹配”迁移到“按保存的 primaryCode 识别物理键”
+- 处理：`tauri-app/src-tauri/src/commands/hotkey.rs` 已移除仅按 `primary_key_code` 的核心命中路径，改为按保存的 `primary_code` 识别物理键；并把主键属于 Alt 家族时的修饰键归一化从“只忽略当前侧”收口为“忽略整组 Alt 状态”，避免主键本身被再次算进 modifiers mismatch。
+- 当前状态：这条已完成代码替换和 `cargo check` 编译验证，但尚未完成外接键盘 `Right Alt` 的人工回归，所以暂不宣称完全验收通过。
+
+## 68. 左右 Alt 的人工验证曾混用，导致部分“热键后续失效”现象存在验证样本污染
+- 新信息：用户补充确认，之前某些人工验证场景里，录制保存时与实际回归按下时，左右 Alt 可能并不是同一侧；也就是说，之前出现的部分“第一次可用、后续又失效”现象，有可能包含“录制的是右 Alt，验证时按到了左 Alt”这一人为混淆因素。
+- 当前结论：此前关于外接键盘 Alt 命中不稳定的日志分析仍然成立，但其人工现象样本需要重新按“录制哪一侧，就只验证哪一侧”的口径再做一轮回归，避免把左右 Alt 混用误判成运行时失效。
+- 后续处理：保留当前 `primaryCode` 命中逻辑修正；下一轮热键人工验收必须显式记录为 `Left Alt` 或 `Right Alt`，不再使用泛化的“Alt”表述。

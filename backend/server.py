@@ -1202,6 +1202,7 @@ async def transcribe(
 
         diarization_done = False
         if enable_diarization:
+            has_transcribed_content = bool((result.get("text") or "").strip()) or bool(result.get("segments"))
             builtin_diarization = _extract_builtin_speaker_labels(result)
             if engine == "funasr" and builtin_diarization:
                 print(
@@ -1225,20 +1226,27 @@ async def transcribe(
                     print("[Speaker] SpeakerDiarizer unavailable, returning FunASR speaker labels only")
 
             if not diarization_done:
-                if not DIARIZATION_AVAILABLE:
-                    raise HTTPException(400, "Speaker diarization helper not available")
-
-                speaker_service = ensure_diarization_loaded()
-                if speaker_service.speakers:
-                    speaker_service.ensure_speaker_verification_loaded()
-                    print("[Speaker] Using external diarization with speaker verification mapping")
+                if not has_transcribed_content:
+                    print("[Speaker] Skip diarization: empty transcription result")
+                    diarization_done = True
                 else:
-                    print("[Speaker] Using external diarization without registered speaker mapping")
+                    if not DIARIZATION_AVAILABLE:
+                        raise HTTPException(400, "Speaker diarization helper not available")
 
-                speakers = speaker_service.diarize(tmp_path)
-                print(f"[Speaker] External diarization produced {len(speakers)} segments")
-                result = speaker_service.assign_speakers(result, speakers, audio_path=tmp_path)
-                diarization_done = True
+                    speaker_service = ensure_diarization_loaded()
+                    if speaker_service.speakers:
+                        speaker_service.ensure_speaker_verification_loaded()
+                        print("[Speaker] Using external diarization with speaker verification mapping")
+                    else:
+                        print("[Speaker] Using external diarization without registered speaker mapping")
+
+                    speakers = speaker_service.diarize(tmp_path)
+                    print(f"[Speaker] External diarization produced {len(speakers)} segments")
+                    if speakers:
+                        result = speaker_service.assign_speakers(result, speakers, audio_path=tmp_path)
+                    else:
+                        print("[Speaker] Skip diarization assignment: no effective speaker segments")
+                    diarization_done = True
 
             if not diarization_done:
                 raise HTTPException(500, "Speaker diarization requested but no diarization result was produced")

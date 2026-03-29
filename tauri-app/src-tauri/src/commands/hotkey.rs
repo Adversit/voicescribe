@@ -128,8 +128,10 @@ fn normalized_modifier_state(primary_code: &str) -> HotkeyModifiersDetailed {
         "ControlLeft" | "ControlRight" => ctrl = false,
         "ShiftLeft" | "ShiftRight" => shift = false,
         "MetaLeft" | "MetaRight" => win = false,
-        "AltLeft" => alt_left = false,
-        "AltRight" => alt_right = false,
+        "AltLeft" | "AltRight" => {
+            alt_left = false;
+            alt_right = false;
+        }
         _ => {}
     }
 
@@ -141,7 +143,6 @@ fn normalized_modifier_state(primary_code: &str) -> HotkeyModifiersDetailed {
         alt_right,
     }
 }
-
 fn modifiers_match(binding: &HotkeyBinding) -> bool {
     let current = normalized_modifier_state(&binding.primary_code);
     current.ctrl == binding.modifiers.ctrl
@@ -151,17 +152,47 @@ fn modifiers_match(binding: &HotkeyBinding) -> bool {
         && current.alt_right == binding.modifiers.alt_right
 }
 
-fn matches_hotkey(vk: u32) -> bool {
+fn is_extended_key(flags: u32) -> bool {
+    flags & 0x01 != 0
+}
+
+fn primary_key_matches(binding: &HotkeyBinding, kb: &KBDLLHOOKSTRUCT) -> bool {
+    let vk = kb.vkCode;
+    let scan = kb.scanCode;
+    let extended = is_extended_key(kb.flags.0);
+
+    match binding.primary_code.as_str() {
+        "AltLeft" => scan == 56 && !extended,
+        "AltRight" => {
+            vk == 0xA5
+                || (scan == 56
+                    && (extended
+                        || (!binding.modifiers.ctrl
+                            && !binding.modifiers.shift
+                            && !binding.modifiers.win
+                            && !binding.modifiers.alt_left
+                            && !binding.modifiers.alt_right)))
+        }
+        "ControlLeft" => scan == 29 && !extended,
+        "ControlRight" => scan == 29 && extended,
+        "ShiftLeft" => scan == 42,
+        "ShiftRight" => scan == 54,
+        "MetaLeft" => vk == 0x5B,
+        "MetaRight" => vk == 0x5C,
+        _ => binding.primary_key_code >= 0 && vk == binding.primary_key_code as u32,
+    }
+}
+
+fn matches_hotkey(kb: &KBDLLHOOKSTRUCT) -> bool {
     let guard = match runtime().lock() {
         Ok(guard) => guard,
         Err(_) => return false,
     };
 
     guard.binding.primary_key_code >= 0
-        && vk == guard.binding.primary_key_code as u32
+        && primary_key_matches(&guard.binding, kb)
         && modifiers_match(&guard.binding)
 }
-
 fn log_hotkey_candidate(kb: &KBDLLHOOKSTRUCT, message: u32) {
     let guard = match runtime().lock() {
         Ok(guard) => guard,
@@ -305,7 +336,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             return LRESULT(1);
         }
 
-        if matches_hotkey(kb.vkCode) {
+        if matches_hotkey(&kb) {
             log_hotkey(format!("matches_hotkey vk={} scan={} flags={} message={}", kb.vkCode, kb.scanCode, kb.flags.0, message));
             match message {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
