@@ -1,5 +1,6 @@
-﻿import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect } from "react";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { debugHotkeyLog } from "../api/tauri";
 import {
   abortRecordingSession,
   beginRecordingSession,
@@ -18,7 +19,10 @@ export function useTrayEvents() {
     let unlistenCopy: (() => void) | undefined;
 
     const bind = async () => {
-      unlistenStart = await listen("tray-start-recording", async () => {
+      const currentWebviewWindow = getCurrentWebviewWindow();
+      void debugHotkeyLog("bind tray listeners start").catch(() => undefined);
+
+      unlistenStart = await currentWebviewWindow.listen("tray-start-recording", async () => {
         try {
           await beginRecordingSession();
         } catch (error) {
@@ -26,7 +30,7 @@ export function useTrayEvents() {
         }
       });
 
-      unlistenStop = await listen("tray-stop-recording", async () => {
+      unlistenStop = await currentWebviewWindow.listen("tray-stop-recording", async () => {
         try {
           await finishRecordingSession();
         } catch (error) {
@@ -34,7 +38,7 @@ export function useTrayEvents() {
         }
       });
 
-      unlistenCancel = await listen("tray-cancel-recording", async () => {
+      unlistenCancel = await currentWebviewWindow.listen("tray-cancel-recording", async () => {
         try {
           await abortRecordingSession();
         } catch (error) {
@@ -42,7 +46,7 @@ export function useTrayEvents() {
         }
       });
 
-      unlistenCopy = await listen("tray-copy-latest", async () => {
+      unlistenCopy = await currentWebviewWindow.listen("tray-copy-latest", async () => {
         const text = useAppStore.getState().currentTranscription?.text ?? "";
 
         if (!text) {
@@ -57,9 +61,14 @@ export function useTrayEvents() {
           setToast(error instanceof Error ? error.message : "复制失败");
         }
       });
+
+      void debugHotkeyLog("bind tray listeners success").catch(() => undefined);
     };
 
-    void bind();
+    void bind().catch((error) => {
+      void debugHotkeyLog(`bind tray listeners failed: ${String(error)}`).catch(() => undefined);
+      setToast(error instanceof Error ? error.message : "托盘监听注册失败");
+    });
 
     return () => {
       unlistenStart?.();

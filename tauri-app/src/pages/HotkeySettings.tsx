@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getHotkeyDisplay, registerHotkeyBinding } from "../api/tauri";
 import {
   SettingsPage,
@@ -141,9 +141,7 @@ export function HotkeySettings() {
   const activeCodesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    void getHotkeyDisplay()
-      .then(setDisplay)
-      .catch(() => setDisplay(settings.hotkeyBinding.display || "未设置"));
+    setDisplay(settings.hotkeyBinding.display || "未设置");
   }, [settings.hotkeyBinding.display]);
 
   useEffect(() => {
@@ -258,15 +256,15 @@ export function HotkeySettings() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="使用方式" description="保持和原版一致的长按、双击、取消三种交互说明。">
+      <SettingsSection title="使用方式" description="保持和当前实现一致的长按、单击、取消三种交互说明。">
         <div className="grid gap-2 xl:grid-cols-3">
           <div className="rounded-[12px] border border-line bg-panel px-3.5 py-3 text-sm leading-5 text-ink/72">
             <div className="font-semibold text-ink">长按模式</div>
             <div className="mt-1">按住开始录音，松开后自动停止并转录。</div>
           </div>
           <div className="rounded-[12px] border border-line bg-panel px-3.5 py-3 text-sm leading-5 text-ink/72">
-            <div className="font-semibold text-ink">双击模式</div>
-            <div className="mt-1">快速双击开始持续录音，再按一次停止。</div>
+            <div className="font-semibold text-ink">单击模式</div>
+            <div className="mt-1">单击开始持续录音，再按一次停止。</div>
           </div>
           <div className="rounded-[12px] border border-line bg-panel px-3.5 py-3 text-sm leading-5 text-ink/72">
             <div className="font-semibold text-ink">取消录音</div>

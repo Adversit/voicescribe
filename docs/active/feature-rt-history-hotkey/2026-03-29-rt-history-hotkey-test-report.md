@@ -142,6 +142,68 @@
 - 前端流式桥接把音频块发送给 `/stream`
 - 后端 `_write_pcm16_wav()` 负责把原始 PCM 封装为合法 WAV 再进入转录链路
 
+
+### 2.11 快捷键单击切换状态机改造
+
+执行目录：D:\learn\AIGC\voicescribe\0324\voicescribe
+
+执行方式：
+- 先按 2026-03-29 补充约定更新 hotkey 专题 requirements/spec，确认“保留长按模式，同时把双击切换改为单击切换”
+- 修改 `tauri-app/src-tauri/src/commands/hotkey.rs`
+- 运行 cargo check
+- 运行 `npm run build`
+
+结果：通过
+
+说明：
+- Rust 状态机已移除双击判定和 last_press_time，热键完整按压现在按单击切换处理：空闲态单击开始，录音态单击停止
+- 长按语义保留：超过阈值时开始录音，松开时停止，且不会在释放时再次落入单击切换分支
+- Esc 取消链路未改
+- 当前仅完成编译与构建验证；真实桌面端仍需补做“单击开始 / 单击停止 / 长按开始 / 松开停止”四项手测
+### 2.12 快捷键单击切换改造后二进制启动验证
+
+执行目录：D:\learn\AIGC\voicescribe\0324\voicescribe
+
+执行方式：
+- 运行 cmd /c scripts\start_windows_system.bat
+- 运行 curl.exe http://127.0.0.1:8765/health
+- 运行 Get-Process voicescribe-desktop | Select-Object Id,ProcessName,StartTime
+
+结果：通过
+
+说明：
+- 热键单击切换改造后的桌面端已重启到最新构建，当前进程启动时间为 2026-03-29 12:17:01
+- 后端健康检查返回 healthy，且 mock_mode=false
+- 当前可以直接进行真实手测，无需再额外手动重启前后端
+### 2.13 快捷键设置页单击说明文案纠正
+
+执行目录：D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app
+
+执行方式：
+- 保持 hotkey 专题 requirements/spec 为“单击开始、再次单击停止 + 长按保持”口径
+- 修改 `tauri-app/src/pages/HotkeySettings.tsx` 的“使用方式”说明文案
+- 运行 `npm run build`
+结果：通过
+
+说明：
+- 设置页残留的“双击模式 / 快速双击开始持续录音”文案已纠正为“单击模式 / 单击开始持续录音，再按一次停止”
+- 当前仅修正文案，不涉及新的 Rust 状态机改动
+### 2.14 快捷键设置页单击文案修正后二进制重启验证
+
+执行目录：D:\learn\AIGC\voicescribe\0324\voicescribe
+
+执行方式：
+- 运行 cmd /c scripts\start_windows_system.bat
+- 运行 curl.exe http://127.0.0.1:8765/health
+- 运行 Get-Process voicescribe-desktop | Select-Object Id,ProcessName,StartTime
+
+结果：通过
+
+说明：
+- 文案修正后的桌面端已重启到最新构建，当前进程启动时间为 2026-03-29 12:27:23
+- 后端健康检查返回 healthy，且 mock_mode=false
+- 当前可以直接检查设置页是否显示“单击模式 / 单击开始持续录音，再按一次停止”
+
 ## 5. 与主文档的关系
 
 本报告只记录本专题的测试与问题。

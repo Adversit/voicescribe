@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import soundfile as sf
-from config import SPEAKER_DATA_DIR
+from config import SPEAKER_DATA_DIR, ensure_runtime_env, resolve_modelscope_model_dir
+from runtime_probe import prepare_windows_runtime
 
 
 class SpeakerDiarizer:
@@ -27,8 +28,11 @@ class SpeakerDiarizer:
         self.data_dir = Path(data_dir).expanduser()
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        self.diarization_model = None  # 说话人分离模型
-        self.sv_model = None  # 声纹验证模型
+        self.diarization_model = None  # speaker diarization model or pipeline
+        self.diarization_model_id: Optional[str] = None
+        self.diarization_backend: Optional[str] = None
+        self.sv_model = None  # speaker verification model
+        self.sv_model_id: Optional[str] = None
         self.speakers: Dict[str, Dict] = {}  # speaker_id -> {name, embedding}
 
         self._load_speakers()
@@ -37,7 +41,7 @@ class SpeakerDiarizer:
         """加载已注册的说话人"""
         speakers_file = self.data_dir / "speakers.json"
         if speakers_file.exists():
-            with open(speakers_file) as f:
+            with open(speakers_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for sp in data.get("speakers", []):
                     emb_file = self.data_dir / f"{sp['id']}.npy"
@@ -54,11 +58,12 @@ class SpeakerDiarizer:
                 for sp in self.speakers.values()
             ]
         }
-        with open(speakers_file, "w") as f:
+        with open(speakers_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-    def load(self, load_diarization: bool = True):
-        """加载 FunASR 模型"""
+    def _import_auto_model(self):
+        ensure_runtime_env()
+        prepare_windows_runtime()
         try:
             from funasr import AutoModel
         except ImportError:
@@ -66,40 +71,114 @@ class SpeakerDiarizer:
                 "Speaker diarization requires funasr. "
                 "Install with: pip install funasr"
             )
+        return AutoModel
 
-        # 加载声纹验证模型 (CAM++ 中文优化)
-        print("[Speaker] Loading speaker verification model...")
+    def _import_modelscope_pipeline(self):
+        ensure_runtime_env()
+        prepare_windows_runtime()
+        try:
+            from modelscope.pipelines import pipeline
+        except ImportError as err:
+            raise ImportError(
+                "Speaker diarization pipeline requires modelscope runtime extras: "
+                "addict, datasets, pillow, simplejson, sortedcontainers, hdbscan"
+            ) from err
+        return pipeline
+
+    def _prepare_diarization_audio(self, audio_path: str) -> tuple[str, Optional[str]]:
+        data, sr = sf.read(audio_path)
+        if getattr(data, 'ndim', 1) > 1:
+            data = data.mean(axis=1)
+        data = data.astype(np.float32, copy=False)
+
+        if sr == 16000:
+            return audio_path, None
+
+        from scipy import signal
+
+        resampled = signal.resample_poly(data, 16000, sr).astype(np.float32, copy=False)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp_file = f.name
+        sf.write(tmp_file, resampled, 16000)
+        return tmp_file, tmp_file
+
+    def ensure_speaker_verification_loaded(self):
+        if self.sv_model is not None:
+            print(f"[Speaker] Speaker verification already loaded: {self.sv_model_id}")
+            return self.sv_model
+
+        AutoModel = self._import_auto_model()
+        model_id = os.environ.get("VOICESCRIBE_SPEAKER_VERIFICATION_MODEL", "damo/speech_campplus_sv_zh-cn_16k-common")
+        model_path = resolve_modelscope_model_dir(model_id)
+        print(f"[Speaker] Loading speaker verification model: {model_id} -> {model_path}...")
         self.sv_model = AutoModel(
-            model="damo/speech_campplus_sv_zh-cn_16k-common",
+            model=model_path,
             disable_update=True
         )
-        print("[Speaker] Speaker verification model loaded")
+        self.sv_model_id = model_id
+        print(f"[Speaker] Speaker verification model loaded: {model_id}")
+        return self.sv_model
 
-        # 加载说话人分离模型
+    def ensure_diarization_loaded(self):
+        if self.diarization_model is not None:
+            print(
+                f"[Speaker] Diarization model already loaded: {self.diarization_model_id} ({self.diarization_backend})"
+            )
+            return self.diarization_model
+
+        pipeline_factory = self._import_modelscope_pipeline()
+        diarization_candidates = []
+        override = os.environ.get("VOICESCRIBE_DIARIZATION_MODEL")
+        if override:
+            diarization_candidates.append(override)
+        diarization_candidates.extend([
+            "iic/speech_campplus_speaker-diarization_common",
+        ])
+
+        last_error = None
+        for model_id in diarization_candidates:
+            try:
+                model_path = resolve_modelscope_model_dir(model_id)
+                print(f"[Speaker] Loading diarization pipeline: {model_id} -> {model_path}...")
+                self.diarization_model = pipeline_factory(
+                    task="speaker-diarization",
+                    model=model_path,
+                )
+                self.diarization_model_id = model_id
+                self.diarization_backend = "modelscope_segmentation_clustering"
+                print(
+                    f"[Speaker] Diarization pipeline loaded: {model_id} ({self.diarization_backend})"
+                )
+                return self.diarization_model
+            except Exception as e:
+                print(f"[Speaker] Diarization pipeline failed to load ({model_id}): {e}")
+                last_error = e
+                self.diarization_model = None
+                self.diarization_model_id = None
+                self.diarization_backend = None
+
+        if last_error is not None:
+            raise RuntimeError(f"Failed to load diarization pipeline: {last_error}")
+        raise RuntimeError("No diarization model candidates available")
+
+    def load(self, load_diarization: bool = True):
+        """Load speaker models required by the current action."""
+        self.ensure_speaker_verification_loaded()
         if load_diarization:
-            diarization_candidates = []
-            override = os.environ.get("VOICESCRIBE_DIARIZATION_MODEL")
-            if override:
-                diarization_candidates.append(override)
-            diarization_candidates.extend([
-                "iic/speech_campplus_speaker-diarization_common",
-                "damo/speech_diarization_sond-zh-cn-alimeeting-16k-n16k4-pytorch",
-            ])
+            self.ensure_diarization_loaded()
+        print(
+            f"[Speaker] Speaker models ready: sv={self.sv_model_id}, diarization={self.diarization_model_id}, backend={self.diarization_backend}"
+        )
 
-            for model_id in diarization_candidates:
-                try:
-                    print(f"[Speaker] Loading diarization model: {model_id}...")
-                    self.diarization_model = AutoModel(
-                        model=model_id,
-                        disable_update=True
-                    )
-                    print(f"[Speaker] Diarization model loaded: {model_id}")
-                    break
-                except Exception as e:
-                    print(f"[Speaker] Diarization model failed to load ({model_id}): {e}")
-                    self.diarization_model = None
-
-        print("[Speaker] FunASR speaker models ready")
+    def runtime_status(self) -> Dict[str, Any]:
+        return {
+            "speaker_verification_loaded": self.sv_model is not None,
+            "speaker_verification_model": self.sv_model_id,
+            "diarization_loaded": self.diarization_model is not None,
+            "diarization_model": self.diarization_model_id,
+            "diarization_backend": self.diarization_backend,
+            "registered_speakers": len(self.speakers),
+        }
 
     def _read_audio_mono(self, audio_path: str) -> tuple[np.ndarray, int]:
         """读取音频并转换为单声道 float32"""
@@ -145,10 +224,10 @@ class SpeakerDiarizer:
 
     def diarize(self, audio_path: str) -> List[Dict]:
         """
-        说话人分离
+        ????????
 
         Args:
-            audio_path: 音频文件路径
+            audio_path: ?????????
 
         Returns:
             [
@@ -158,24 +237,45 @@ class SpeakerDiarizer:
             ]
         """
         if self.diarization_model is None:
-            # 如果没有 diarization 模型，返回单一说话人
             print("[Speaker] No diarization model, assuming single speaker")
             return [{"start": 0.0, "end": 9999.0, "speaker": "SPEAKER_00"}]
 
-        result = self.diarization_model.generate(audio_path)
+        processed_audio_path, temp_audio_path = self._prepare_diarization_audio(audio_path)
+        try:
+            if self.diarization_backend == "modelscope_segmentation_clustering":
+                result = self.diarization_model(processed_audio_path)
+                raw_segments = result.get("text") if isinstance(result, dict) else result
+                results = []
+                if isinstance(raw_segments, list):
+                    for item in raw_segments:
+                        if isinstance(item, (list, tuple)) and len(item) >= 3:
+                            speaker_index = int(item[2])
+                            results.append(
+                                {
+                                    "start": float(item[0]),
+                                    "end": float(item[1]),
+                                    "speaker": f"SPEAKER_{speaker_index:02d}",
+                                }
+                            )
+                return results
 
-        # FunASR 返回格式: [(start, end, speaker_id), ...]
-        results = []
-        if isinstance(result, list):
-            for item in result:
-                if len(item) >= 3:
-                    results.append({
-                        "start": float(item[0]),
-                        "end": float(item[1]),
-                        "speaker": str(item[2]),
-                    })
-
-        return results
+            result = self.diarization_model.generate(processed_audio_path)
+            results = []
+            if isinstance(result, list):
+                for item in result:
+                    if len(item) >= 3:
+                        results.append({
+                            "start": float(item[0]),
+                            "end": float(item[1]),
+                            "speaker": str(item[2]),
+                        })
+            return results
+        finally:
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                try:
+                    os.remove(temp_audio_path)
+                except Exception:
+                    pass
 
     def extract_embedding(self, audio_path: str) -> np.ndarray:
         """提取音频的声纹特征"""

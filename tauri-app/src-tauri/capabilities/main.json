@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Permissions for the main VoiceScribe desktop window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    "autostart:default",
+    "clipboard-manager:allow-write-text"
+  ]
+}

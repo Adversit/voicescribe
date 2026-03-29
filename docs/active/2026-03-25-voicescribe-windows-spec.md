@@ -75,6 +75,7 @@
 1. 桌面端负责启动/停止后端子进程。
 2. 首次运行需准备 Python 运行时与最小依赖。
 3. 安装态必须支持 embedded Python 或等价方案。
+4. 该能力属于最终封装/安装验收项；在 Phase 1-4 功能调试阶段，允许先使用系统 Python 回退链路完成开发态与安装态模拟联调，但不得据此宣称安装包闭环已最终验收。
 
 ### 5.2 全局热键
 
@@ -149,6 +150,8 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 
 ## 7. Phase 5: 构建与打包
 
+本章属于最后阶段任务，默认在 Phase 1-4 的功能调试、联调和人工验收收口后再推进；未进入该阶段前，封装与打包相关未完成项不视为当前前序功能调试阻塞项。
+
 1. 安装包包含 Tauri 可执行文件、后端代码和运行时初始化逻辑。
 2. 安装包不包含预置模型。
 3. 首次启动必须能完成运行时初始化。
@@ -182,6 +185,7 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 - 托盘与托盘图标
 - Windows 开机自启
 - 安装态 embedded Python 冷启动
+  说明：该项属于 Phase 5 最终封装阶段人工验收，不作为当前前序功能调试完成与否的判断条件。
 - 主窗口与各设置页的界面一致性
 - 窗口从初始尺寸到放大尺寸的比例稳定性
 
@@ -198,3 +202,43 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 - 实时转录专题需求： [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
 - 实时转录专题 Spec： [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
 - 实时转录专题测试报告： [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
+- 录音悬浮窗专题需求： [2026-03-29-overlay-recording-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-requirements.md)
+- 录音悬浮窗专题 Spec： [2026-03-29-overlay-recording-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-spec.md)
+- 录音悬浮窗专题测试报告： [2026-03-29-overlay-recording-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-test-report.md)
+
+## 2026-03-29 录音悬浮窗专题补充
+
+- 录音悬浮窗本轮不再按“单独 UI 卡片”处理，而是作为录音流状态机、事件桥接、实时音量反馈与浮层视觉的一体化专题收口。
+- 悬浮窗中的波纹必须来自真实录音电平事件，不能继续使用与录音无关的模拟动画。
+- 悬浮窗显示/隐藏、快捷键停止、点击取消/停止，都必须回到主录音流统一处理，不能由悬浮窗自身隐式维护状态。
+
+## 2026-03-29 录音兼容与说话人模型加载补充
+1. Windows 录音链路不得强制要求输入设备原生支持 16kHz + mono；允许按设备原生输入配置采集，再在本地统一转换为 16kHz / 16-bit / mono WAV 供后续转录链路使用。
+2. 说话人相关能力必须拆分为三条显式加载链路：转录模型加载、说话人分离模型加载、说话人识别（声纹）模型加载，不能再依赖隐式副作用。
+3. 当启用说话人分离时，必须能明确记录当前到底走了 FunASR 内置 speaker 标签，还是走外部 SpeakerDiarizer 的 diarization / speaker verification 链路。
+4. 说话人注册、说话人识别、带说话人标签的转录，必须都能证明各自依赖的模型已实际加载并被使用，而不是仅在健康检查里显示依赖包可用。
+## 2026-03-29 FunASR / Torch 运行时探测补充
+
+- Windows 下不能只用 importlib.find_spec() 判断 FunASR / 说话人模型可用性；必须补充真实运行时探测，至少覆盖 	orch 导入、unasr.AutoModel 导入，以及对应异常日志。
+- /health 与模型状态展示必须区分“包存在”和“运行时可加载”。出现 	orch DLL 初始化失败时，不能继续把 FunASR / speaker feature 标记为可用。
+- 说话人识别、说话人分离、转录三条链路都要给出明确日志：模型名、加载入口、运行时探测结果、失败异常。
+- 当前已定位的 Windows 真实风险是 	orch 导入阶段抛出 WinError 1114，需要在模型链路验收前先收口该运行时问题。
+
+## 2026-03-29 外部分离模型路径补充
+
+- SpeakerDiarizer 的外部分离模型不能继续用 unasr.AutoModel 直接加载 speaker-diarization 仓库 ID；当前可验证可用的路径是 modelscope 的 SegmentationClusteringPipeline。
+- iic/speech_campplus_speaker-diarization_common 在本机已验证可初始化 pipeline，但 Windows 下必须先提供 16kHz / mono wav，否则会触发 	orchaudio sox extension is not supported on Windows。
+- 因此外部分离链路在实现上需要：补齐 modelscope 运行时依赖、Windows 侧输入预重采样到 16k、把 pipeline 输出统一转换为 [{start,end,speaker}] 结构。
+- 主转录链路仍优先使用 FunASR 内置 speaker 标签；外部分离链路作为补充能力和回退路径，需要能独立加载并可单独验证。
+
+## 2026-03-29 Whisper Windows 运行时回退补充
+
+- Windows 下不能把 `Whisper available=true` 直接视为“Whisper 稳定可用”；本轮已发现 `faster-whisper / ctranslate2` 在 `WhisperModel(...)` 初始化阶段可触发 native 崩溃。
+- 因此 Windows 端允许对 Whisper 引擎增加实现级回退：优先尝试 `faster-whisper`，若运行时探测或真实加载失败，则切换到 `openai-whisper`，优先保证存在一条稳定的 Whisper 转录链路。
+- 测试与汇报时必须区分 “FunASR 稳定链路” 与 “Whisper 稳定链路”；未写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md) 的，仍视为未验证。
+
+## 2026-03-29 FunASR GPU 运行时补充
+
+- FunASR 的设备选择策略保持为 `CUDA > MPS > CPU`，但这只是代码层优先级；最终是否能进入 GPU 取决于后端虚拟环境安装的 `torch / torchaudio` 是否为 CUDA 构建。
+- 如果本机 `nvidia-smi` 正常、但 `torch.cuda.is_available()` 为 `False`，应优先判定为运行时构建错误，而不是业务代码错误。
+- FunASR GPU 验收必须至少同时满足三点：`torch.cuda.is_available() == True`、加载日志显示 `[FunASR] Using device: cuda:0`、真实转录请求可在该设备链路下完成。

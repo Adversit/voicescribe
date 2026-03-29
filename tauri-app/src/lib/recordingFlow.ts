@@ -3,6 +3,7 @@ import {
   cancelRecording,
   deleteAudioFile,
   outputText,
+  debugHotkeyLog,
   startRecording,
   stopRecording,
   transcribeAudio,
@@ -107,7 +108,15 @@ export async function beginRecordingSession() {
   const startedAt = Date.now();
   const store = useAppStore.getState();
   clearCancelResetTimer();
-  await startRecording();
+  await debugHotkeyLog("beginRecordingSession start").catch(() => undefined);
+  try {
+    await startRecording();
+    await debugHotkeyLog("beginRecordingSession startRecording success").catch(() => undefined);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await debugHotkeyLog(`beginRecordingSession startRecording failed: ${message}`).catch(() => undefined);
+    throw error;
+  }
   store.setRecording(true);
   store.setTranscribing(false);
   store.setRecordingCancelled(false);
@@ -116,14 +125,26 @@ export async function beginRecordingSession() {
   if (store.settings.enableStreaming) {
     startRealtimeStreamSession();
   }
-  await showOverlay({ mode: "recording", startedAt });
+  await showOverlay({
+    mode: "recording",
+    startedAt,
+    audioLevel: 0,
+    canCancel: true,
+    canStop: true,
+  });
 }
 
 export async function finishRecordingSession() {
   const store = useAppStore.getState();
   store.setRecording(false);
   store.setTranscribing(true);
-  await pushOverlayState({ mode: "transcribing", startedAt: null });
+  await pushOverlayState({
+    mode: "transcribing",
+    startedAt: null,
+    audioLevel: 0,
+    canCancel: false,
+    canStop: false,
+  });
 
   try {
     const audioPath = await stopRecording();
@@ -173,7 +194,13 @@ export async function abortRecordingSession() {
     store.setAudioLevel(0);
     store.setRecordingCancelled(true);
     store.setToast("录音已取消");
-    await pushOverlayState({ mode: "cancelled", startedAt: null });
+    await pushOverlayState({
+      mode: "cancelled",
+      startedAt: null,
+      audioLevel: 0,
+      canCancel: false,
+      canStop: false,
+    });
 
     cancelResetTimer = window.setTimeout(() => {
       useAppStore.getState().setRecordingCancelled(false);

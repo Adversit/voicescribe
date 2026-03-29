@@ -1,6 +1,14 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import { emit, listen } from "@tauri-apps/api/event";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { emitTo, listen } from "@tauri-apps/api/event";
+import { LoaderCircle, Square, X } from "lucide-react";
 import type { OverlayMode, OverlayStatePayload } from "../lib/overlayWindow";
+
+const HISTORY_SIZE = 13;
+const IDLE_LEVEL = 0.08;
+const CANCEL_LABEL = "取消录音";
+const STOP_LABEL = "停止录音";
+const TRANSCRIBING_LABEL = "正在转录";
+const CANCELLED_LABEL = "已取消录音";
 
 function formatDuration(milliseconds: number | null) {
   if (!milliseconds) {
@@ -13,18 +21,31 @@ function formatDuration(milliseconds: number | null) {
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }
 
-function AudioBars({ level, active }: { level: number; active: boolean }) {
-  const bars = [0.55, 0.85, 1, 0.8, 0.5];
+function createLevelHistory(level = IDLE_LEVEL) {
+  return Array.from({ length: HISTORY_SIZE }, (_, index) => {
+    const taper = 1 - Math.abs(index - Math.floor(HISTORY_SIZE / 2)) / HISTORY_SIZE;
+    return Math.max(IDLE_LEVEL, level * (0.7 + taper * 0.45));
+  });
+}
 
+function normalizeLevel(level: number) {
+  if (!Number.isFinite(level)) {
+    return IDLE_LEVEL;
+  }
+
+  return Math.max(IDLE_LEVEL, Math.min(1, level));
+}
+
+function RealWaveform({ levels }: { levels: number[] }) {
   return (
-    <div className="flex h-8 items-end gap-[3px]">
-      {bars.map((factor, index) => {
-        const height = active ? Math.max(6, Math.min(28, 8 + level * factor * 20)) : 6;
+    <div className="flex h-7 items-center gap-1 px-1">
+      {levels.map((level, index) => {
+        const height = Math.round(4 + normalizeLevel(level) * 20);
         return (
           <span
-            key={index}
-            className="w-1 rounded-full bg-white/95 transition-all duration-100"
-            style={{ height }}
+            key={`${index}-${height}`}
+            className="block w-[3px] rounded-full bg-white transition-[height,opacity] duration-75"
+            style={{ height, opacity: 0.45 + normalizeLevel(level) * 0.55 }}
           />
         );
       })}
@@ -32,10 +53,37 @@ function AudioBars({ level, active }: { level: number; active: boolean }) {
   );
 }
 
+function IconButton(props: {
+  label: string;
+  disabled: boolean;
+  variant: "muted" | "light";
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const { label, disabled, variant, onClick, children } = props;
+  const baseClass = variant === "light"
+    ? "bg-white text-black hover:bg-white/90"
+    : "bg-white/14 text-white hover:bg-white/22";
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)] transition ${baseClass} ${disabled ? "cursor-not-allowed opacity-35" : ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function RecordingOverlay() {
-  const [mode, setMode] = useState<OverlayMode>("idle");
+  const [mode, setMode] = useState<OverlayMode>("hidden");
   const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [audioLevel, setAudioLevel] = useState(0);
+  const [canCancel, setCanCancel] = useState(false);
+  const [canStop, setCanStop] = useState(false);
+  const [levels, setLevels] = useState<number[]>(() => createLevelHistory());
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -47,14 +95,23 @@ export function RecordingOverlay() {
         const payload = event.payload;
         setMode(payload.mode);
         setStartedAt(payload.mode === "recording" ? (payload.startedAt ?? Date.now()) : null);
-        if (payload.mode !== "recording") {
-          setAudioLevel(0);
+        setCanCancel(Boolean(payload.canCancel));
+        setCanStop(Boolean(payload.canStop));
+
+        if (payload.mode === "recording") {
+          setLevels(createLevelHistory(payload.audioLevel ?? IDLE_LEVEL));
+          return;
         }
+
+        setLevels(createLevelHistory());
       });
 
       unlistenAudio = await listen<number>("audio-level", (event) => {
-        setAudioLevel(event.payload ?? 0);
+        const nextLevel = normalizeLevel(event.payload ?? 0);
+        setLevels((current) => [...current.slice(1), nextLevel]);
       });
+
+      await emitTo("main", "overlay-ready");
     };
 
     void bind();
@@ -70,7 +127,7 @@ export function RecordingOverlay() {
       return;
     }
 
-    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    const timer = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(timer);
   }, [mode]);
 
@@ -81,54 +138,56 @@ export function RecordingOverlay() {
     return now - startedAt;
   }, [mode, now, startedAt]);
 
-  const backgroundClass = mode === "cancelled"
-    ? "bg-[#9a3f1d]/90"
-    : mode === "recording"
-      ? "bg-[#17100dcc]"
-      : "bg-[#1b1512cc]";
+  if (mode === "hidden") {
+    return null;
+  }
+
+  const handleCancel = () => {
+    if (!canCancel) {
+      return;
+    }
+
+    void emitTo("main", "overlay-cancel-recording");
+  };
+
+  const handleStop = () => {
+    if (!canStop) {
+      return;
+    }
+
+    void emitTo("main", "overlay-stop-recording");
+  };
 
   return (
-    <div className="flex min-h-screen items-end justify-center bg-transparent p-6">
-      <button
-        type="button"
-        onClick={() =>
-          mode === "recording"
-            ? void emit("hotkey-cancel")
-            : undefined
-        }
-        className={`flex min-w-[180px] items-center gap-3 rounded-2xl border border-white/25 px-4 py-3 text-left text-white shadow-2xl backdrop-blur ${backgroundClass}`}
-      >
-        {mode === "cancelled" ? (
-          <>
-            <span className="inline-flex h-4 w-4 rounded-full bg-[#f1b24a]" />
-            <div>
-              <div className="text-sm font-semibold">已取消</div>
-              <div className="text-xs text-white/70">本次录音不会进入转录</div>
+    <div className="pointer-events-none flex min-h-screen items-end justify-center bg-transparent px-4 pb-8">
+      {mode === "recording" ? (
+        <div className="pointer-events-auto flex min-w-[290px] items-center gap-3 rounded-full border border-white/10 bg-[rgba(10,10,10,0.96)] px-3 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+          <IconButton label={CANCEL_LABEL} disabled={!canCancel} variant="muted" onClick={handleCancel}>
+            <X className="h-5 w-5" strokeWidth={2.3} />
+          </IconButton>
+
+          <div className="flex min-w-[118px] flex-1 flex-col items-center justify-center gap-1">
+            <RealWaveform levels={levels} />
+            <div className="text-[10px] font-medium tracking-[0.24em] text-white/58">
+              {formatDuration(elapsed)}
             </div>
-          </>
-        ) : mode === "transcribing" ? (
-          <>
-            <div className="flex items-center gap-1.5">
-              <span className="h-2 w-2 animate-bounce rounded-full bg-white/95 [animation-delay:-0.2s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-white/80 [animation-delay:-0.1s]" />
-              <span className="h-2 w-2 animate-bounce rounded-full bg-white/65" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold">thinking</div>
-              <div className="text-xs text-white/70">正在转录音频</div>
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="inline-flex h-3.5 w-3.5 animate-pulse rounded-full bg-white" />
-            <AudioBars level={audioLevel} active={mode === "recording"} />
-            <div>
-              <div className="text-sm font-semibold">{formatDuration(elapsed)}</div>
-              <div className="text-xs text-white/70">点击悬浮窗可取消录音</div>
-            </div>
-          </>
-        )}
-      </button>
+          </div>
+
+          <IconButton label={STOP_LABEL} disabled={!canStop} variant="light" onClick={handleStop}>
+            <Square className="h-[18px] w-[18px] fill-current" strokeWidth={1.8} />
+          </IconButton>
+        </div>
+      ) : mode === "transcribing" ? (
+        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-white/10 bg-[rgba(12,12,12,0.95)] px-5 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.30)] backdrop-blur-xl">
+          <LoaderCircle className="h-4 w-4 animate-spin text-white/78" strokeWidth={2.2} />
+          <div className="text-sm font-medium tracking-[0.06em] text-white/86">{TRANSCRIBING_LABEL}</div>
+        </div>
+      ) : (
+        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[#b56d2f]/30 bg-[rgba(40,24,8,0.94)] px-4 py-2.5 text-[#ffd7ae] shadow-[0_14px_30px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#ffb25c]" />
+          <div className="text-sm font-medium">{CANCELLED_LABEL}</div>
+        </div>
+      )}
     </div>
   );
 }

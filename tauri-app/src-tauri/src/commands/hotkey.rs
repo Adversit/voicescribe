@@ -1,10 +1,13 @@
-﻿use crate::commands::audio::recording_active;
+use crate::commands::audio::recording_active;
 use crate::state::{HotkeyBinding, HotkeyModifiersDetailed, HotkeyState};
-use std::sync::{Mutex, OnceLock};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, State};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager, State};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LWIN, VK_RWIN, VK_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -19,7 +22,6 @@ static HOOK_THREAD_ID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
 
 struct HotkeyRuntime {
     binding: HotkeyBinding,
-    last_press_time: Option<Instant>,
     is_pressed: bool,
     is_long_press_mode: bool,
     long_press_generation: u64,
@@ -30,7 +32,6 @@ impl Default for HotkeyRuntime {
     fn default() -> Self {
         Self {
             binding: HotkeyBinding::default(),
-            last_press_time: None,
             is_pressed: false,
             is_long_press_mode: false,
             long_press_generation: 0,
@@ -51,13 +52,40 @@ fn hook_thread_id() -> &'static Mutex<Option<u32>> {
     HOOK_THREAD_ID.get_or_init(|| Mutex::new(None))
 }
 
-fn emit_event(name: &str) {
-    let app = runtime().lock().ok().and_then(|guard| guard.app_handle.clone());
-    if let Some(app) = app {
-        let _ = app.emit(name, ());
+fn hotkey_log_path() -> std::path::PathBuf {
+    std::env::temp_dir().join("voicescribe-hotkey.log")
+}
+
+fn log_hotkey(message: impl AsRef<str>) {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(hotkey_log_path())
+    {
+        let _ = writeln!(file, "[{}] {}", timestamp, message.as_ref());
     }
 }
 
+fn emit_event(name: &str) {
+    log_hotkey(format!("emit_event {name}"));
+    let app = runtime().lock().ok().and_then(|guard| guard.app_handle.clone());
+    if let Some(app) = app {
+        if let Some(window) = app.get_webview_window("main") {
+            match window.emit(name, ()) {
+                Ok(()) => log_hotkey(format!("emit_event delivered_to=main name={name}")),
+                Err(err) => log_hotkey(format!("emit_event failed_to_main name={name} error={err}")),
+            }
+        } else {
+            log_hotkey("emit_event skipped: main window missing");
+        }
+    } else {
+        log_hotkey("emit_event skipped: app_handle missing");
+    }
+}
 fn is_key_down(vk: i32) -> bool {
     unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
 }
@@ -116,7 +144,11 @@ fn spawn_long_press_timer(generation: u64) {
                 Err(_) => return,
             };
 
-            if guard.is_pressed && !guard.is_long_press_mode && guard.long_press_generation == generation {
+            if guard.is_pressed
+                && !guard.is_long_press_mode
+                && guard.long_press_generation == generation
+                && !recording_active()
+            {
                 guard.is_long_press_mode = true;
                 true
             } else {
@@ -124,18 +156,14 @@ fn spawn_long_press_timer(generation: u64) {
             }
         };
 
-        if should_start && !recording_active() {
+        if should_start {
+            log_hotkey("long_press threshold reached");
             emit_event("hotkey-start-recording");
         }
     });
 }
-
 fn handle_key_down() {
-    let now = Instant::now();
-    let mut emit: Option<&'static str> = None;
-    let mut long_press_generation = None;
-
-    {
+    let long_press_generation = {
         let mut guard = match runtime().lock() {
             Ok(guard) => guard,
             Err(_) => return,
@@ -146,37 +174,19 @@ fn handle_key_down() {
         }
 
         guard.is_pressed = true;
+        guard.long_press_generation += 1;
+        log_hotkey(format!(
+            "key_down armed generation={} binding={}",
+            guard.long_press_generation, guard.binding.display
+        ));
+        guard.long_press_generation
+    };
 
-        if let Some(last_press) = guard.last_press_time {
-            if now.duration_since(last_press) < Duration::from_millis(350) {
-                guard.last_press_time = None;
-                guard.is_long_press_mode = false;
-                guard.long_press_generation += 1;
-                emit = Some(if recording_active() {
-                    "hotkey-stop-recording"
-                } else {
-                    "hotkey-start-recording"
-                });
-            }
-        }
-
-        if emit.is_none() {
-            guard.last_press_time = Some(now);
-            guard.long_press_generation += 1;
-            long_press_generation = Some(guard.long_press_generation);
-        }
-    }
-
-    if let Some(event_name) = emit {
-        emit_event(event_name);
-    }
-    if let Some(generation) = long_press_generation {
-        spawn_long_press_timer(generation);
-    }
+    spawn_long_press_timer(long_press_generation);
 }
 
 fn handle_key_up() {
-    let should_stop = {
+    let event_name = {
         let mut guard = match runtime().lock() {
             Ok(guard) => guard,
             Err(_) => return,
@@ -187,13 +197,27 @@ fn handle_key_up() {
         }
 
         guard.is_pressed = false;
-        let stop = guard.is_long_press_mode && recording_active();
+        guard.long_press_generation += 1;
+        let event_name = if guard.is_long_press_mode {
+            if recording_active() {
+                log_hotkey("key_up -> stop after long press");
+                Some("hotkey-stop-recording")
+            } else {
+                None
+            }
+        } else if recording_active() {
+            log_hotkey("single_click -> stop");
+            Some("hotkey-stop-recording")
+        } else {
+            log_hotkey("single_click -> start");
+            Some("hotkey-start-recording")
+        };
         guard.is_long_press_mode = false;
-        stop
+        event_name
     };
 
-    if should_stop {
-        emit_event("hotkey-stop-recording");
+    if let Some(event_name) = event_name {
+        emit_event(event_name);
     }
 }
 
@@ -202,15 +226,21 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         let kb = *(lparam.0 as *const KBDLLHOOKSTRUCT);
         let message = wparam.0 as u32;
 
+        if kb.vkCode == 0xA4 || kb.vkCode == 0xA5 || kb.vkCode == 0x11 || kb.vkCode == 0xA2 || kb.vkCode == 0xA3 || kb.vkCode == 0x10 || kb.vkCode == 0xA0 || kb.vkCode == 0xA1 || kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32 {
+            log_hotkey(format!("raw_modifier_event vk={} message={}", kb.vkCode, message));
+        }
+
         if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
             && kb.vkCode == VK_ESCAPE.0 as u32
             && recording_active()
         {
+            log_hotkey("esc -> cancel");
             emit_event("hotkey-cancel");
             return LRESULT(1);
         }
 
         if matches_hotkey(kb.vkCode) {
+            log_hotkey(format!("matches_hotkey vk={} message={}", kb.vkCode, message));
             match message {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
                     handle_key_down();
@@ -231,16 +261,45 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 fn ensure_hook_thread() -> Result<(), String> {
     let mut thread_guard = hook_thread().lock().map_err(|_| "Hotkey thread mutex poisoned")?;
     if thread_guard.is_some() {
+        log_hotkey("ensure_hook_thread: already running");
         return Ok(());
     }
+    log_hotkey("ensure_hook_thread: starting");
 
-    let handle = thread::spawn(|| unsafe {
+    let (startup_tx, startup_rx) = mpsc::channel();
+
+    let handle = thread::spawn(move || unsafe {
         if let Ok(mut thread_id_guard) = hook_thread_id().lock() {
             *thread_id_guard = Some(GetCurrentThreadId());
         }
 
-        let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0)
-            .unwrap_or_default();
+        let module = match GetModuleHandleW(None) {
+            Ok(module) => module,
+            Err(err) => {
+                log_hotkey(format!("ensure_hook_thread: GetModuleHandleW failed: {err}"));
+                let _ = startup_tx.send(Err(format!("GetModuleHandleW failed: {err}")));
+                if let Ok(mut thread_id_guard) = hook_thread_id().lock() {
+                    *thread_id_guard = None;
+                }
+                return;
+            }
+        };
+
+        let hook = match SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), module, 0) {
+            Ok(hook) => {
+                log_hotkey("ensure_hook_thread: SetWindowsHookExW succeeded");
+                let _ = startup_tx.send(Ok(()));
+                hook
+            }
+            Err(err) => {
+                log_hotkey(format!("ensure_hook_thread: SetWindowsHookExW failed: {err}"));
+                let _ = startup_tx.send(Err(format!("SetWindowsHookExW failed: {err}")));
+                if let Ok(mut thread_id_guard) = hook_thread_id().lock() {
+                    *thread_id_guard = None;
+                }
+                return;
+            }
+        };
 
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).as_bool() {}
@@ -251,8 +310,23 @@ fn ensure_hook_thread() -> Result<(), String> {
         }
     });
 
-    *thread_guard = Some(handle);
-    Ok(())
+    match startup_rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(Ok(())) => {
+            *thread_guard = Some(handle);
+            log_hotkey("ensure_hook_thread: startup confirmed");
+            Ok(())
+        }
+        Ok(Err(err)) => {
+            let _ = handle.join();
+            log_hotkey(format!("ensure_hook_thread: startup failed: {err}"));
+            Err(err)
+        }
+        Err(_) => {
+            let _ = handle.join();
+            log_hotkey("ensure_hook_thread: startup timed out");
+            Err("Timed out while starting hotkey hook thread".to_string())
+        }
+    }
 }
 
 fn shutdown_hook_thread() -> Result<(), String> {
@@ -341,6 +415,12 @@ fn mask_from_binding(binding: &HotkeyBinding) -> u32 {
 }
 
 #[tauri::command]
+pub fn debug_hotkey_log(message: String) -> Result<(), String> {
+    log_hotkey(format!("frontend {message}"));
+    Ok(())
+}
+
+#[tauri::command]
 pub fn register_hotkey(app: AppHandle, state: State<'_, HotkeyState>, modifiers: u32, key_code: i32) -> Result<(), String> {
     let binding = build_binding_from_legacy(modifiers, key_code);
     register_hotkey_binding(app, state, binding)
@@ -355,6 +435,7 @@ pub fn register_hotkey_binding(
     *state.modifiers.lock().map_err(|_| "Hotkey mutex poisoned")? = mask_from_binding(&binding);
     *state.key_code.lock().map_err(|_| "Hotkey mutex poisoned")? = binding.primary_key_code;
     *state.binding.lock().map_err(|_| "Hotkey mutex poisoned")? = binding.clone();
+    log_hotkey(format!("register_hotkey_binding display={} primary_code={} primary_key_code={}", binding.display, binding.primary_code, binding.primary_key_code));
 
     let mut guard = runtime().lock().map_err(|_| "Hotkey runtime mutex poisoned")?;
     guard.binding = binding;
@@ -386,7 +467,6 @@ pub fn unregister_hotkey(state: State<'_, HotkeyState>) -> Result<(), String> {
     guard.binding.display = "未设置".to_string();
     guard.is_pressed = false;
     guard.is_long_press_mode = false;
-    guard.last_press_time = None;
     drop(guard);
 
     shutdown_hook_thread()

@@ -5,9 +5,16 @@ FunASR Engine
 
 from typing import Dict, Any, Optional
 
+from config import ensure_runtime_env, resolve_modelscope_model_dir
+from runtime_probe import prepare_windows_runtime
+
 
 class FunASREngine:
     """FunASR 语音识别引擎"""
+
+    VAD_MODEL_ID = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+    PUNC_MODEL_ID = "iic/punc_ct-transformer_cn-en-common-vocab471067-large"
+    SPK_MODEL_ID = "iic/speech_campplus_sv_zh-cn_16k-common"
     
     MODELS = {
         "paraformer-zh": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
@@ -24,13 +31,17 @@ class FunASREngine:
         """加载模型"""
         if model_name not in self.MODELS:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self.MODELS.keys())}")
-        
+
+        ensure_runtime_env()
+        prepare_windows_runtime()
         from funasr import AutoModel
-        
+
         model_id = self.MODELS[model_name]
-        
+        model_revision = "v2.0.4" if model_name != "sensevoice-small" else None
+        model_path = resolve_modelscope_model_dir(model_id, revision=model_revision)
         device = self._get_device()
         print(f"[FunASR] Using device: {device}")
+        print(f"[FunASR] Resolved main model path: {model_path}")
 
         self.enable_diarization = enable_diarization
 
@@ -38,38 +49,39 @@ class FunASREngine:
         if enable_diarization:
             # 使用 FunASR 内置 CAM++ 说话人特征（spk_model）
             diarization_kwargs = {
-                "spk_model": "cam++",
+                "spk_model": resolve_modelscope_model_dir(self.SPK_MODEL_ID),
                 "spk_mode": "punc_segment",
             }
 
         if model_name == "sensevoice-small":
             # SenseVoice 特殊配置
             self.model = AutoModel(
-                model=model_id,
-                vad_model="fsmn-vad",
+                model=model_path,
+                vad_model=resolve_modelscope_model_dir(self.VAD_MODEL_ID),
                 vad_kwargs={"max_single_segment_time": 30000},
                 device=device,
+                disable_update=True,
                 **diarization_kwargs,
             )
         elif model_name == "seaco-paraformer":
             # SeACo-Paraformer: 专门针对热词优化的模型
             # 热词召回率比普通 Paraformer 高很多
             self.model = AutoModel(
-                model=model_id,
-                model_revision="v2.0.4",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
+                model=model_path,
+                vad_model=resolve_modelscope_model_dir(self.VAD_MODEL_ID),
+                punc_model=resolve_modelscope_model_dir(self.PUNC_MODEL_ID),
                 device=device,
+                disable_update=True,
                 **diarization_kwargs,
             )
         else:
             # Paraformer 系列 - 启用 VAD 和标点预测
             self.model = AutoModel(
-                model=model_id,
-                model_revision="v2.0.4",
-                vad_model="fsmn-vad",
-                punc_model="ct-punc",
+                model=model_path,
+                vad_model=resolve_modelscope_model_dir(self.VAD_MODEL_ID),
+                punc_model=resolve_modelscope_model_dir(self.PUNC_MODEL_ID),
                 device=device,
+                disable_update=True,
                 **diarization_kwargs,
             )
         

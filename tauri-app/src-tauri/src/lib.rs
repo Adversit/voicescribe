@@ -1,10 +1,10 @@
-﻿mod commands;
+mod commands;
 mod state;
 
 use commands::{
     audio::{cancel_recording, delete_audio_file, get_recording_status, start_recording, stop_recording},
     backend::{backend_status, start_backend, stop_backend, transcribe},
-    hotkey::{get_hotkey_display, register_hotkey, register_hotkey_binding, unregister_hotkey},
+    hotkey::{debug_hotkey_log, get_hotkey_display, register_hotkey, register_hotkey_binding, unregister_hotkey},
     text_input::output_text,
 };
 use state::{BackendProcessState, HotkeyState, RecordingState};
@@ -16,9 +16,9 @@ use tauri::{
 };
 
 const OVERLAY_LABEL: &str = "overlay";
-const OVERLAY_WIDTH: f64 = 220.0;
-const OVERLAY_HEIGHT: f64 = 84.0;
-const OVERLAY_BOTTOM_MARGIN: i32 = 64;
+const OVERLAY_WIDTH: f64 = 296.0;
+const OVERLAY_HEIGHT: f64 = 94.0;
+const OVERLAY_BOTTOM_MARGIN: i32 = 48;
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -29,9 +29,10 @@ fn show_main_window(app: &tauri::AppHandle) {
 }
 
 fn emit_tray_event(app: &tauri::AppHandle, event_name: &str) {
-    let _ = app.emit(event_name, ());
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit(event_name, ());
+    }
 }
-
 fn position_overlay_window(window: &WebviewWindow) {
     if let (Ok(Some(monitor)), Ok(size)) = (window.current_monitor(), window.outer_size()) {
         let screen = monitor.size();
@@ -161,6 +162,7 @@ pub fn run() {
             stop_backend,
             backend_status,
             transcribe,
+            debug_hotkey_log,
             register_hotkey,
             register_hotkey_binding,
             unregister_hotkey,

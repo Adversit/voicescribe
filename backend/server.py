@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 VoiceScribe Backend Server
 本地语音转文字服务
@@ -38,9 +38,11 @@ from config import (
     MODELSCOPE_CACHE,
     WHISPER_CPP_MODEL_DIR,
     ensure_dirs,
+    ensure_runtime_env,
     find_whisper_cli,
     HISTORY_STORAGE_PATH,
 )
+from runtime_probe import prepare_windows_runtime, probe_funasr_runtime, probe_torch_runtime
 
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
@@ -53,6 +55,9 @@ def _whispercpp_cli_available() -> bool:
 def _whispercpp_model_available() -> bool:
     return (WHISPER_CPP_MODEL_DIR / "ggml-base.bin").exists()
 
+
+TORCH_RUNTIME = probe_torch_runtime()
+FUNASR_RUNTIME = probe_funasr_runtime()
 
 # 尝试导入 ASR 引擎
 WHISPER_AVAILABLE = False
@@ -79,9 +84,11 @@ except Exception as e:
 
 try:
     from engines.funasr_engine import FunASREngine
-    FUNASR_AVAILABLE = _module_available("funasr")
-    if not FUNASR_AVAILABLE:
+    FUNASR_AVAILABLE = _module_available("funasr") and bool(FUNASR_RUNTIME.get("ok"))
+    if not _module_available("funasr"):
         print("[Warning] FunASR engine not available: missing funasr package")
+    elif not FUNASR_AVAILABLE:
+        print(f"[Warning] FunASR runtime not available: {FUNASR_RUNTIME.get('error')}")
 except ImportError as e:
     print(f"[Warning] FunASR engine not available: {e}")
 
@@ -95,9 +102,11 @@ except ImportError as e:
     print(f"[Warning] Parakeet engine not available: {e}")
 
 # 设置运行时目录
+ensure_runtime_env()
 os.environ.setdefault("MODELSCOPE_CACHE", MODELSCOPE_CACHE)
 os.environ.setdefault("VOICESCRIBE_CONFIG_DIR", str(CONFIG_DIR))
 ensure_dirs()
+prepare_windows_runtime()
 
 # 下载状态缓存
 model_downloads = {}
@@ -413,8 +422,10 @@ def _realtime_entries_from_result(result: dict) -> List[dict]:
 DIARIZATION_AVAILABLE = False
 try:
     from diarization.speaker import SpeakerDiarizer
-    DIARIZATION_AVAILABLE = True
-except ImportError as e:
+    DIARIZATION_AVAILABLE = bool(FUNASR_RUNTIME.get("ok"))
+    if not DIARIZATION_AVAILABLE:
+        print(f"[Warning] Speaker diarization runtime not available: {FUNASR_RUNTIME.get('error')}")
+except Exception as e:
     print(f"[Warning] Speaker diarization not available: {e}")
 
 # AI 文本优化是可选的
@@ -448,6 +459,129 @@ PRELOAD_CONFIG = {
     "funasr": "seaco-paraformer",
 }
 ENABLE_PRELOAD = os.environ.get("VOICESCRIBE_PRELOAD_MODELS") == "1"
+
+
+def _get_or_create_diarizer() -> "SpeakerDiarizer":
+    global diarizer
+    if diarizer is None:
+        diarizer = SpeakerDiarizer()
+    return diarizer
+
+
+def _speaker_runtime_status() -> dict:
+    if not DIARIZATION_AVAILABLE:
+        return {
+            "speaker_verification_loaded": False,
+            "speaker_verification_model": None,
+            "diarization_loaded": False,
+            "diarization_model": None,
+            "registered_speakers": 0,
+        }
+
+    speaker_service = diarizer if diarizer is not None else SpeakerDiarizer()
+    return speaker_service.runtime_status()
+
+
+def ensure_speaker_verification_loaded() -> "SpeakerDiarizer":
+    if not DIARIZATION_AVAILABLE:
+        raise HTTPException(400, f"Speaker features not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
+
+    speaker_service = _get_or_create_diarizer()
+    speaker_service.ensure_speaker_verification_loaded()
+    print(
+        f"[Speaker] Speaker verification ready: model={speaker_service.sv_model_id}, registered={len(speaker_service.speakers)}"
+    )
+    return speaker_service
+
+
+def ensure_diarization_loaded() -> "SpeakerDiarizer":
+    if not DIARIZATION_AVAILABLE:
+        raise HTTPException(400, f"Speaker diarization not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
+
+    speaker_service = _get_or_create_diarizer()
+    speaker_service.ensure_diarization_loaded()
+    print(
+        f"[Speaker] Diarization ready: model={speaker_service.diarization_model_id}, registered={len(speaker_service.speakers)}"
+    )
+    return speaker_service
+
+
+async def ensure_engine_loaded(
+    engine: str,
+    model: str,
+    enable_diarization: bool = False,
+):
+    global engines
+
+    existing = engines.get(engine)
+    if existing and existing.get("model") == model:
+        if engine != "funasr" or not enable_diarization or existing.get("diarization", False):
+            print(
+                f"[Load] Reusing engine={engine} model={model} diarization={existing.get('diarization', False)}"
+            )
+            return existing
+
+    if MOCK_MODE:
+        engines[engine] = {"engine": None, "model": model, "diarization": bool(enable_diarization)}
+        return engines[engine]
+
+    print(f"[Load] Loading engine={engine} model={model} diarization={enable_diarization}")
+
+    if engine == "whisper":
+        if not WHISPER_AVAILABLE:
+            raise HTTPException(400, "Whisper engine not available. Install faster-whisper.")
+        eng = WhisperEngine()
+        whisper_entry = _get_registry_entry("whisper", model)
+        load_target = whisper_entry["path"] if whisper_entry and os.path.exists(whisper_entry.get("path", "")) else model
+        eng.load(load_target)
+        engines["whisper"] = {"engine": eng, "model": model, "load_target": load_target}
+    elif engine == "whispercpp":
+        if not WHISPERCPP_AVAILABLE:
+            raise HTTPException(400, "Whisper.cpp engine not available. Install whisper-cpp via brew.")
+        whispercpp_entry = _get_registry_entry("whispercpp", model)
+        model_path = whispercpp_entry["path"] if whispercpp_entry and os.path.exists(whispercpp_entry.get("path", "")) else str(WHISPER_CPP_MODEL_DIR / f"ggml-{model}.bin")
+        eng = WhisperCppEngine(model_path=model_path)
+        engines["whispercpp"] = {"engine": eng, "model": model, "load_target": model_path}
+    elif engine == "funasr":
+        if not FUNASR_AVAILABLE:
+            raise HTTPException(400, f"FunASR engine not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
+        eng = FunASREngine()
+        eng.load(model, enable_diarization=bool(enable_diarization))
+        engines["funasr"] = {
+            "engine": eng,
+            "model": model,
+            "diarization": bool(enable_diarization),
+            "load_target": model,
+        }
+    elif engine == "parakeet":
+        if not PARAKEET_AVAILABLE:
+            raise HTTPException(400, "Parakeet engine not available. Requires NVIDIA GPU and NeMo toolkit.")
+        eng = ParakeetEngine()
+        parakeet_entry = _get_registry_entry("parakeet", model)
+        load_target = parakeet_entry["path"] if parakeet_entry and os.path.exists(parakeet_entry.get("path", "")) else model
+        eng.load(load_target)
+        engines["parakeet"] = {"engine": eng, "model": model, "load_target": load_target}
+    else:
+        raise HTTPException(400, f"Unknown engine: {engine}")
+
+    print(f"[Load] Loaded engine={engine} model={model} runtime={engines[engine]}")
+    return engines[engine]
+
+
+def _extract_builtin_speaker_labels(result: dict) -> List[dict]:
+    diarization_list = []
+    for seg in result.get("segments", []):
+        speaker = seg.get("speaker")
+        if speaker is None:
+            continue
+        diarization_list.append(
+            {
+                "start": seg.get("start", 0.0),
+                "end": seg.get("end", 0.0),
+                "speaker": speaker,
+            }
+        )
+    return diarization_list
 
 
 @app.on_event("startup")
@@ -554,6 +688,10 @@ async def root():
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
             "ai_refine": AI_REFINE_AVAILABLE,
+        },
+        "runtime_checks": {
+            "torch": TORCH_RUNTIME,
+            "funasr": FUNASR_RUNTIME,
         }
     }
 
@@ -964,43 +1102,8 @@ async def load_engine(
             model = model or request.query_params.get("model")
     if engine is None or model is None:
         raise HTTPException(422, "Missing engine/model")
-    """预加载指定引擎和模型"""
-    global engines
-    
-    if MOCK_MODE:
-        engines[engine] = {"engine": None, "model": model}
-        return {"status": "loaded (mock)", "engine": engine, "model": model}
-    
-    if engine == "whisper":
-        if not WHISPER_AVAILABLE:
-            raise HTTPException(400, "Whisper engine not available. Install faster-whisper.")
-        eng = WhisperEngine()
-        whisper_entry = _get_registry_entry("whisper", model)
-        eng.load(whisper_entry["path"] if whisper_entry and os.path.exists(whisper_entry.get("path", "")) else model)
-        engines["whisper"] = {"engine": eng, "model": model}
-    elif engine == "whispercpp":
-        if not WHISPERCPP_AVAILABLE:
-            raise HTTPException(400, "Whisper.cpp engine not available. Install whisper-cpp via brew.")
-        whispercpp_entry = _get_registry_entry("whispercpp", model)
-        model_path = whispercpp_entry["path"] if whispercpp_entry and os.path.exists(whispercpp_entry.get("path", "")) else str(WHISPER_CPP_MODEL_DIR / f"ggml-{model}.bin")
-        eng = WhisperCppEngine(model_path=model_path)
-        engines["whispercpp"] = {"engine": eng, "model": model}
-    elif engine == "funasr":
-        if not FUNASR_AVAILABLE:
-            raise HTTPException(400, "FunASR engine not available. Install funasr.")
-        eng = FunASREngine()
-        eng.load(model, enable_diarization=bool(enable_diarization))
-        engines["funasr"] = {"engine": eng, "model": model, "diarization": bool(enable_diarization)}
-    elif engine == "parakeet":
-        if not PARAKEET_AVAILABLE:
-            raise HTTPException(400, "Parakeet engine not available. Requires NVIDIA GPU and NeMo toolkit.")
-        eng = ParakeetEngine()
-        parakeet_entry = _get_registry_entry("parakeet", model)
-        eng.load(parakeet_entry["path"] if parakeet_entry and os.path.exists(parakeet_entry.get("path", "")) else model)
-        engines["parakeet"] = {"engine": eng, "model": model}
-    else:
-        raise HTTPException(400, f"Unknown engine: {engine}")
-    
+
+    await ensure_engine_loaded(engine, model, bool(enable_diarization) if engine == "funasr" else False)
     return {"status": "loaded", "engine": engine, "model": model}
 
 
@@ -1038,20 +1141,17 @@ async def transcribe(
     enable_ai_refine: bool = Form(False),
 ) -> TranscribeResult:
     """转录音频文件"""
-    global engines, diarizer
-    
-    # Save uploaded file
+    global diarizer
+
     suffix = Path(audio.filename).suffix or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await audio.read()
         tmp.write(content)
         tmp_path = tmp.name
-    
+
     try:
-        # Mock 模式
         if MOCK_MODE:
             result = mock_transcribe(tmp_path, language)
-            # AI 文本优化（mock 模式也支持）
             if enable_ai_refine and AI_REFINE_AVAILABLE:
                 refiner = AIRefiner()
                 hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
@@ -1063,69 +1163,68 @@ async def transcribe(
                 engine=f"{engine} (mock)",
                 model=model,
             )
-        
-        # 检查引擎是否可用
-        if engine == "whisper" and not WHISPER_AVAILABLE:
-            raise HTTPException(400, "Whisper engine not available")
-        if engine == "whispercpp" and not WHISPERCPP_AVAILABLE:
-            raise HTTPException(400, "Whisper.cpp engine not available")
-        if engine == "funasr" and not FUNASR_AVAILABLE:
-            raise HTTPException(400, "FunASR engine not available")
-        if engine == "parakeet" and not PARAKEET_AVAILABLE:
-            raise HTTPException(400, "Parakeet engine not available")
-        
-        # Get or create engine
-        if engine not in engines or engines[engine]["model"] != model:
-            await load_engine(engine, model, enable_diarization=enable_diarization if engine == "funasr" else None)
-        elif engine == "funasr" and enable_diarization:
-            # 如果需要说话人识别但当前引擎未开启，则重新加载
-            if not engines.get("funasr", {}).get("diarization", False):
-                await load_engine(engine, model, enable_diarization=True)
-        
-        eng = engines[engine]["engine"]
 
-        # Transcribe (pass hotwords for FunASR)
+        entry = await ensure_engine_loaded(
+            engine,
+            model,
+            bool(enable_diarization) if engine == "funasr" else False,
+        )
+        eng = entry["engine"]
+
+        print(
+            f"[Transcribe] Start engine={engine} model={model} diarization={enable_diarization} ai_refine={enable_ai_refine}"
+        )
+
         if engine == "funasr" and hotwords:
             print(f"[Transcribe] FunASR with hotwords: {hotwords}")
             result = eng.transcribe(tmp_path, language=language, hotwords=hotwords)
         else:
             print(f"[Transcribe] Engine={engine}, hotwords={hotwords or '(none)'}")
             result = eng.transcribe(tmp_path, language=language)
-        
-        # Speaker diarization if enabled (FunASR 内置 spk_model 时可跳过)
+
         diarization_done = False
-        if engine == "funasr" and enable_diarization:
-            if engines.get("funasr", {}).get("diarization", False):
-                # 如果 FunASR 已给出 speaker 标签，尝试将标签映射为已注册说话人姓名
-                try:
-                    diarization_list = [
-                        {
-                            "start": seg["start"],
-                            "end": seg["end"],
-                            "speaker": seg.get("speaker"),
-                        }
-                        for seg in result.get("segments", [])
-                        if seg.get("speaker") is not None
-                    ]
-                    if diarization_list:
-                        diarization_done = True
-                        if diarizer is None:
-                            diarizer = SpeakerDiarizer()
-                        if diarizer.speakers and diarizer.sv_model is None:
-                            diarizer.load(load_diarization=False)
-                        result = diarizer.assign_speakers(result, diarization_list, audio_path=tmp_path)
-                except Exception as e:
-                    print(f"[Speaker] Name mapping failed: {e}")
+        if enable_diarization:
+            builtin_diarization = _extract_builtin_speaker_labels(result)
+            if engine == "funasr" and builtin_diarization:
+                print(
+                    f"[Speaker] Using FunASR built-in speaker labels: segments={len(builtin_diarization)}"
+                )
+                diarization_done = True
+                if DIARIZATION_AVAILABLE:
+                    speaker_service = _get_or_create_diarizer()
+                    if speaker_service.speakers:
+                        speaker_service.ensure_speaker_verification_loaded()
+                        print("[Speaker] Mapping FunASR labels with speaker verification")
+                        result = speaker_service.assign_speakers(
+                            result,
+                            builtin_diarization,
+                            audio_path=tmp_path,
+                        )
+                    else:
+                        print("[Speaker] No registered speakers, keeping FunASR labels")
+                        result = speaker_service.assign_speakers(result, builtin_diarization)
+                else:
+                    print("[Speaker] SpeakerDiarizer unavailable, returning FunASR speaker labels only")
 
-        if enable_diarization and DIARIZATION_AVAILABLE and not diarization_done:
-            if diarizer is None:
-                diarizer = SpeakerDiarizer()
-                diarizer.load()
+            if not diarization_done:
+                if not DIARIZATION_AVAILABLE:
+                    raise HTTPException(400, "Speaker diarization helper not available")
 
-            speakers = diarizer.diarize(tmp_path)
-            result = diarizer.assign_speakers(result, speakers, audio_path=tmp_path)
+                speaker_service = ensure_diarization_loaded()
+                if speaker_service.speakers:
+                    speaker_service.ensure_speaker_verification_loaded()
+                    print("[Speaker] Using external diarization with speaker verification mapping")
+                else:
+                    print("[Speaker] Using external diarization without registered speaker mapping")
 
-        # AI 文本优化
+                speakers = speaker_service.diarize(tmp_path)
+                print(f"[Speaker] External diarization produced {len(speakers)} segments")
+                result = speaker_service.assign_speakers(result, speakers, audio_path=tmp_path)
+                diarization_done = True
+
+            if not diarization_done:
+                raise HTTPException(500, "Speaker diarization requested but no diarization result was produced")
+
         if enable_ai_refine and AI_REFINE_AVAILABLE:
             refiner = AIRefiner()
             hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
@@ -1141,7 +1240,7 @@ async def transcribe(
             engine=engine,
             model=model,
         )
-    
+
     finally:
         os.unlink(tmp_path)
 
@@ -1237,26 +1336,21 @@ async def register_speaker(
     audio: UploadFile = File(...),
 ):
     """注册说话人声纹"""
-    global diarizer
-    
     if MOCK_MODE:
         return {"status": "registered (mock)", "speaker_id": "mock_speaker_001", "name": name}
-    
-    if not DIARIZATION_AVAILABLE:
-        raise HTTPException(400, "Speaker diarization not available")
-    
-    if diarizer is None:
-        diarizer = SpeakerDiarizer()
-        diarizer.load()
-    
-    # Save uploaded file
+
+    speaker_service = ensure_speaker_verification_loaded()
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
         content = await audio.read()
         tmp.write(content)
         tmp_path = tmp.name
-    
+
     try:
-        speaker_id = diarizer.register_speaker(name, tmp_path)
+        speaker_id = speaker_service.register_speaker(name, tmp_path)
+        print(
+            f"[Speaker] Registered speaker name={name} id={speaker_id} sv_model={speaker_service.sv_model_id}"
+        )
         return {"status": "registered", "speaker_id": speaker_id, "name": name}
     finally:
         os.unlink(tmp_path)
@@ -1265,36 +1359,26 @@ async def register_speaker(
 @app.get("/speakers")
 async def list_speakers():
     """列出已注册的说话人"""
-    global diarizer
-
     if MOCK_MODE:
         return {"speakers": [{"speaker_id": "mock_001", "name": "Mock User"}]}
 
     if not DIARIZATION_AVAILABLE:
         return {"speakers": []}
 
-    # 如果 diarizer 未初始化，创建一个临时实例来读取已注册的说话人
-    if diarizer is None:
-        temp_diarizer = SpeakerDiarizer()
-        return {"speakers": temp_diarizer.list_speakers()}
-
-    return {"speakers": diarizer.list_speakers()}
+    speaker_service = diarizer if diarizer is not None else SpeakerDiarizer()
+    return {"speakers": speaker_service.list_speakers()}
 
 
 @app.delete("/speakers/{speaker_id}")
 async def delete_speaker(speaker_id: str):
     """删除说话人"""
-    global diarizer
-
     if MOCK_MODE:
         return {"status": "deleted (mock)", "speaker_id": speaker_id}
 
     if not DIARIZATION_AVAILABLE:
-        raise HTTPException(400, "Speaker diarization not available")
+        raise HTTPException(400, f"Speaker features not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
 
-    # 如果 diarizer 未初始化，创建一个临时实例
     target_diarizer = diarizer if diarizer else SpeakerDiarizer()
-
     success = target_diarizer.delete_speaker(speaker_id)
     if not success:
         raise HTTPException(404, f"Speaker {speaker_id} not found")
@@ -1314,7 +1398,20 @@ async def health_check():
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
             "ai_refine": AI_REFINE_AVAILABLE,
-        }
+        },
+        "loaded_engines": {
+            name: {
+                "model": entry.get("model"),
+                "diarization": bool(entry.get("diarization", False)),
+                "load_target": entry.get("load_target"),
+            }
+            for name, entry in engines.items()
+        },
+        "speaker_runtime": _speaker_runtime_status(),
+        "runtime_checks": {
+            "torch": TORCH_RUNTIME,
+            "funasr": FUNASR_RUNTIME,
+        },
     }
 
 

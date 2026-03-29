@@ -25,6 +25,10 @@ export async function getHotkeyDisplay(): Promise<string> {
   return invoke("get_hotkey_display");
 }
 
+export async function debugHotkeyLog(message: string): Promise<void> {
+  await invoke("debug_hotkey_log", { message });
+}
+
 export async function startRecording(): Promise<string> {
   return invoke("start_recording");
 }

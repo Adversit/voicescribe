@@ -1,4 +1,4 @@
-﻿use crate::commands::text_input::{clear_previous_window, remember_foreground_window};
+use crate::commands::text_input::{clear_previous_window, remember_foreground_window};
 use crate::state::RecordingState;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -14,13 +14,16 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 type SharedWriter = Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>;
+type SharedProcessor = Arc<Mutex<LinearResampler>>;
 
 static RECORDER: OnceLock<Mutex<AudioRecorder>> = OnceLock::new();
 static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 static AUDIO_LEVEL_BITS: AtomicU32 = AtomicU32::new(0);
+const TARGET_SAMPLE_RATE: u32 = 16_000;
+const TARGET_CHANNELS: u16 = 1;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RecordingStatus {
@@ -34,6 +37,87 @@ struct AudioRecorder {
     stop_tx: Option<Sender<()>>,
     recording_path: Option<PathBuf>,
     start_time: Option<Instant>,
+}
+
+struct LinearResampler {
+    input_sample_rate: u32,
+    output_sample_rate: u32,
+    position: f64,
+    buffer: Vec<i16>,
+}
+
+impl LinearResampler {
+    fn new(input_sample_rate: u32, output_sample_rate: u32) -> Self {
+        Self {
+            input_sample_rate,
+            output_sample_rate,
+            position: 0.0,
+            buffer: Vec::new(),
+        }
+    }
+
+    fn process(&mut self, input: &[i16]) -> Vec<i16> {
+        if input.is_empty() {
+            return Vec::new();
+        }
+
+        if self.input_sample_rate == self.output_sample_rate {
+            return input.to_vec();
+        }
+
+        self.buffer.extend_from_slice(input);
+        let step = self.input_sample_rate as f64 / self.output_sample_rate as f64;
+        let mut output = Vec::new();
+
+        while self.position + 1.0 < self.buffer.len() as f64 {
+            output.push(self.sample_at(self.position));
+            self.position += step;
+        }
+
+        let consumed = self.position.floor() as usize;
+        if consumed > 0 {
+            self.buffer.drain(..consumed);
+            self.position -= consumed as f64;
+        }
+
+        output
+    }
+
+    fn flush(&mut self) -> Vec<i16> {
+        if self.buffer.is_empty() {
+            return Vec::new();
+        }
+
+        if self.input_sample_rate == self.output_sample_rate {
+            self.position = 0.0;
+            return std::mem::take(&mut self.buffer);
+        }
+
+        let step = self.input_sample_rate as f64 / self.output_sample_rate as f64;
+        let mut output = Vec::new();
+
+        while self.position < self.buffer.len() as f64 {
+            output.push(self.sample_at(self.position));
+            self.position += step;
+        }
+
+        self.buffer.clear();
+        self.position = 0.0;
+        output
+    }
+
+    fn sample_at(&self, position: f64) -> i16 {
+        let index = position.floor() as usize;
+        if index + 1 >= self.buffer.len() {
+            return *self.buffer.last().unwrap_or(&0);
+        }
+
+        let fraction = position - index as f64;
+        let left = self.buffer[index] as f64;
+        let right = self.buffer[index + 1] as f64;
+        let interpolated = left + (right - left) * fraction;
+        interpolated.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16
+    }
 }
 
 impl Default for AudioRecorder {
@@ -57,7 +141,12 @@ pub fn recording_active() -> bool {
 
 fn emit_level(app: &AppHandle, level: f32) {
     AUDIO_LEVEL_BITS.store(level.to_bits(), Ordering::SeqCst);
-    let _ = app.emit("audio-level", level);
+
+    for label in ["main", "overlay"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.emit("audio-level", level);
+        }
+    }
 }
 
 fn emit_chunk(app: &AppHandle, samples: &[i16]) {
@@ -71,25 +160,20 @@ fn emit_chunk(app: &AppHandle, samples: &[i16]) {
     }
 
     let payload = BASE64.encode(bytes);
-    let _ = app.emit("audio-chunk", payload);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("audio-chunk", payload);
+    }
 }
 
 fn select_config(device: &cpal::Device) -> Result<(SampleFormat, StreamConfig), String> {
-    if let Ok(configs) = device.supported_input_configs() {
-        for cfg in configs {
-            if cfg.channels() == 1 && cfg.min_sample_rate().0 <= 16_000 && cfg.max_sample_rate().0 >= 16_000 {
-                return Ok((
-                    cfg.sample_format(),
-                    cfg.with_sample_rate(cpal::SampleRate(16_000)).config(),
-                ));
-            }
-        }
-    }
-
     let default = device.default_input_config().map_err(|err| err.to_string())?;
-    let mut config = default.config();
-    config.channels = 1;
-    config.sample_rate = cpal::SampleRate(16_000);
+    let config = default.config();
+    eprintln!(
+        "[Audio] Selected input config: channels={} sample_rate={} format={:?}",
+        config.channels,
+        config.sample_rate.0,
+        default.sample_format()
+    );
     Ok((default.sample_format(), config))
 }
 
@@ -117,6 +201,27 @@ fn write_samples(writer: &SharedWriter, samples: &[i16]) {
             }
         }
     }
+}
+
+fn process_audio_chunk(
+    writer: &SharedWriter,
+    processor: &SharedProcessor,
+    app: &AppHandle,
+    mono_samples: &[i16],
+) {
+    let processed = match processor.lock() {
+        Ok(mut processor_guard) => processor_guard.process(mono_samples),
+        Err(_) => return,
+    };
+
+    if processed.is_empty() {
+        return;
+    }
+
+    let level = level_from_i16(&processed);
+    write_samples(writer, &processed);
+    emit_level(app, level);
+    emit_chunk(app, &processed);
 }
 
 fn mono_i16_from_f32(data: &[f32], channels: usize) -> Vec<i16> {
@@ -158,10 +263,7 @@ fn mono_i16_from_u16(data: &[u16], channels: usize) -> Vec<i16> {
 
     data.chunks(channels)
         .map(|frame| {
-            let sum = frame
-                .iter()
-                .map(|sample| *sample as i32 - 32768)
-                .sum::<i32>();
+            let sum = frame.iter().map(|sample| *sample as i32 - 32768).sum::<i32>();
             (sum / frame.len() as i32) as i16
         })
         .collect()
@@ -172,54 +274,61 @@ fn build_stream(
     sample_format: SampleFormat,
     config: &StreamConfig,
     writer: SharedWriter,
+    processor: SharedProcessor,
     app: AppHandle,
 ) -> Result<Stream, String> {
     let channels = config.channels as usize;
     let error_handler = |error| eprintln!("[Audio] stream error: {error}");
 
     match sample_format {
-        SampleFormat::F32 => device
-            .build_input_stream(
-                config,
-                move |data: &[f32], _| {
-                    let mono = mono_i16_from_f32(data, channels);
-                    let level = level_from_i16(&mono);
-                    write_samples(&writer, &mono);
-                    emit_level(&app, level);
-                    emit_chunk(&app, &mono);
-                },
-                error_handler,
-                None,
-            )
-            .map_err(|err| err.to_string()),
-        SampleFormat::I16 => device
-            .build_input_stream(
-                config,
-                move |data: &[i16], _| {
-                    let mono = mono_i16_from_i16(data, channels);
-                    let level = level_from_i16(&mono);
-                    write_samples(&writer, &mono);
-                    emit_level(&app, level);
-                    emit_chunk(&app, &mono);
-                },
-                error_handler,
-                None,
-            )
-            .map_err(|err| err.to_string()),
-        SampleFormat::U16 => device
-            .build_input_stream(
-                config,
-                move |data: &[u16], _| {
-                    let mono = mono_i16_from_u16(data, channels);
-                    let level = level_from_i16(&mono);
-                    write_samples(&writer, &mono);
-                    emit_level(&app, level);
-                    emit_chunk(&app, &mono);
-                },
-                error_handler,
-                None,
-            )
-            .map_err(|err| err.to_string()),
+        SampleFormat::F32 => {
+            let writer = writer.clone();
+            let processor = processor.clone();
+            let app = app.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[f32], _| {
+                        let mono = mono_i16_from_f32(data, channels);
+                        process_audio_chunk(&writer, &processor, &app, &mono);
+                    },
+                    error_handler,
+                    None,
+                )
+                .map_err(|err| err.to_string())
+        }
+        SampleFormat::I16 => {
+            let writer = writer.clone();
+            let processor = processor.clone();
+            let app = app.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[i16], _| {
+                        let mono = mono_i16_from_i16(data, channels);
+                        process_audio_chunk(&writer, &processor, &app, &mono);
+                    },
+                    error_handler,
+                    None,
+                )
+                .map_err(|err| err.to_string())
+        }
+        SampleFormat::U16 => {
+            let writer = writer.clone();
+            let processor = processor.clone();
+            let app = app.clone();
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[u16], _| {
+                        let mono = mono_i16_from_u16(data, channels);
+                        process_audio_chunk(&writer, &processor, &app, &mono);
+                    },
+                    error_handler,
+                    None,
+                )
+                .map_err(|err| err.to_string())
+        }
         other => Err(format!("unsupported sample format: {other:?}")),
     }
 }
@@ -295,8 +404,8 @@ pub fn start_recording(app: AppHandle, state: State<'_, RecordingState>) -> Resu
         let writer = match WavWriter::create(
             &thread_file_path,
             WavSpec {
-                channels: 1,
-                sample_rate: 16_000,
+                channels: TARGET_CHANNELS,
+                sample_rate: TARGET_SAMPLE_RATE,
                 bits_per_sample: 16,
                 sample_format: HoundSampleFormat::Int,
             },
@@ -309,7 +418,18 @@ pub fn start_recording(app: AppHandle, state: State<'_, RecordingState>) -> Resu
         };
 
         let shared_writer = Arc::new(Mutex::new(Some(writer)));
-        let stream = match build_stream(&device, sample_format, &config, shared_writer.clone(), thread_app) {
+        let processor = Arc::new(Mutex::new(LinearResampler::new(
+            config.sample_rate.0,
+            TARGET_SAMPLE_RATE,
+        )));
+        let stream = match build_stream(
+            &device,
+            sample_format,
+            &config,
+            shared_writer.clone(),
+            processor.clone(),
+            thread_app.clone(),
+        ) {
             Ok(stream) => stream,
             Err(err) => {
                 let _ = ready_tx.send(Err(err));
@@ -332,6 +452,17 @@ pub fn start_recording(app: AppHandle, state: State<'_, RecordingState>) -> Resu
         }
 
         drop(stream);
+
+        let trailing = match processor.lock() {
+            Ok(mut processor_guard) => processor_guard.flush(),
+            Err(_) => Vec::new(),
+        };
+        if !trailing.is_empty() {
+            write_samples(&shared_writer, &trailing);
+            emit_level(&thread_app, level_from_i16(&trailing));
+            emit_chunk(&thread_app, &trailing);
+        }
+
         {
             let mut guard = match shared_writer.lock() {
                 Ok(guard) => guard,
