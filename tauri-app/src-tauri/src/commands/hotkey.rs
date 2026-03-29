@@ -4,7 +4,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -26,6 +26,8 @@ struct HotkeyRuntime {
     is_long_press_mode: bool,
     long_press_generation: u64,
     app_handle: Option<AppHandle>,
+    last_emitted_event: Option<&'static str>,
+    last_emitted_at: Option<Instant>,
 }
 
 impl Default for HotkeyRuntime {
@@ -36,6 +38,8 @@ impl Default for HotkeyRuntime {
             is_long_press_mode: false,
             long_press_generation: 0,
             app_handle: None,
+            last_emitted_event: None,
+            last_emitted_at: None,
         }
     }
 }
@@ -86,6 +90,29 @@ fn emit_event(name: &str) {
         log_hotkey("emit_event skipped: app_handle missing");
     }
 }
+fn should_emit_hotkey_event(event_name: &'static str) -> bool {
+    let mut guard = match runtime().lock() {
+        Ok(guard) => guard,
+        Err(_) => return true,
+    };
+
+    let now = Instant::now();
+    if let (Some(last_event), Some(last_at)) = (guard.last_emitted_event, guard.last_emitted_at) {
+        if last_event == event_name && now.duration_since(last_at) <= Duration::from_millis(200) {
+            log_hotkey(format!(
+                "suppress_duplicate_event name={} delta_ms={}",
+                event_name,
+                now.duration_since(last_at).as_millis()
+            ));
+            return false;
+        }
+    }
+
+    guard.last_emitted_event = Some(event_name);
+    guard.last_emitted_at = Some(now);
+    true
+}
+
 fn is_key_down(vk: i32) -> bool {
     unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
 }
@@ -133,6 +160,42 @@ fn matches_hotkey(vk: u32) -> bool {
     guard.binding.primary_key_code >= 0
         && vk == guard.binding.primary_key_code as u32
         && modifiers_match(&guard.binding)
+}
+
+fn log_hotkey_candidate(kb: &KBDLLHOOKSTRUCT, message: u32) {
+    let guard = match runtime().lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    let current = normalized_modifier_state(&guard.binding.primary_code);
+    let modifiers_ok = current.ctrl == guard.binding.modifiers.ctrl
+        && current.shift == guard.binding.modifiers.shift
+        && current.win == guard.binding.modifiers.win
+        && current.alt_left == guard.binding.modifiers.alt_left
+        && current.alt_right == guard.binding.modifiers.alt_right;
+
+    log_hotkey(format!(
+        "hotkey_candidate display={} primary_code={} primary_key_code={} vk={} scan={} flags={} message={} expected_modifiers=ctrl:{} shift:{} win:{} alt_left:{} alt_right:{} current_modifiers=ctrl:{} shift:{} win:{} alt_left:{} alt_right:{} modifiers_match={}",
+        guard.binding.display,
+        guard.binding.primary_code,
+        guard.binding.primary_key_code,
+        kb.vkCode,
+        kb.scanCode,
+        kb.flags.0,
+        message,
+        guard.binding.modifiers.ctrl,
+        guard.binding.modifiers.shift,
+        guard.binding.modifiers.win,
+        guard.binding.modifiers.alt_left,
+        guard.binding.modifiers.alt_right,
+        current.ctrl,
+        current.shift,
+        current.win,
+        current.alt_left,
+        current.alt_right,
+        modifiers_ok,
+    ));
 }
 
 fn spawn_long_press_timer(generation: u64) {
@@ -217,7 +280,9 @@ fn handle_key_up() {
     };
 
     if let Some(event_name) = event_name {
-        emit_event(event_name);
+        if should_emit_hotkey_event(event_name) {
+            emit_event(event_name);
+        }
     }
 }
 
@@ -227,7 +292,8 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         let message = wparam.0 as u32;
 
         if kb.vkCode == 0xA4 || kb.vkCode == 0xA5 || kb.vkCode == 0x11 || kb.vkCode == 0xA2 || kb.vkCode == 0xA3 || kb.vkCode == 0x10 || kb.vkCode == 0xA0 || kb.vkCode == 0xA1 || kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32 {
-            log_hotkey(format!("raw_modifier_event vk={} message={}", kb.vkCode, message));
+            log_hotkey(format!("raw_modifier_event vk={} scan={} flags={} message={}", kb.vkCode, kb.scanCode, kb.flags.0, message));
+            log_hotkey_candidate(&kb, message);
         }
 
         if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
@@ -240,7 +306,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         }
 
         if matches_hotkey(kb.vkCode) {
-            log_hotkey(format!("matches_hotkey vk={} message={}", kb.vkCode, message));
+            log_hotkey(format!("matches_hotkey vk={} scan={} flags={} message={}", kb.vkCode, kb.scanCode, kb.flags.0, message));
             match message {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
                     handle_key_down();
@@ -435,7 +501,7 @@ pub fn register_hotkey_binding(
     *state.modifiers.lock().map_err(|_| "Hotkey mutex poisoned")? = mask_from_binding(&binding);
     *state.key_code.lock().map_err(|_| "Hotkey mutex poisoned")? = binding.primary_key_code;
     *state.binding.lock().map_err(|_| "Hotkey mutex poisoned")? = binding.clone();
-    log_hotkey(format!("register_hotkey_binding display={} primary_code={} primary_key_code={}", binding.display, binding.primary_code, binding.primary_key_code));
+    log_hotkey(format!("register_hotkey_binding display={} primary_code={} primary_key_code={} modifiers=ctrl:{} shift:{} win:{} alt_left:{} alt_right:{}", binding.display, binding.primary_code, binding.primary_key_code, binding.modifiers.ctrl, binding.modifiers.shift, binding.modifiers.win, binding.modifiers.alt_left, binding.modifiers.alt_right));
 
     let mut guard = runtime().lock().map_err(|_| "Hotkey runtime mutex poisoned")?;
     guard.binding = binding;

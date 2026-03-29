@@ -190,3 +190,35 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
 - 表现：用户观察到波纹呈现“不是 0 就是 1”的跳变感，缺乏中间高、边缘低的录音波纹观感。
 - 原因：当前前端主要吃 `audio-level` 标量并以历史队列直接画柱条，本质上更接近电平条；虽然信号来自真实录音，但可视化维度不够，无法呈现真实波形/包络。
 - 处理：改为让 overlay 直接消费录音线程发出的真实 `audio-chunk` PCM 数据块，基于真实样本窗口计算柱条，再做轻度平滑与镜像排布，确保“真实驱动”与“可读观感”同时满足。
+## 57. 快捷键开始录音后缺少稳定首帧反馈，用户重复按键会立刻触发停止与转录
+- 表现：用户主观感受为“开始录音时要等说话人分离/识别模型加载，按很多次快捷键才会启动”。
+- 实际日志：`voicescribe-hotkey.log` 显示第一次 `hotkey-start-recording` 已经成功进入 `beginRecordingSession -> startRecording success`；后续重复按键马上触发 `hotkey-stop-recording -> finishRecordingSession -> transcribeAudio`，此时才进入 `backend transcribe request ... diarization=true`。
+- 根因：当前 `overlay-ready` 监听是在第一次 `showOverlay()` 时才注册，导致 overlay 启动早于主窗口监听注册时会丢失首个 ready 事件；于是 `waitForOverlayReady` 在开始录音后反复超时，用户第一时间看不到稳定的启动反馈，容易连续再按，把录音立刻停掉。
+- 结论：所谓“开始录音被说话人模型加载拖慢”是表象，真实问题是录音已开始但首帧可见反馈不足，重复点击把流程切换到了停止/转录分支。
+- 处理：需要把 overlay-ready 监听前移到主窗口启动阶段，避免首个 ready 事件丢失，并回归验证首次开始录音是否不再出现 `waitForOverlayReady timed out`。
+## 58. `Right Alt` 单键热键会在一次物理按压中重复触发两次开始录音
+- 表现：用户感觉“第一次按快捷键经常启动不了，需要多按几次”；最新热键日志显示同一秒内会连续出现两条 `hotkey-start-recording`。
+- 实际日志：在同一次 `Right Alt` 按压下，先后出现 `single_click -> start`、`beginRecordingSession startRecording success`，随后紧接着又出现第二条 `single_click -> start`，并导致 `beginRecordingSession startRecording failed: Recording already active`。
+- 影响：这会伪装成“快捷键第一次不生效”或“开始阶段被别的任务阻塞”，实际上是热键层对同一物理按压重复发出了开始事件。
+- 处理：需在 Rust 热键层对同名开始/停止事件增加短时去重，优先挡住 `Right Alt` 这种单键触发的重复上报。
+## 59. `Right Alt` 单键热键重复触发已在 Rust 热键层增加 200ms 去重
+- 处理：在 `tauri-app/src-tauri/src/commands/hotkey.rs` 为同名 `hotkey-start-recording` / `hotkey-stop-recording` 增加短时去重窗口；同一物理按压内若重复上报相同事件，则直接记录 `suppress_duplicate_event` 并丢弃。
+- 验证：`cargo check` 已通过；随后手动结束旧的 `voicescribe-desktop.exe` 与 `server.py`，再完整执行 `cmd /c scripts\start_windows_system.bat`，新进程启动时间更新为 2026-03-29 23:19:21（桌面端）和 2026-03-29 23:19:23（后端）。
+- 当前结论：此前“更新后像是没重启”的判断在本次链路里部分成立，`start_windows_system.bat` 单独执行时没有替换已在运行的旧桌面进程；本轮已通过手动清理旧进程后重启到最新代码。热键去重的真实手测结果仍待用户再次按一次 `Right Alt` 回归确认。
+## 60. 外接键盘 `Right Alt` 在设置页被保存为 `AltRight(165)`，但运行时低层 hook 实际收到 `vk=164`
+- 表现：重启后用户明确使用外接键盘右 Alt 单击，应用界面与后端均无反应；热键日志只出现 `raw_modifier_event vk=164 ...`，没有 `matches_hotkey`。
+- 对照：当前持久化设置文件 `C:\Users\DingK\AppData\Roaming\com.voicescribe.desktop\voicescribe-settings.json` 中保存的是 `display=Right Alt`、`primaryCode=AltRight`、`primaryKeyCode=165`。
+- 结论：当前不再是“没重启”或“第一次要多按几次”的问题，而是“设置页录制到的浏览器键位标识”和 Windows 低层 hook 收到的实际键码在外接键盘上不一致”。
+- 下一步：优先修 `hotkey.rs` 的左右 Alt 判定逻辑，不只按裸 `vkCode`，还要结合低层键盘事件的扩展标志识别物理右 Alt。
+## 61. 外接键盘右 Alt 匹配已改为结合低层扩展标志识别
+- 处理：`tauri-app/src-tauri/src/commands/hotkey.rs` 不再只按 `vkCode == 165` 认右 Alt，而是改成“右 Alt = `vk=165` 或 `vk=164 + extended flag`”；同时原始热键日志补充 `scanCode` 与 `flags`，便于区分物理左右 Alt。
+- 验证：`cargo check` 通过；手动清理旧的桌面端与 `server.py` 后重新执行 `cmd /c scripts\start_windows_system.bat`，新进程时间更新为桌面端 2026-03-29 23:29:50、后端 2026-03-29 23:29:52，`/health=healthy`。
+- 待人工验收：用户使用外接键盘右 Alt 单击一次，确认是否出现 `matches_hotkey`、悬浮窗与录音启动。## 62. 右 Alt 扩展标志匹配修复未真正落盘，当前运行时仍按裸 k == 165 判断
+- 现象：最新日志中已经能看到外接键盘右 Alt 出现 k=164 scan=56 flags=32 这类扩展键事件，但仍然没有 matches_hotkey。
+- 排查：回读 	auri-app/src-tauri/src/commands/hotkey.rs 发现 matches_hotkey 仍然是旧实现 k == primary_key_code，说明上一轮“按扩展标志识别右 Alt”的替换没有真正写进源码。
+- 结论：这条当前不是用户按错，也不是模型加载慢，而是修复未落盘，运行时代码仍无法识别 k=164 + extended flag 这一类外接键盘右 Alt 事件。
+
+## 63. 空录音/无效语音进入说话人分离时会抛 500，并触发前端重复重试
+- 现象：ackend/diarization/speaker.py 在 self.diarization_model(processed_audio_path) 处抛出 AssertionError: modelscope error: The effective audio duration is too short.，随后 /transcribe 返回 500，前端热键日志持续出现多次 ackend transcribe attempt -> response_error 500。
+- 结论：当前空录音或没有有效语音内容时，后端没有把“说话人分离最短有效音频长度不足”收口成可预期分支，而是直接炸成 500；前端又把它当成可重试错误，造成重复循环。
+- 下一步：在 speaker.py 和 server.py 把“空音频/过短音频/无语音内容”降级成跳过 diarization 或用户可理解的失败，不再返回 500。

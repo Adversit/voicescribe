@@ -45,6 +45,10 @@ function ensureOverlayReadyListener() {
   }).then(() => undefined);
 }
 
+export function primeOverlayBridge() {
+  ensureOverlayReadyListener();
+}
+
 async function waitForOverlayReady() {
   ensureOverlayReadyListener();
   if (overlayReady) {
@@ -106,4 +110,8 @@ export async function hideOverlay(): Promise<void> {
   await pushOverlayState({ mode: "hidden" });
   await invoke("hide_overlay");
   await debugHotkeyLog("hideOverlay success").catch(() => undefined);
+}
+
+if (isTauriRuntime()) {
+  ensureOverlayReadyListener();
 }

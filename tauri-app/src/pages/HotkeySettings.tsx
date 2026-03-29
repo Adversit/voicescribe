@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getHotkeyDisplay, registerHotkeyBinding } from "../api/tauri";
+import { debugHotkeyLog, getHotkeyDisplay, registerHotkeyBinding } from "../api/tauri";
 import {
   SettingsPage,
   SettingsSection,
@@ -236,6 +236,7 @@ export function HotkeySettings() {
               className={secondaryButtonClassName}
               onClick={() => {
                 const binding = activeBinding;
+                void debugHotkeyLog(`capture apply primaryCode=${binding.primaryCode} primaryKeyCode=${binding.primaryKeyCode} display=${binding.display}`).catch(() => undefined);
                 void registerHotkeyBinding(binding)
                   .then(() => getHotkeyDisplay())
                   .then((value) => {

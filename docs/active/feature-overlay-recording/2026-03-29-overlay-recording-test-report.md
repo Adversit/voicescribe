@@ -61,3 +61,28 @@
 - `audio.rs` 已把真实 `audio-chunk` PCM 事件同时发送给 `main` 与 `overlay`。
 - `RecordingOverlay.tsx` 已改为优先消费真实 `audio-chunk` 计算柱条，只把 `audio-level` 当作首帧/回退信号；柱条做了轻度平滑和镜像排布，以恢复“中心聚焦、边缘衰减”的录音波纹观感。
 - 静态验证：`npm run build`、`cargo check` 已再次通过。
+## 2026-03-29 22:45 开始录音响应慢的真实定位
+- 读取 `C:\Users\DingK\AppData\Local\Temp\voicescribe-hotkey.log` 后确认：第一次热键开始录音已经成功进入 `beginRecordingSession -> startRecording success`。
+- 同一日志链还显示：用户连续再次按键后，流程立即切换到 `finishRecordingSession -> transcribeAudio -> backend transcribe request(diarization=true)`，这才触发说话人分离/识别模型。
+- 因此本问题不是“开始录音时同步加载说话人模型”，而是“开始录音后首帧反馈不足，导致重复按键把会话提前停掉”。
+- 当前最小修复方向：将 `overlay-ready` 监听前移到主窗口启动阶段，避免第一次 `showOverlay()` 才注册监听，进而消除 `waitForOverlayReady timed out`。
+## 2026-03-29 22:45 overlay-ready 前移验证
+- 修改：`overlayWindow.ts` 在主窗口模块初始化阶段即注册 `overlay-ready` 监听，并由 `AppShell.tsx` 启动时主动 `primeOverlayBridge()`。
+- 自动验证：重启系统后，`voicescribe-hotkey.log` 已出现同一时间戳的 `frontend overlay bind success -> frontend overlay-ready emitted to main -> frontend overlay-ready received`。
+- 结论：主窗口现在能在冷启动阶段提前接住 overlay 的首个 ready 事件，理论上第一次开始录音不应再因为 `waitForOverlayReady timed out` 缺少反馈而诱发重复点击。
+- 待人工验证：重新手测“只按一次快捷键开始录音”，确认不再因为误以为没启动而连续再按，进而误触停止与后续说话人模型加载。
+## 2026-03-29 22:50 `Right Alt` 重复触发定位
+- 重启后的新进程日志已确认：并非旧进程未生效。
+- 同一次 `Right Alt` 物理按压下，日志连续出现两次 `single_click -> start` 与两次 `hotkey-start-recording`。
+- 第一条已经成功开始录音；第二条紧跟着再次进入 `beginRecordingSession`，于是出现 `startRecording failed: Recording already active`。
+- 当前问题已从“模型加载拖慢开始录音”收口为“热键层重复触发导致开始录音反馈异常”。
+## 2026-03-29 23:20 `Right Alt` 去重修复与完整重启验证
+- 代码：`tauri-app/src-tauri/src/commands/hotkey.rs` 已增加同名热键事件 200ms 去重，目标是消除一次物理 `Right Alt` 按压内重复出现两条 `hotkey-start-recording`。
+- 自动验证：`cargo check` 通过；`npm run build` 已在本轮前置通过。
+- 启动验证：手动结束旧的桌面端与 `server.py` 后重新执行 `cmd /c scripts\start_windows_system.bat`，新进程时间为桌面端 23:19:21、后端 23:19:23，`GET /health` 返回 `healthy`，`mock_mode=false`。
+- 待人工验收：冷启动后只按一次 `Right Alt`，确认是否仍需多次按键才能开始第一次录音。
+## 2026-03-29 23:28 外接键盘右 Alt 不命中定位
+- 用户回归：冷启动后，明确按外接键盘右 Alt，界面与后端都无反应。
+- 日志：`voicescribe-hotkey.log` 中当前测试只出现 `raw_modifier_event vk=164`，没有 `matches_hotkey`、`hotkey-start-recording`、`beginRecordingSession`。
+- 对照：当前持久化热键仍为 `Right Alt / AltRight / 165`。
+- 结论：本轮剩余根因已从“重复触发”切换为“外接键盘右 Alt 的运行时键码与设置页保存值不一致”，下一步应修热键匹配本身，而不是继续排查 overlay 或后端。

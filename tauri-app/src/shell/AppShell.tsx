@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { Layout } from "../components/Layout";
 import { Toast } from "../components/Toast";
 import { useBackendConnection } from "../hooks/useBackendConnection";
@@ -12,6 +12,7 @@ import { HotkeySettings } from "../pages/HotkeySettings";
 import { RealtimeTranscriptionPage } from "../pages/RealtimeTranscriptionPage";
 import { SpeakerSettings } from "../pages/SpeakerSettings";
 import { VocabularySettings } from "../pages/VocabularySettings";
+import { primeOverlayBridge } from "../lib/overlayWindow";
 
 const pageMap = {
   general: <GeneralSettings />,
@@ -35,6 +36,7 @@ export function AppShell() {
   const refreshHistory = useAppStore((state) => state.refreshHistory);
 
   useEffect(() => {
+    primeOverlayBridge();
     void hydrateSettings();
     void refreshHistory().catch(() => {
       // History may not be available until backend is running.
