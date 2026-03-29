@@ -15,10 +15,13 @@ import { useAppStore } from "../stores/appStore";
 import type { HistoryRecord, HistorySpeakerEntry, TranscribeResult } from "../types";
 
 let cancelResetTimer: number | null = null;
+
 const MIN_RECORDING_DURATION_MS_BY_ENGINE: Partial<Record<string, number>> = {
   funasr: 1000,
 };
-const TOO_SHORT_RECORDING_MESSAGE = "录音时间过短，请至少录制 1 秒后再停止";
+
+const TOO_SHORT_RECORDING_MESSAGE = "录音时间过短，请至少录制 1 秒后再停止。";
+
 const TOO_SHORT_RECORDING_PATTERNS = [
   /too short/i,
   /sampling_points.*short/i,
@@ -127,6 +130,7 @@ export async function beginRecordingSession() {
   const store = useAppStore.getState();
   clearCancelResetTimer();
   await debugHotkeyLog("beginRecordingSession start").catch(() => undefined);
+
   try {
     await startRecording();
     await debugHotkeyLog("beginRecordingSession startRecording success").catch(() => undefined);
@@ -135,14 +139,18 @@ export async function beginRecordingSession() {
     await debugHotkeyLog(`beginRecordingSession startRecording failed: ${message}`).catch(() => undefined);
     throw error;
   }
+
   store.setRecording(true);
   store.setTranscribing(false);
   store.setRecordingCancelled(false);
   store.setAudioLevel(0);
   store.setToast("开始录音");
+
   if (store.settings.enableStreaming) {
     startRealtimeStreamSession();
   }
+
+  await debugHotkeyLog("beginRecordingSession showOverlay start").catch(() => undefined);
   await showOverlay({
     mode: "recording",
     startedAt,
@@ -150,17 +158,28 @@ export async function beginRecordingSession() {
     canCancel: true,
     canStop: true,
   });
+  await debugHotkeyLog("beginRecordingSession showOverlay success").catch(() => undefined);
 }
 
 export async function finishRecordingSession() {
   const store = useAppStore.getState();
   const settings = store.settings;
   const minRecordingDurationMs = MIN_RECORDING_DURATION_MS_BY_ENGINE[settings.selectedEngine] ?? 0;
+
+  await debugHotkeyLog(
+    `finishRecordingSession start engine=${settings.selectedEngine} model=${settings.selectedModel}`,
+  ).catch(() => undefined);
+
   const status = minRecordingDurationMs > 0
     ? await getRecordingStatus().catch(() => null)
     : null;
 
+  await debugHotkeyLog(
+    `finishRecordingSession status duration=${status?.duration ?? "unknown"} minMs=${minRecordingDurationMs}`,
+  ).catch(() => undefined);
+
   if (status && status.duration * 1000 < minRecordingDurationMs) {
+    await debugHotkeyLog("finishRecordingSession too short -> cancelRecording").catch(() => undefined);
     await cancelRecording().catch(() => undefined);
     cancelRealtimeStreamSession();
     store.setRecording(false);
@@ -169,11 +188,13 @@ export async function finishRecordingSession() {
     store.setAudioLevel(0);
     store.setToast(TOO_SHORT_RECORDING_MESSAGE);
     await hideOverlay();
+    await debugHotkeyLog("finishRecordingSession too short -> hideOverlay success").catch(() => undefined);
     return;
   }
 
   store.setRecording(false);
   store.setTranscribing(true);
+  await debugHotkeyLog("finishRecordingSession pushOverlayState transcribing").catch(() => undefined);
   await pushOverlayState({
     mode: "transcribing",
     startedAt: null,
@@ -183,10 +204,17 @@ export async function finishRecordingSession() {
   });
 
   try {
+    await debugHotkeyLog("finishRecordingSession stopRecording start").catch(() => undefined);
     const audioPath = await stopRecording();
+    await debugHotkeyLog(`finishRecordingSession stopRecording success audioPath=${audioPath}`).catch(() => undefined);
+
     if (settings.enableStreaming) {
       await stopRealtimeStreamSession();
     }
+
+    await debugHotkeyLog(
+      `finishRecordingSession transcribeAudio start engine=${settings.selectedEngine} model=${settings.selectedModel}`,
+    ).catch(() => undefined);
 
     const result = await transcribeAudio({
       audioPath,
@@ -198,10 +226,14 @@ export async function finishRecordingSession() {
       enableAIRefine: settings.enableAIRefine,
     });
 
+    await debugHotkeyLog(
+      `finishRecordingSession transcribeAudio success textLength=${result.text.length} segments=${result.segments.length}`,
+    ).catch(() => undefined);
+
     await outputText(settings.outputMode, result.text);
     useAppStore.getState().saveTranscription(result, settings.retainAudio ? audioPath : null);
     await persistTranscriptionHistory(result, audioPath);
-    useAppStore.getState().setToast("转录完成，结果已输出并写入历史记录");
+    useAppStore.getState().setToast("转录完成，结果已输出并写入历史记录。");
     await backendApi.listHistory().then((records) => {
       useAppStore.setState({
         historyRecords: records,
@@ -210,6 +242,7 @@ export async function finishRecordingSession() {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    await debugHotkeyLog(`finishRecordingSession failed: ${message}`).catch(() => undefined);
     if (isTooShortRecordingError(message)) {
       useAppStore.getState().setToast(TOO_SHORT_RECORDING_MESSAGE);
       return;
@@ -220,10 +253,13 @@ export async function finishRecordingSession() {
     nextStore.setTranscribing(false);
     nextStore.setAudioLevel(0);
     await hideOverlay();
+    await debugHotkeyLog("finishRecordingSession finally completed").catch(() => undefined);
   }
 }
+
 export async function abortRecordingSession() {
   clearCancelResetTimer();
+  await debugHotkeyLog("abortRecordingSession start").catch(() => undefined);
 
   try {
     await cancelRecording();
@@ -242,11 +278,13 @@ export async function abortRecordingSession() {
       canCancel: false,
       canStop: false,
     });
+    await debugHotkeyLog("abortRecordingSession pushOverlayState cancelled").catch(() => undefined);
 
     cancelResetTimer = window.setTimeout(() => {
       useAppStore.getState().setRecordingCancelled(false);
       cancelResetTimer = null;
       void hideOverlay();
+      void debugHotkeyLog("abortRecordingSession hideOverlay after cancelled").catch(() => undefined);
     }, 1400);
   }
 }

@@ -1,3 +1,4 @@
+use crate::commands::hotkey::log_hotkey;
 use crate::state::BackendProcessState;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -818,7 +819,17 @@ pub async fn transcribe(
 
     let mut last_error = String::from("transcribe failed");
 
-    for _attempt in 1..=30 {
+    log_hotkey(format!(
+        "backend transcribe request engine={} model={} diarization={} ai_refine={} audio_path={}",
+        engine, model, enable_diarization, enable_ai_refine, audio_path
+    ));
+
+    for attempt in 1..=30 {
+        log_hotkey(format!(
+            "backend transcribe attempt={} engine={} model={}",
+            attempt, engine, model
+        ));
+
         let form = reqwest::multipart::Form::new()
             .part(
                 "audio",
@@ -841,6 +852,10 @@ pub async fn transcribe(
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() {
+                    log_hotkey(format!(
+                        "backend transcribe success attempt={} status={}",
+                        attempt, status
+                    ));
                     return response
                         .json::<TranscribeResult>()
                         .await
@@ -852,6 +867,11 @@ pub async fn transcribe(
                     .await
                     .unwrap_or_else(|_| "backend returned error".to_string());
 
+                log_hotkey(format!(
+                    "backend transcribe response_error attempt={} status={} body={}",
+                    attempt, status, last_error
+                ));
+
                 if status.is_client_error()
                     && status != reqwest::StatusCode::REQUEST_TIMEOUT
                     && status != reqwest::StatusCode::TOO_MANY_REQUESTS
@@ -861,12 +881,17 @@ pub async fn transcribe(
             }
             Err(err) => {
                 last_error = err.to_string();
+                log_hotkey(format!(
+                    "backend transcribe request_error attempt={} error={}",
+                    attempt, last_error
+                ));
             }
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
+    log_hotkey(format!("backend transcribe failed after retries error={}", last_error));
     Err(last_error)
 }
 

@@ -32,14 +32,17 @@ body {
   background: var(--surface-bg);
   color: var(--text);
 }
-body.overlay-window {
+html.overlay-window,
+body.overlay-window,
+body.overlay-window #overlay-root {
   background: transparent !important;
+}
+body.overlay-window {
   color: #ffffff;
   overflow: hidden;
 }
 body.overlay-window #overlay-root {
   min-height: 100vh;
-  background: transparent;
 }
 button,
 input,

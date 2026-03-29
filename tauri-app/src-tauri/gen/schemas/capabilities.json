@@ -1,1 +1,1 @@
-{"main-capability":{"identifier":"main-capability","description":"Permissions for the main VoiceScribe desktop window.","local":true,"windows":["main"],"permissions":["core:default","store:default","autostart:default","clipboard-manager:allow-write-text"]}}
+{"main-capability":{"identifier":"main-capability","description":"Permissions for the main and overlay VoiceScribe desktop windows.","local":true,"windows":["main","overlay"],"permissions":["core:default","store:default","autostart:default","clipboard-manager:allow-write-text"]}}

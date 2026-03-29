@@ -160,8 +160,10 @@ fn emit_chunk(app: &AppHandle, samples: &[i16]) {
     }
 
     let payload = BASE64.encode(bytes);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("audio-chunk", payload);
+    for label in ["main", "overlay"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.emit("audio-chunk", payload.clone());
+        }
     }
 }
 

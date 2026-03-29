@@ -1161,6 +1161,10 @@ async def transcribe(
         tmp_path = tmp.name
 
     try:
+        print(
+            f"[Transcribe] Request received filename={audio.filename or ''} engine={engine} model={model} language={language} diarization={enable_diarization} ai_refine={enable_ai_refine} size_bytes={len(content)}"
+        )
+
         if MOCK_MODE:
             result = mock_transcribe(tmp_path, language)
             if enable_ai_refine and AI_REFINE_AVAILABLE:
@@ -1182,6 +1186,9 @@ async def transcribe(
         )
         eng = entry["engine"]
 
+        print(
+            f"[Transcribe] Engine ready engine={engine} model={model} load_target={entry.get('load_target')} diarization={entry.get('diarization', False)}"
+        )
         print(
             f"[Transcribe] Start engine={engine} model={model} diarization={enable_diarization} ai_refine={enable_ai_refine}"
         )
@@ -1244,6 +1251,9 @@ async def transcribe(
             result["text"] = refiner.refine(result["text"], hotwords_list)
             print(f"[AI Refine] Refined: {result['text'][:100]}...")
 
+        print(
+            f"[Transcribe] Completed engine={engine} model={model} text_length={len(result.get('text', ''))} segments={len(result.get('segments', []))} duration={result.get('duration', 0)}"
+        )
         return TranscribeResult(
             text=result["text"],
             segments=result.get("segments", []),

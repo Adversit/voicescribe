@@ -56,7 +56,7 @@ fn hotkey_log_path() -> std::path::PathBuf {
     std::env::temp_dir().join("voicescribe-hotkey.log")
 }
 
-fn log_hotkey(message: impl AsRef<str>) {
+pub(crate) fn log_hotkey(message: impl AsRef<str>) {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_secs())

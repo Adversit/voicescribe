@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { Check, LoaderCircle, X } from "lucide-react";
+import { debugHotkeyLog } from "../api/tauri";
 import type { OverlayMode, OverlayStatePayload } from "../lib/overlayWindow";
 
-const HISTORY_SIZE = 13;
-const IDLE_LEVEL = 0.08;
+const BAR_COUNT = 13;
+const RADIAL_COUNT = Math.floor(BAR_COUNT / 2) + 1;
+const IDLE_FLOOR = 0.06;
 const CANCEL_LABEL = "取消录音";
 const STOP_LABEL = "完成录音";
 const TRANSCRIBING_LABEL = "正在转录";
@@ -21,31 +23,97 @@ function formatDuration(milliseconds: number | null) {
   return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }
 
-function createLevelHistory(level = IDLE_LEVEL) {
-  return Array.from({ length: HISTORY_SIZE }, (_, index) => {
-    const taper = 1 - Math.abs(index - Math.floor(HISTORY_SIZE / 2)) / HISTORY_SIZE;
-    return Math.max(IDLE_LEVEL, level * (0.7 + taper * 0.45));
-  });
+function mirrorRadial(radial: number[]) {
+  return [...radial.slice(1).reverse(), ...radial];
 }
 
-function normalizeLevel(level: number) {
+function createIdleBars() {
+  const radial = Array.from({ length: RADIAL_COUNT }, (_, index) => Math.max(IDLE_FLOOR, 0.14 - index * 0.012));
+  return mirrorRadial(radial);
+}
+
+function normalizeScalarLevel(level: number) {
   if (!Number.isFinite(level)) {
-    return IDLE_LEVEL;
+    return IDLE_FLOOR;
   }
 
-  return Math.max(IDLE_LEVEL, Math.min(1, level));
+  const boosted = Math.pow(Math.min(1, Math.max(0, level) * 1.35), 0.86);
+  return Math.max(IDLE_FLOOR, Math.min(1, boosted));
+}
+
+function createBarsFromScalar(level = IDLE_FLOOR) {
+  const center = normalizeScalarLevel(level);
+  const radial = Array.from({ length: RADIAL_COUNT }, (_, index) => {
+    const decay = Math.max(0.35, 1 - index * 0.11);
+    return Math.max(IDLE_FLOOR, center * decay);
+  });
+  return mirrorRadial(radial);
+}
+
+function decodePcm16(base64Payload: string) {
+  try {
+    const binary = globalThis.atob(base64Payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    const view = new DataView(bytes.buffer);
+    const samples = new Int16Array(bytes.byteLength / 2);
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = view.getInt16(index * 2, true);
+    }
+    return samples;
+  } catch {
+    return new Int16Array();
+  }
+}
+
+function createBarsFromAudioChunk(base64Payload: string) {
+  const samples = decodePcm16(base64Payload);
+  if (samples.length === 0) {
+    return createIdleBars();
+  }
+
+  const windowSize = Math.max(160, Math.floor(samples.length / RADIAL_COUNT));
+  const radial = Array.from({ length: RADIAL_COUNT }, (_, index) => {
+    const end = Math.max(0, samples.length - index * windowSize);
+    const start = Math.max(0, end - windowSize);
+    if (start >= end) {
+      return IDLE_FLOOR;
+    }
+
+    let energy = 0;
+    for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+      const normalized = samples[sampleIndex] / 32768;
+      energy += normalized * normalized;
+    }
+
+    const rms = Math.sqrt(energy / (end - start));
+    const boosted = Math.pow(Math.min(1, rms * 6.8), 0.66);
+    const decay = Math.max(0.38, 1 - index * 0.09);
+    return Math.max(IDLE_FLOOR, Math.min(1, boosted * decay));
+  });
+
+  const smoothed = radial.map((value, index) => {
+    const prev = index > 0 ? radial[index - 1] : value;
+    const next = index + 1 < radial.length ? radial[index + 1] : value;
+    return Math.max(IDLE_FLOOR, Math.min(1, value * 0.62 + prev * 0.24 + next * 0.14));
+  });
+
+  return mirrorRadial(smoothed);
 }
 
 function RealWaveform({ levels }: { levels: number[] }) {
   return (
-    <div className="flex h-7 items-center gap-1 px-1">
+    <div className="flex h-8 items-center gap-[5px] px-1">
       {levels.map((level, index) => {
-        const height = Math.round(4 + normalizeLevel(level) * 20);
+        const height = Math.round(6 + level * 22);
         return (
           <span
             key={`${index}-${height}`}
-            className="block w-[3px] rounded-full bg-white transition-[height,opacity] duration-75"
-            style={{ height, opacity: 0.45 + normalizeLevel(level) * 0.55 }}
+            className="block w-[4px] rounded-full bg-white transition-[height,opacity] duration-75"
+            style={{ height, opacity: 0.38 + level * 0.62 }}
           />
         );
       })}
@@ -61,9 +129,10 @@ function IconButton(props: {
   children: ReactNode;
 }) {
   const { label, disabled, variant, onClick, children } = props;
-  const baseClass = variant === "light"
-    ? "bg-white text-black hover:bg-white/90"
-    : "bg-white/14 text-white hover:bg-white/22";
+  const baseClass =
+    variant === "light"
+      ? "bg-white text-black hover:bg-white/90"
+      : "bg-white/14 text-white hover:bg-white/22";
 
   return (
     <button
@@ -83,42 +152,59 @@ export function RecordingOverlay() {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [canCancel, setCanCancel] = useState(false);
   const [canStop, setCanStop] = useState(false);
-  const [levels, setLevels] = useState<number[]>(() => createLevelHistory());
+  const [levels, setLevels] = useState<number[]>(() => createIdleBars());
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     let unlistenState: (() => void) | undefined;
-    let unlistenAudio: (() => void) | undefined;
+    let unlistenAudioLevel: (() => void) | undefined;
+    let unlistenAudioChunk: (() => void) | undefined;
 
     const bind = async () => {
+      await debugHotkeyLog("overlay bind start").catch(() => undefined);
+
       unlistenState = await listen<OverlayStatePayload>("overlay-state", (event) => {
         const payload = event.payload;
+        void debugHotkeyLog(
+          `overlay received state mode=${payload.mode} canCancel=${Boolean(payload.canCancel)} canStop=${Boolean(payload.canStop)}`,
+        ).catch(() => undefined);
         setMode(payload.mode);
         setStartedAt(payload.mode === "recording" ? (payload.startedAt ?? Date.now()) : null);
         setCanCancel(Boolean(payload.canCancel));
         setCanStop(Boolean(payload.canStop));
 
         if (payload.mode === "recording") {
-          setLevels(createLevelHistory(payload.audioLevel ?? IDLE_LEVEL));
+          setLevels(createBarsFromScalar(payload.audioLevel ?? IDLE_FLOOR));
           return;
         }
 
-        setLevels(createLevelHistory());
+        setLevels(createIdleBars());
       });
 
-      unlistenAudio = await listen<number>("audio-level", (event) => {
-        const nextLevel = normalizeLevel(event.payload ?? 0);
-        setLevels((current) => [...current.slice(1), nextLevel]);
+      unlistenAudioLevel = await listen<number>("audio-level", (event) => {
+        setLevels((current) => {
+          const next = createBarsFromScalar(event.payload ?? 0);
+          return current.map((value, index) => value * 0.28 + next[index] * 0.72);
+        });
       });
 
+      unlistenAudioChunk = await listen<string>("audio-chunk", (event) => {
+        setLevels(createBarsFromAudioChunk(event.payload));
+      });
+
+      await debugHotkeyLog("overlay bind success").catch(() => undefined);
       await emitTo("main", "overlay-ready");
+      await debugHotkeyLog("overlay-ready emitted to main").catch(() => undefined);
     };
 
-    void bind();
+    void bind().catch((error) => {
+      void debugHotkeyLog(`overlay bind failed: ${String(error)}`).catch(() => undefined);
+    });
 
     return () => {
       unlistenState?.();
-      unlistenAudio?.();
+      unlistenAudioLevel?.();
+      unlistenAudioChunk?.();
     };
   }, []);
 
@@ -147,6 +233,7 @@ export function RecordingOverlay() {
       return;
     }
 
+    void debugHotkeyLog("overlay click cancel").catch(() => undefined);
     void emitTo("main", "overlay-cancel-recording");
   };
 
@@ -155,6 +242,7 @@ export function RecordingOverlay() {
       return;
     }
 
+    void debugHotkeyLog("overlay click stop").catch(() => undefined);
     void emitTo("main", "overlay-stop-recording");
   };
 
@@ -166,7 +254,7 @@ export function RecordingOverlay() {
             <X className="h-5 w-5" strokeWidth={2.3} />
           </IconButton>
 
-          <div className="flex min-w-[112px] flex-1 flex-col items-center justify-center gap-1">
+          <div className="flex min-w-[128px] flex-1 flex-col items-center justify-center gap-1">
             <RealWaveform levels={levels} />
             <div className="text-[10px] font-medium tracking-[0.24em] text-white/58">
               {formatDuration(elapsed)}

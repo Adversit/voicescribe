@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { debugHotkeyLog } from "../api/tauri";
 
 export type OverlayMode = "hidden" | "recording" | "transcribing" | "cancelled";
 
@@ -40,12 +41,14 @@ function ensureOverlayReadyListener() {
 
   overlayReadyListenerPromise = listen<void>(OVERLAY_READY_EVENT, () => {
     overlayReady = true;
+    void debugHotkeyLog("overlay-ready received").catch(() => undefined);
   }).then(() => undefined);
 }
 
 async function waitForOverlayReady() {
   ensureOverlayReadyListener();
   if (overlayReady) {
+    await debugHotkeyLog("waitForOverlayReady immediate").catch(() => undefined);
     return;
   }
 
@@ -57,10 +60,12 @@ async function waitForOverlayReady() {
 
       window.clearTimeout(timer);
       window.clearInterval(stop);
+      void debugHotkeyLog("waitForOverlayReady resolved by event").catch(() => undefined);
       resolve();
     }, 20);
     const timer = window.setTimeout(() => {
       window.clearInterval(stop);
+      void debugHotkeyLog("waitForOverlayReady timed out").catch(() => undefined);
       resolve();
     }, OVERLAY_READY_TIMEOUT_MS);
   });
@@ -71,7 +76,11 @@ export async function pushOverlayState(payload: OverlayStatePayload): Promise<vo
     return;
   }
 
-  await emitTo(OVERLAY_LABEL, OVERLAY_STATE_EVENT, withDefaults(payload));
+  const next = withDefaults(payload);
+  await debugHotkeyLog(
+    `pushOverlayState mode=${next.mode} canCancel=${Boolean(next.canCancel)} canStop=${Boolean(next.canStop)}`,
+  ).catch(() => undefined);
+  await emitTo(OVERLAY_LABEL, OVERLAY_STATE_EVENT, next);
 }
 
 export async function showOverlay(payload: OverlayStatePayload): Promise<void> {
@@ -80,9 +89,12 @@ export async function showOverlay(payload: OverlayStatePayload): Promise<void> {
   }
 
   ensureOverlayReadyListener();
+  await debugHotkeyLog(`showOverlay invoke start mode=${payload.mode}`).catch(() => undefined);
   await invoke("show_overlay");
+  await debugHotkeyLog("showOverlay invoke success").catch(() => undefined);
   await waitForOverlayReady();
   await pushOverlayState(payload);
+  await debugHotkeyLog(`showOverlay completed mode=${payload.mode}`).catch(() => undefined);
 }
 
 export async function hideOverlay(): Promise<void> {
@@ -90,6 +102,8 @@ export async function hideOverlay(): Promise<void> {
     return;
   }
 
+  await debugHotkeyLog("hideOverlay start").catch(() => undefined);
   await pushOverlayState({ mode: "hidden" });
   await invoke("hide_overlay");
+  await debugHotkeyLog("hideOverlay success").catch(() => undefined);
 }

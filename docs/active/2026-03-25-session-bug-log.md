@@ -152,6 +152,41 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
 
 ## 50. 冷启动后可能同时出现系统 Python 与 venv 两个 `server.py` 进程
 - 表现：清空 8765 后重新走 `scripts/start_windows_system.bat --skip-build`，进程列表中会同时出现 `backend\venv\Scripts\python.exe ... server.py` 与 `D:\Anaconda3\python.exe ... server.py`；实际监听 8765 的是系统 Python 进程。
-- 影响：虽然当前缓存迁移与模型目录逻辑已经跟随仓库代码生效，但后端进程来源不唯一，会给“到底由哪套 Python 运行时提供服务”带来不确定性。
-- 原因：待查。初步现象说明桌面端启动链中仍存在 system Python 回退或重复拉起后端的路径。
-- 处理：后续需要单独收口“桌面端只保留一份后端进程，且优先使用 `backend/venv` 或明确指定运行时”的逻辑。
+- 影响：如果只看任务管理器，容易误判为“桌面端重复启动了两套后端”；但这条现象本身不会导致 8765 被两个独立后端同时占用。
+- 原因：已验证这不是桌面端额外拉起第二套后端，而是 Windows 上 `venv\Scripts\python.exe` 作为父进程，再由其拉起基础解释器 `D:\Anaconda3\python.exe server.py` 作为子进程提供实际监听。这是当前 `backend/venv` 基于 Anaconda Python 创建后的运行时表现。
+- 验证：
+  - 通过 `Get-CimInstance Win32_Process` 可见 `D:\Anaconda3\python.exe ... server.py` 的 `ParentProcessId` 指向 `backend\venv\Scripts\python.exe ... server.py`
+  - 手动启动 `backend\venv\Scripts\python.exe server.py --port 8877` 时会复现同样的父子进程结构
+  - 强制结束父进程后，子进程与 8877 监听端口会一并消失
+- 处理：本条从“重复启动 bug”降级为“Windows venv 运行时表现说明”。当前不改启动代码；后续如需减少误解，可在 `/health` 或调试面板中补充 `sys.executable / sys.prefix / sys.base_prefix`。
+
+## 51. 录音流、悬浮窗与托盘菜单仍残留中文乱码
+- 表现：`recordingFlow.ts`、`RecordingOverlay.tsx` 与 `lib.rs` 中部分中文提示出现乱码，直接影响 toast、悬浮窗按钮/状态与托盘菜单可读性。
+- 影响：即使录音和悬浮窗逻辑正常，用户仍会看到不可读文案，不满足当前“所有新写入中文必须保持正常 UTF-8”的约束。
+- 原因：此前 Windows PowerShell 环境下多次改写文件后，局部字符串以错误编码写回，导致源文件中残留 mojibake。
+- 处理：本轮统一按 UTF-8 正常中文重写这些用户可见字符串，并补构建验证，避免再次把乱码带进桌面端运行时。
+
+## 52. `feature-rt-history-hotkey` 专题需求与 spec 正文被写成乱码
+- 表现：`2026-03-28-rt-history-hotkey-requirements.md` 与 `2026-03-28-rt-history-hotkey-spec.md` 的正文大面积变成乱码，但顶部 2026-03-29 新增补充段仍是正常中文，形成“新段落正常、旧正文损坏”的混合状态。
+- 影响：当前专题文档无法继续作为后续实现与验收依据，违背 `plan > spec > checklist > code` 的工作顺序。
+- 原因：后续某轮在 Windows PowerShell 下局部改写这两份文档时，只把新增段落按 UTF-8 写回，正文基线却以错误编码保留，导致 HEAD 中出现混合编码内容。
+- 处理：已从 `48c4d37` 中恢复这两份文档的正常中文正文，再将 2026-03-29 的快捷键交互补充和状态机调整重新按 UTF-8 写回。
+
+## 53. overlay 窗口事件监听被 Tauri ACL 拒绝，导致首次录音后悬浮窗不显示真实状态
+- 表现：冷启动后按快捷键开始录音，热键日志显示 `hotkey-start-recording -> beginRecordingSession -> startRecording success` 已命中，但 overlay 没有稳定显示录音胶囊；日志里明确出现 `overlay bind failed: Command plugin:event|listen not allowed by ACL`。
+- 影响：这会把问题伪装成“快捷键第一次没反应”或“开始后只弹出米黄色空框”，并进一步让用户误判为“停止后没有进入转录/模型懒加载”。
+- 原因：当前 Tauri capability 只授权了 `main` 窗口；overlay 页面虽然创建成功，但它自己的 `listen("overlay-state")` / `listen("audio-level")` 在 ACL 层被拒绝，导致首次状态无法消费。
+- 处理：本轮日志验证已确认真实断点，下一步需把 overlay 窗口纳入 capability 或补专用 capability，并回归验证 `overlay-ready / overlay-state / audio-level` 三条事件链。
+## 54. overlay 事件 ACL 缺失已修复，冷启动后监听已恢复
+- 处理：将 `tauri-app/src-tauri/capabilities/main.json` 的 capability 作用窗口从仅 `main` 扩展到 `main + overlay`，使 overlay 页面具备 `core:event:default` 所含的 `listen / unlisten / emit / emit-to` 权限。
+- 验证：重建并重启系统后，`C:\Users\DingK\AppData\Local\Temp\voicescribe-hotkey.log` 中原先的 `frontend overlay bind failed: Command plugin:event|listen not allowed by ACL` 已消失，替换为 `frontend overlay bind success` 与 `frontend overlay-ready emitted to main`。
+- 当前结论：悬浮窗首次不显示的第一层硬阻塞已经解除；后续若仍有“只见空框”或“停止后不转录”，应继续沿 `overlay-state / audio-level / finishRecordingSession / /transcribe` 链路排查，而不再回到 ACL 权限层。
+## 55. overlay 根层透明不彻底，录音时仍露出米黄色背景板
+- 表现：虽然黑色胶囊已经出现，但胶囊外仍有一整块米黄色矩形底板，破坏悬浮窗观感。
+- 原因：当前只对 `body.overlay-window` 与 `#overlay-root` 做了透明处理，`html` 根层仍沿用主应用全局背景色，导致透明窗口中透出浅色底板。
+- 处理：需把 overlay 页面根层透明约束扩展到 `html + body + #overlay-root`，必要时在 `overlay.html` 上单独标记 `html.overlay-window` 以避免复用主界面底色。
+
+## 56. overlay 波纹当前更像电平灯，不像真实录音波纹
+- 表现：用户观察到波纹呈现“不是 0 就是 1”的跳变感，缺乏中间高、边缘低的录音波纹观感。
+- 原因：当前前端主要吃 `audio-level` 标量并以历史队列直接画柱条，本质上更接近电平条；虽然信号来自真实录音，但可视化维度不够，无法呈现真实波形/包络。
+- 处理：改为让 overlay 直接消费录音线程发出的真实 `audio-chunk` PCM 数据块，基于真实样本窗口计算柱条，再做轻度平滑与镜像排布，确保“真实驱动”与“可读观感”同时满足。
