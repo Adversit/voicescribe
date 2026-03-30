@@ -246,3 +246,110 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
 - 新信息：用户补充确认，之前某些人工验证场景里，录制保存时与实际回归按下时，左右 Alt 可能并不是同一侧；也就是说，之前出现的部分“第一次可用、后续又失效”现象，有可能包含“录制的是右 Alt，验证时按到了左 Alt”这一人为混淆因素。
 - 当前结论：此前关于外接键盘 Alt 命中不稳定的日志分析仍然成立，但其人工现象样本需要重新按“录制哪一侧，就只验证哪一侧”的口径再做一轮回归，避免把左右 Alt 混用误判成运行时失效。
 - 后续处理：保留当前 `primaryCode` 命中逻辑修正；下一轮热键人工验收必须显式记录为 `Left Alt` 或 `Right Alt`，不再使用泛化的“Alt”表述。
+
+## 69. 旧快捷键兼容层仍残留，需在稳定 `hotkeyBinding` 路径后删除
+- 现状：前端真正使用的已经是 `hotkeyBinding` 结构，但仓库内仍保留旧的 `registerHotkey(modifiers, keyCode)` / `register_hotkey(...)` 接口，以及设置结构中的 `hotkeyModifiers`、`hotkeyKeyCode` 兼容字段。
+- 风险：这些旧字段和旧接口虽然当前基本不再承担主路径职责，但会继续制造“到底哪套才是正式口径”的歧义，也增加后续热键问题定位成本。
+- 处理：下一步删除旧快捷键兼容层，只保留 `hotkeyBinding` 作为唯一持久化与注册入口；删除后再按 `Left Alt` / `Right Alt` 明确区分做人工回归。
+
+## 70. 旧快捷键兼容层已删除，当前仅保留 `hotkeyBinding` 作为唯一入口
+- 处理：已删除前端旧 API `registerHotkey(modifiers, keyCode)`、Rust 旧命令 `register_hotkey(...)`、旧转换函数 `build_binding_from_legacy(...)` 与旧设置字段 `hotkeyModifiers`、`hotkeyKeyCode`；同时移除了 `HotkeyState` 中不再使用的 `modifiers/key_code` 状态位。
+- 验证：全局检索已确认仓库内不再存在这些旧接口/旧字段的调用残留；`cargo check` 与 `npm run build` 已通过。
+- 当前口径：快捷键录制、持久化、启动重注册与运行时命中，后续只允许走 `hotkeyBinding` 这一套新结构，不再存在“旧接口兜底”的解释空间。
+
+## 71. 快捷键录制仍走浏览器 `KeyboardEvent`，与运行时 Windows 低层 hook 不是同一事件源
+- 现状：虽然运行时命中已经在 `tauri-app/src-tauri/src/commands/hotkey.rs` 内走 Windows 低层 hook，但快捷键设置页 `tauri-app/src/pages/HotkeySettings.tsx` 仍使用浏览器 `keydown/keyup` 的 `event.code` 录制 binding。
+- 风险：录制源与命中源不是同一事件层时，左右 Alt、左右 Ctrl、AltGr 这类键位的表达方式可能并不完全同构，容易出现“录制时是一套、运行时匹配时是另一套”的偏差。
+- 处理：下一步把快捷键录制也切到 Windows 底层 hook，由 Rust 直接产出 `HotkeyBinding` 并回传前端；浏览器层不再自己构造 binding。
+
+## 72. ????????? Windows ?? hook????????????
+- ???????????? Rust `hotkey.rs` ????? hook???????????? `KeyboardEvent` ?? binding?
+- ??????? Rust ?????? / ????????? hook ???? `HotkeyBinding` ??????????????? Rust ??? binding??????? `primaryCode / primaryKeyCode / modifiers`?
+- ???????????????????`Left Alt / Right Alt / Left Ctrl / Right Ctrl / AltGr` ???????????????????? Windows hook ??????
+
+## 73. ????????? Windows ?? hook??? Alt ???????
+- ???Rust `hotkey.rs` ?????????????? hook ???? `HotkeyBinding` ??? `hotkey-capture-complete` ??????????????? `keydown/keyup` ????????????????????? binding?
+- ????`cargo check`?`npm run build`?`cmd /c scripts\start_windows_system.bat` ? `/health` ????????????????????????????????????
+- ????????????? `Left Alt` / `Right Alt` ???????????????????????????????????????????
+## 74. 快捷键录制与运行时命中仍不是同一套归一化链路，且录制中可误用旧 binding
+- 现象：`start_hotkey_capture` 已进入 Rust，但当前日志里只有 `start_hotkey_capture` 与前端的 `capture start registered`，没有出现任何 `capture_key_down` / `capture_key_up` / `capture_complete`；随后前端仍可能直接执行 `capture apply ...`，把旧的 `hotkeyBinding` 再注册一遍。
+- 影响：用户主观体验会变成“点了录制快捷键，但没有完成录制”；即使实际没有拿到新的捕获结果，界面仍允许继续点“应用快捷键”，把问题伪装成“录制成功但保存后没生效”。
+- 原因：当前运行时命中逻辑已经开始按 `primaryCode + modifiers` 识别物理键，但录制链路内部的按键归一化仍是另一套实现；尤其 `Alt` 家族在捕获路径与运行时路径的判定没有完全共用同一个底层函数。同时，`HotkeySettings.tsx` 在录制态没有强制要求“必须先收到最新 capture 结果才能应用”，导致旧值可被误提交。
+- 处理：下一步把 Rust 侧“物理键事件 -> 归一化 code -> HotkeyBinding”的逻辑收口为单一实现，录制和运行时共用；前端录制态清掉旧 draft，未收到新的 `hotkey-capture-complete` 前禁止应用，并补充更细日志确认问题断点是在“未捕获”还是“已捕获但未回到前端”。
+
+## 75. encoding_guard ??? UTF-8 ?????????? UTF-8 ???????????
+- ???`docs/active/2026-03-25-session-bug-log.md` ?????? `???`?`?` ??????????? `encoding_guard.py verify` ??? `OK`?
+- ????????? UTF-8 ?????????????? `\ufffd` ???? `\x00`???????????? UTF-8????????????? `?` ???????
+- ????????????????????? UTF-8/GBK ?????????????????????????????
+## 75. 快捷键设置页中文文案被写成 JSX 文本节点中的 `\uXXXX` 字面量
+- 表现：快捷键设置页部分中文没有正常显示为中文，而是直接显示转义串或乱码感文案。
+- 原因：本轮为了规避 PowerShell 中文写入风险，界面文案改写时把 `\uXXXX` 直接写进了 JSX 文本节点；在 JSX 文本节点里这不会被当作 JavaScript 字符串转义执行，只会按普通文本原样渲染。
+- 影响：用户无法正常阅读快捷键页提示，且容易误判“录制没有进入等待状态”。
+- 处理：需要把所有中文文案收口到常量字符串或表达式里渲染，不能继续把 `\uXXXX` 直接放在 JSX 文本节点中。
+
+## 76. 快捷键录制启动后未进入稳定捕获态，日志只有 `start_hotkey_capture/stop_hotkey_capture`
+- 表现：点击“开始录制”后，用户按键没有得到新的录制结果；热键日志里只看到 `frontend capture start requested -> start_hotkey_capture -> frontend capture start registered -> stop_hotkey_capture`，没有 `capture_key_down` / `capture_complete`。
+- 当前观察：同一时间段之后的普通输入日志只剩 `hotkey_state ...`，说明录制按键时 `capture_active` 已经不是有效状态。
+- 影响：当前不能宣称“快捷键录制已修复”，因为真实录制主链路还没有闭环。
+- 处理：需要继续定位前端为什么过早退出录制态，并补足日志，确认是按钮焦点、副作用 cleanup，还是录制态切换本身导致的提前停止。
+
+## 77. 最小探针模式证明录制窗口内没有任何键盘事件进入当前 hook 回调链路
+- 时间: 2026-03-30
+- 表现：
+  - 新探针版进程日志已出现 `frontend capture start requested` 与 `start_hotkey_capture active=true generation=1`。
+  - 但从开始录制到停止录制的 7 秒窗口内，没有任何 `capture_probe ...`、`capture_raw_event ...`、`capture_key_down ...` 或 `capture_complete ...`。
+  - 停止录制后数秒内，普通键盘事件日志重新出现，仍然只有 `capture_skip_inactive ...` 与 `hotkey_state ...`。
+- 已确认事实：
+  - 前端按钮链路正常，Rust `start_hotkey_capture()` 已执行。
+  - hook 线程正常存活。
+  - 探针模式设计为在开始录制后的 10 秒内记录所有进入 hook 的键盘事件；实际录制窗口内一条都没有。
+- 结论：
+  - 根因已经收敛到“录制窗口内键盘事件没有进入当前 hook 回调链路”，而不是 binding 组装、保存设置、重新注册，或 `CaptureState.active` 可见性错误。
+- 当前状态：
+  - 未解决。
+  - 后续不应继续直接修改 capture 完成状态机，应优先排查录制窗口内输入事件为何没有进入 hook。
+
+## 78. hook 生命周期自检日志在启动路径持锁回调自身状态查询，可能把 hook 线程启动卡死
+- 时间: 2026-03-30
+- 表现：
+  - `ensure_hook_thread()` 在持有 `HOOK_THREAD` mutex 的同时等待 `startup_rx.recv_timeout(...)`。
+  - 同期新增的 `log_hook_runtime_status(...)` 会再次读取 `HOOK_THREAD` 状态。
+  - 如果在 hook 线程启动路径或 `startup confirmed` 路径调用该自检函数，进程会停在 `ensure_hook_thread: starting` 附近，不再继续输出后续启动日志。
+- 已确认事实：
+  - `hook_thread:started` 位于新线程启动早期，会在主线程仍持有 `HOOK_THREAD` mutex 时尝试再次读取该 mutex。
+  - `ensure_hook_thread:startup_confirmed` 位于 `*thread_guard = Some(handle)` 之后、`thread_guard` 释放之前，也会在同一线程内自锁。
+- 结论：
+  - 这不是热键录制根因的最终确认，但它会污染 hook 生命周期检测结果，必须先移除这两个启动路径自检调用，再继续做线程存活性判断。
+- 处理：
+  - 先删除 `hook_thread:started` 与 `ensure_hook_thread:startup_confirmed` 两处 `log_hook_runtime_status(...)` 调用。
+  - 删除后重新执行 `cargo check`、`npm run build`、桌面进程重启与热键日志检查，再继续判断 hook 是否进入 stale slot / dead thread 状态。
+
+## 79. hook 线程已确认存活时，录制窗口内仍没有任何键盘事件进入 `keyboard_hook_proc`
+- 时间: 2026-03-30
+- 表现：
+  - 新进程启动后，日志已出现完整 hook 启动链路：`ensure_hook_thread: SetWindowsHookExW succeeded` 与 `ensure_hook_thread: startup confirmed`。
+  - 用户点击“开始录制”后，日志显示 `slot_present=true thread_id_present=true thread_finished=false capture_active=true`。
+  - 但从 `frontend capture start registered` 到 `frontend capture stop requested by button` 之间，仍然没有任何 `capture_probe ...`、`capture_raw_event ...`、`capture_key_down ...` 或 `capture_complete ...`。
+  - 停止录制后，下一次普通按键又立即出现 `capture_skip_inactive ...` 与 `hotkey_state ...`。
+- 已确认事实：
+  - 这次不是 hook 线程假存活，也不是启动路径死锁。
+  - `start_hotkey_capture()` 已成功把 `CaptureState.active` 设为 `true`，且 `ensure_hook_thread()` 返回的是现有存活线程。
+  - 录制窗口内没有任何键盘事件进入 `keyboard_hook_proc(...)`，而停止录制后事件又恢复进入同一条回调链路。
+- 结论：
+  - 当前根因进一步收敛到“录制窗口内输入事件被系统层或窗口交互层绕开了当前低层 hook 回调链路”，而不是 hook 生命周期、capture 状态可见性、binding 组装或保存/重注册问题。
+- 处理：
+  - 后续应优先排查录制窗口打开后的输入焦点、系统组合键、副窗口/消息循环干扰，或考虑把录制输入探针前移到更外层的 Windows 输入链路。
+  - 在继续改判定逻辑前，先把诊断日志扩展到 `HotkeySettings.tsx` 的开始/停止按钮、Tauri invoke 边界、`hotkey-capture-complete` 回传、apply/store/re-register 链路，确保人工测试时能按同一条时间线判断问题停在哪一段。
+
+## 80. ???????? Rust capture ????? keydown/keyup
+- ??: 2026-03-30
+- ??: ?? Tauri/Rust ??????????????????????????? `keyboard_hook_proc(...)`????????? hook ??????????????
+- ??: ???? `D:\learn\AIGC\voicescribe\voicescribe` ????????????? hook?????????? `keydown/keyup`?????????? Windows ?? hook ?????? Alt ???????? `AltLeft / AltRight`????? `VK_LMENU / VK_RMENU` ? `VK_MENU + extended flag` ???
+- ??: ??????????????? `keydown/keyup`?????????? `HotkeyBinding { keys, display }` ?????? Rust ?? hook??? Alt ??????/??/Esc ????????
+
+## 81. Runtime hotkey can be blocked by a stale key in `pressed_keys`
+- Time: 2026-03-30
+- Symptom: the hotkey is registered, but pressing the configured single key does nothing.
+- Evidence: hotkey logs showed `binding=0xA5` while `pressed=0x9+0xA5`, meaning a stale `Tab` remained in `pressed_keys` before Right Alt was pressed.
+- Root cause: the runtime matcher depends on exact set equality, but system-level flows such as Alt+Tab can miss a later key-up event and leave a ghost key in the pressed set.
+- Fix direction: before each runtime comparison, prune tracked keys that are no longer physically down according to the current keyboard state, then continue normal matching.

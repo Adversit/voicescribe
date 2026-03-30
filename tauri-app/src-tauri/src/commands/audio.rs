@@ -168,7 +168,9 @@ fn emit_chunk(app: &AppHandle, samples: &[i16]) {
 }
 
 fn select_config(device: &cpal::Device) -> Result<(SampleFormat, StreamConfig), String> {
-    let default = device.default_input_config().map_err(|err| err.to_string())?;
+    let default = device
+        .default_input_config()
+        .map_err(|err| err.to_string())?;
     let config = default.config();
     eprintln!(
         "[Audio] Selected input config: channels={} sample_rate={} format={:?}",
@@ -265,7 +267,10 @@ fn mono_i16_from_u16(data: &[u16], channels: usize) -> Vec<i16> {
 
     data.chunks(channels)
         .map(|frame| {
-            let sum = frame.iter().map(|sample| *sample as i32 - 32768).sum::<i32>();
+            let sum = frame
+                .iter()
+                .map(|sample| *sample as i32 - 32768)
+                .sum::<i32>();
             (sum / frame.len() as i32) as i16
         })
         .collect()
@@ -335,7 +340,10 @@ fn build_stream(
     }
 }
 
-fn finish_recording(state: &State<'_, RecordingState>, delete_file: bool) -> Result<Option<String>, String> {
+fn finish_recording(
+    state: &State<'_, RecordingState>,
+    delete_file: bool,
+) -> Result<Option<String>, String> {
     let (worker, stop_tx, path) = {
         let mut recorder_guard = recorder().lock().map_err(|_| "Recorder mutex poisoned")?;
         let worker = recorder_guard.worker.take();
@@ -352,8 +360,14 @@ fn finish_recording(state: &State<'_, RecordingState>, delete_file: bool) -> Res
         let _ = worker.join();
     }
 
-    *state.is_recording.lock().map_err(|_| "Recording mutex poisoned")? = false;
-    *state.current_path.lock().map_err(|_| "Recording mutex poisoned")? = None;
+    *state
+        .is_recording
+        .lock()
+        .map_err(|_| "Recording mutex poisoned")? = false;
+    *state
+        .current_path
+        .lock()
+        .map_err(|_| "Recording mutex poisoned")? = None;
     RECORDING_ACTIVE.store(false, Ordering::SeqCst);
     AUDIO_LEVEL_BITS.store(0, Ordering::SeqCst);
 
@@ -486,8 +500,14 @@ pub fn start_recording(app: AppHandle, state: State<'_, RecordingState>) -> Resu
             recorder_guard.recording_path = Some(file_path.clone());
             recorder_guard.start_time = Some(Instant::now());
 
-            *state.is_recording.lock().map_err(|_| "Recording mutex poisoned")? = true;
-            *state.current_path.lock().map_err(|_| "Recording mutex poisoned")? = Some(file_path.clone());
+            *state
+                .is_recording
+                .lock()
+                .map_err(|_| "Recording mutex poisoned")? = true;
+            *state
+                .current_path
+                .lock()
+                .map_err(|_| "Recording mutex poisoned")? = Some(file_path.clone());
 
             RECORDING_ACTIVE.store(true, Ordering::SeqCst);
             AUDIO_LEVEL_BITS.store(0, Ordering::SeqCst);

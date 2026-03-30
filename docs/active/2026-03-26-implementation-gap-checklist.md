@@ -105,6 +105,7 @@
   - Matching rule is now `current pressed set == registered set`
   - Long-press start, release-to-stop, single-tap toggle, and `Esc` cancel stay unchanged
   - Runtime hook is now only responsible for global hotkey matching, not settings capture
+  - Runtime must recover from stale pressed keys when the OS misses a key-up event, otherwise single-key bindings can get blocked by a ghost key such as `Tab`
 
 - `HK-05` Dual registration entry removal: `completed`
   - [useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts) remains the only formal registration entry

@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
     HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
@@ -259,6 +259,24 @@ fn is_extended_key(flags: u32) -> bool {
     flags & 0x01 != 0
 }
 
+fn is_vk_currently_down(vk: u32) -> bool {
+    unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 }
+}
+
+fn prune_stale_pressed_keys(pressed_keys: &mut BTreeSet<u32>) -> Vec<u32> {
+    let stale_keys = pressed_keys
+        .iter()
+        .copied()
+        .filter(|key| !is_vk_currently_down(*key))
+        .collect::<Vec<_>>();
+
+    for key in &stale_keys {
+        pressed_keys.remove(key);
+    }
+
+    stale_keys
+}
+
 fn normalized_vk_from_kb(kb: &KBDLLHOOKSTRUCT) -> Option<u32> {
     let vk = kb.vkCode;
     let scan = kb.scanCode;
@@ -371,6 +389,16 @@ enum HotkeyTransition {
 fn update_runtime_hotkey_state(key: u32, message: u32) -> Option<HotkeyTransition> {
     let mut guard = runtime().lock().ok()?;
     let was_active = guard.is_hotkey_active;
+    let stale_keys = prune_stale_pressed_keys(&mut guard.pressed_keys);
+
+    if !stale_keys.is_empty() {
+        log_hotkey(format!(
+            "prune_stale_pressed_keys removed={} before_message={} current_key=0x{:X}",
+            format_keys(&stale_keys),
+            message,
+            key,
+        ));
+    }
 
     match message {
         WM_KEYDOWN | WM_SYSKEYDOWN => {

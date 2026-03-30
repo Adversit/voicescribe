@@ -135,8 +135,8 @@ fn should_use_dev_project_tree_for_paths(
 fn should_use_dev_project_tree() -> bool {
     let source_root = source_project_root_dir();
     let force_dev_mode = truthy_env("VOICESCRIBE_FORCE_DEV_MODE");
-    let force_packaged_mode =
-        truthy_env("VOICESCRIBE_FORCE_INSTALL_MODE") || truthy_env("VOICESCRIBE_FORCE_PACKAGED_MODE");
+    let force_packaged_mode = truthy_env("VOICESCRIBE_FORCE_INSTALL_MODE")
+        || truthy_env("VOICESCRIBE_FORCE_PACKAGED_MODE");
 
     let Some(current_exe) = env::current_exe().ok() else {
         return source_root.join("backend").exists() && !force_packaged_mode;
@@ -234,7 +234,11 @@ fn backend_start_locked(backend_dir: &Path) -> bool {
 
 fn acquire_backend_start_lock(backend_dir: &Path) -> Result<bool, String> {
     let lock_path = backend_start_lock_path(backend_dir);
-    match OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+    {
         Ok(_) => Ok(true),
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Ok(false),
         Err(err) => Err(err.to_string()),
@@ -302,7 +306,8 @@ fn sync_backend_bundle(app: &AppHandle, source: &Path, target: &Path) -> Result<
     if backend_bundle_sync_required_for_version(target, &bundle_version, force_sync) {
         copy_backend_tree(source, target)?;
         let _ = fs::remove_file(backend_deps_stamp_path(target));
-        fs::write(backend_sync_stamp_path(target), bundle_version).map_err(|err| err.to_string())?;
+        fs::write(backend_sync_stamp_path(target), bundle_version)
+            .map_err(|err| err.to_string())?;
     }
 
     Ok(())
@@ -510,7 +515,11 @@ fn install_requirements_command(venv_python: &Path, backend_dir: &Path) -> Resul
     Ok(())
 }
 
-fn ensure_backend_venv(app: &AppHandle, backend_dir: &Path, runtime_dir: &Path) -> Result<Option<String>, String> {
+fn ensure_backend_venv(
+    app: &AppHandle,
+    backend_dir: &Path,
+    runtime_dir: &Path,
+) -> Result<Option<String>, String> {
     if let Some(existing) = venv_python_candidates(backend_dir)
         .into_iter()
         .find(|candidate| candidate.exists())
@@ -639,7 +648,10 @@ pub fn start_backend(
     }
 
     {
-        let mut starting_guard = state.starting.lock().map_err(|_| "Backend mutex poisoned")?;
+        let mut starting_guard = state
+            .starting
+            .lock()
+            .map_err(|_| "Backend mutex poisoned")?;
         if *starting_guard {
             let last_error = state
                 .last_error
@@ -660,7 +672,10 @@ pub fn start_backend(
 
     let lock_acquired = acquire_backend_start_lock(&backend_dir)?;
     if !lock_acquired {
-        *state.starting.lock().map_err(|_| "Backend mutex poisoned")? = false;
+        *state
+            .starting
+            .lock()
+            .map_err(|_| "Backend mutex poisoned")? = false;
         let last_error = state
             .last_error
             .lock()
@@ -731,7 +746,10 @@ pub fn start_backend(
         }
     })();
 
-    *state.starting.lock().map_err(|_| "Backend mutex poisoned")? = false;
+    *state
+        .starting
+        .lock()
+        .map_err(|_| "Backend mutex poisoned")? = false;
     start_result
 }
 
@@ -750,7 +768,10 @@ pub fn stop_backend(
     }
     let _ = kill_backend_processes(&backend_dir);
     *child_guard = None;
-    *state.starting.lock().map_err(|_| "Backend mutex poisoned")? = false;
+    *state
+        .starting
+        .lock()
+        .map_err(|_| "Backend mutex poisoned")? = false;
     release_backend_start_lock(&backend_dir);
     Ok(snapshot_status(
         false,
@@ -776,7 +797,10 @@ pub fn backend_status(
     let backend_dir = resolve_backend_dir(&app, &runtime_dir)?;
     let running = backend_port_is_open();
     let starting = backend_start_locked(&backend_dir)
-        || *state.starting.lock().map_err(|_| "Backend mutex poisoned")?;
+        || *state
+            .starting
+            .lock()
+            .map_err(|_| "Backend mutex poisoned")?;
 
     if running {
         release_backend_start_lock(&backend_dir);
@@ -891,7 +915,10 @@ pub async fn transcribe(
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    log_hotkey(format!("backend transcribe failed after retries error={}", last_error));
+    log_hotkey(format!(
+        "backend transcribe failed after retries error={}",
+        last_error
+    ));
     Err(last_error)
 }
 
@@ -968,8 +995,8 @@ mod tests {
         extract_embedded_python_zip(&zip_file, &target_dir).expect("extract embedded zip");
 
         assert!(target_dir.join("python.exe").exists());
-        let updated = fs::read_to_string(target_dir.join("python311._pth"))
-            .expect("read extracted pth");
+        let updated =
+            fs::read_to_string(target_dir.join("python311._pth")).expect("read extracted pth");
         assert!(updated.contains("import site"));
         assert!(!updated.contains("#import site"));
 
@@ -990,9 +1017,15 @@ mod tests {
         fs::create_dir_all(exe.parent().expect("exe parent")).expect("create exe parent");
         fs::write(&exe, b"fake-exe").expect("write exe");
 
-        assert!(should_use_dev_project_tree_for_paths(&exe, &root, false, false));
-        assert!(!should_use_dev_project_tree_for_paths(&exe, &root, false, true));
-        assert!(should_use_dev_project_tree_for_paths(&exe, &root, true, true));
+        assert!(should_use_dev_project_tree_for_paths(
+            &exe, &root, false, false
+        ));
+        assert!(!should_use_dev_project_tree_for_paths(
+            &exe, &root, false, true
+        ));
+        assert!(should_use_dev_project_tree_for_paths(
+            &exe, &root, true, true
+        ));
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1007,7 +1040,9 @@ mod tests {
         fs::create_dir_all(&packaged_dir).expect("create packaged parent");
         fs::write(&packaged, b"fake-exe").expect("write packaged exe");
 
-        assert!(!should_use_dev_project_tree_for_paths(&packaged, &root, false, false));
+        assert!(!should_use_dev_project_tree_for_paths(
+            &packaged, &root, false, false
+        ));
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&packaged_dir);
@@ -1020,11 +1055,16 @@ mod tests {
         fs::write(dir.join("server.py"), b"print('ok')").expect("write server");
         fs::write(dir.join(".bundle-version"), "0.2.0").expect("write stamp");
 
-        assert!(!backend_bundle_sync_required_for_version(&dir, "0.2.0", false));
-        assert!(backend_bundle_sync_required_for_version(&dir, "0.2.1", false));
-        assert!(backend_bundle_sync_required_for_version(&dir, "0.2.0", true));
+        assert!(!backend_bundle_sync_required_for_version(
+            &dir, "0.2.0", false
+        ));
+        assert!(backend_bundle_sync_required_for_version(
+            &dir, "0.2.1", false
+        ));
+        assert!(backend_bundle_sync_required_for_version(
+            &dir, "0.2.0", true
+        ));
 
         let _ = fs::remove_dir_all(&dir);
     }
 }
-

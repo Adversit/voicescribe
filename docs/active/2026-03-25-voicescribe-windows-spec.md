@@ -169,6 +169,8 @@ Constraints:
 2. Hook events are normalized to Windows VK before runtime matching; settings-page capture no longer branches inside the hook.
 3. Browser capture and runtime matching must still agree on the same left/right Alt normalization targets.
 4. Right Alt must normalize to `VK_RMENU (0xA5)` consistently; do not collapse it into a generic Alt key.
+5. Runtime matching must prune stale keys whose physical key-up was missed by the OS/input path before comparing against the binding set.
+6. This stale-key recovery is required for cases such as Alt+Tab or other system flows that can leave `pressed_keys` with a ghost key like `Tab`.
 
 ### F. 前端注册路径
 
