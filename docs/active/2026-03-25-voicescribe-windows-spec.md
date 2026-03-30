@@ -151,7 +151,8 @@ Constraints:
 5. More than 2 keys is overflow: do not create a binding; show the frontend overflow message and exit that capture attempt
 6. `Esc` only cancels the current draft capture; it does not mutate the saved binding
 7. Phase 1 does not fold AltGr; if the browser reports `Ctrl + RightAlt`, persist the actual 2-key combo
-8. Clicking Apply only writes the draft into store; actual re-registration still flows through `useHotkey.ts -> register_hotkey_binding(...)`
+8. Clicking Apply only writes the draft into store; actual re-registration still flows through `useHotkey.ts -> register_hotkey_binding(...)`.
+9. Settings-page capture must suspend runtime hotkey matching before browser capture starts, and resume it when capture ends/cancels/stops. Suspension does not delete the registered binding; it only pauses runtime matching and clears transient pressed-state.
 
 
 匹配状态机固定为：
@@ -171,6 +172,8 @@ Constraints:
 4. Right Alt must normalize to `VK_RMENU (0xA5)` consistently; do not collapse it into a generic Alt key.
 5. Runtime matching must prune stale keys whose physical key-up was missed by the OS/input path before comparing against the binding set.
 6. This stale-key recovery is required for cases such as Alt+Tab or other system flows that can leave `pressed_keys` with a ghost key like `Tab`.
+7. The low-level keyboard hook is observe-only for runtime hotkeys: matched hotkey presses/releases and `Esc` cancel continue to `CallNextHookEx(...)` instead of being swallowed.
+8. Runtime matching must support an explicit suspended state for settings capture; while suspended, no hotkey start/stop transitions may be emitted.
 
 ### F. 前端注册路径
 
@@ -348,6 +351,17 @@ This supplement covers one shared log timeline for `start capture -> browser key
 4. Apply succeeds in UI state but re-register fails.
 5. Browser-captured binding and Rust runtime match behavior diverge.
 
+### G. Apply Trace Timeline
+
+1. A single `trace_id` must correlate one settings-page capture/apply attempt across frontend and Rust runtime.
+2. The same `trace_id` must appear on:
+   - frontend `capture apply requested`
+   - store-driven `useHotkey -> register_hotkey_binding`
+   - Rust `resume_hotkey_runtime`
+   - the first subsequent Rust `hotkey_state`
+3. The timeline must preserve real execution order, even if `resume_hotkey_runtime` happens before Apply due to capture cleanup.
+4. This trace is diagnostic only. It must not change runtime hotkey semantics or persistence format.
+
 ### 5.3 RT / History / Hotkey Bundle
 ### 5.3 ????
 1. 当前主窗口侧边栏允许扩展为 7 个页面：通用、引擎、实时转录、历史记录、热词、说话人、快捷键。
@@ -499,3 +513,16 @@ unasr.AutoModel 直接加载 speaker-diarization 仓库 ID；当前可验证可�
 - FunASR 的设备选择策略保持为 `CUDA > MPS > CPU`，但这只是代码层优先级；最终是否能进入 GPU 取决于后端虚拟环境安装的 `torch / torchaudio` 是否为 CUDA 构建。
 - 如果本机 `nvidia-smi` 正常、但 `torch.cuda.is_available()` 为 `False`，应优先判定为运行时构建错误，而不是业务代码错误。
 - FunASR GPU 验收必须至少同时满足三点：`torch.cuda.is_available() == True`、加载日志显示 `[FunASR] Using device: cuda:0`、真实转录请求可在该设备链路下完成。
+
+## 2026-03-30 Apply Trace Raw Hook Diagnostics Supplement
+
+1. 单次设置页 `capture/apply` 共享的 `trace_id` 不只要串到 `resume/register/first hotkey_state`，还要能串到 Apply 之后进入 Rust hook 的原始键盘事件。
+2. 本轮诊断只补充可观测性，不改变正式热键行为、不改变匹配规则、不改变长按/单击状态机。
+3. 诊断日志必须至少覆盖：
+   - 原始 `WM_KEYDOWN / WM_SYSKEYDOWN / WM_KEYUP / WM_SYSKEYUP`
+   - `vkCode / scanCode / flags / normalized_vk`
+   - 更新后的 `pressed_keys`
+   - 当前 `binding`
+   - 该事件是否来自共享 `trace_id` 的诊断窗口
+4. 诊断窗口必须是有界的，避免把长期正常输入全部绑定到同一个旧 `trace_id`；优先记录 Apply 后紧随其后的有限条 hook 事件。
+5. 如果 Apply 后很久都没有任何 hook 事件进入诊断窗口，新的结论应表述为“延迟发生在 Apply 之后、下一条原始键盘事件进入 hook 之前”，而不是“注册慢”。

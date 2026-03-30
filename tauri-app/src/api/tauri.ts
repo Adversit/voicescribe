@@ -14,8 +14,8 @@ export async function backendStatus(): Promise<BackendRuntimeStatus> {
 }
 
 
-export async function registerHotkeyBinding(binding: HotkeyBinding): Promise<void> {
-  await invoke("register_hotkey_binding", { binding });
+export async function registerHotkeyBinding(binding: HotkeyBinding, traceId?: string): Promise<void> {
+  await invoke("register_hotkey_binding", { binding, traceId });
 }
 
 export async function getHotkeyDisplay(): Promise<string> {
@@ -24,6 +24,14 @@ export async function getHotkeyDisplay(): Promise<string> {
 
 export async function debugHotkeyLog(message: string): Promise<void> {
   await invoke("debug_hotkey_log", { message });
+}
+
+export async function suspendHotkeyRuntime(): Promise<void> {
+  await invoke("suspend_hotkey_runtime");
+}
+
+export async function resumeHotkeyRuntime(traceId?: string, reason?: string): Promise<void> {
+  await invoke("resume_hotkey_runtime", { traceId, reason });
 }
 
 

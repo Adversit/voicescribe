@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { debugHotkeyLog } from "../api/tauri";
+import { debugHotkeyLog, resumeHotkeyRuntime, suspendHotkeyRuntime } from "../api/tauri";
 import {
   SettingsPage,
   SettingsSection,
@@ -25,6 +25,8 @@ const TEXT = {
   stopCapture: "\u505c\u6b62\u5f55\u5236",
   apply: "\u5e94\u7528\u5feb\u6377\u952e",
   saveSuccess: "\u5feb\u6377\u952e\u5df2\u4fdd\u5b58",
+  captureSuspendFailed: "\u6682\u505c\u8fd0\u884c\u65f6\u70ed\u952e\u5931\u8d25",
+  captureResumeFailed: "\u6062\u590d\u8fd0\u884c\u65f6\u70ed\u952e\u5931\u8d25",
   captureOverflow: "\u6700\u591a\u53ea\u80fd\u5f55\u5236 2 \u4e2a\u952e",
   usageTitle: "\u4f7f\u7528\u8bf4\u660e",
   usageDescription:
@@ -197,15 +199,22 @@ function blurActiveElement() {
 function logHotkeyUi(message: string) {
   void debugHotkeyLog(`hotkey-settings ${message}`).catch(() => undefined);
 }
+function createTraceId() {
+  const random = Math.random().toString(16).slice(2, 8);
+  return `hotkey-apply-${Date.now()}-${random}`;
+}
+
 
 export function HotkeySettings() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
+  const setHotkeyApplyTraceId = useAppStore((state) => state.setHotkeyApplyTraceId);
   const setToast = useAppStore((state) => state.setToast);
   const [display, setDisplay] = useState(settings.hotkeyBinding.display || TEXT.notSet);
   const [capturing, setCapturing] = useState(false);
   const [draftBinding, setDraftBinding] = useState<HotkeyBinding | null>(null);
   const captureKeysRef = useRef<Set<number>>(new Set());
+  const captureTraceRef = useRef<string | null>(null);
   const [captureKeysPreview, setCaptureKeysPreview] = useState<number[]>([]);
   const canApplyDraft = !capturing && draftBinding !== null;
 
@@ -217,16 +226,16 @@ export function HotkeySettings() {
       return;
     }
 
-    logHotkeyUi("bind browser capture start");
+    logHotkeyUi(`bind browser capture start trace_id=${captureTraceRef.current ?? "none"}`);
 
     const completeCapture = (keys: Iterable<number>, reason: string) => {
       const binding = createBindingFromKeys(keys);
       if (!binding) {
-        logHotkeyUi(`browser capture complete ignored reason=${reason} keys=${formatKeys([...keys])}`);
+        logHotkeyUi(`browser capture complete ignored trace_id=${captureTraceRef.current ?? "none"} reason=${reason} keys=${formatKeys([...keys])}`);
         return;
       }
 
-      logHotkeyUi(`browser capture complete reason=${reason} ${formatBindingSummary(binding)}`);
+      logHotkeyUi(`browser capture complete trace_id=${captureTraceRef.current ?? "none"} reason=${reason} ${formatBindingSummary(binding)}`);
       setDraftBinding(binding);
       setDisplay(binding.display || TEXT.notSet);
       captureKeysRef.current.clear();
@@ -235,11 +244,12 @@ export function HotkeySettings() {
     };
 
     const cancelCapture = (reason: string) => {
-      logHotkeyUi(`browser capture cancelled reason=${reason}`);
+      logHotkeyUi(`browser capture cancelled trace_id=${captureTraceRef.current ?? "none"} reason=${reason}`);
       captureKeysRef.current.clear();
       setCaptureKeysPreview([]);
       setCapturing(false);
       setDisplay(settings.hotkeyBinding.display || TEXT.notSet);
+      captureTraceRef.current = null;
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -253,7 +263,7 @@ export function HotkeySettings() {
 
       const key = normalizeBrowserCapturedVk(event);
       if (key === null) {
-        logHotkeyUi(`browser keydown ignored code=${event.code} location=${event.location}`);
+        logHotkeyUi(`browser keydown ignored trace_id=${captureTraceRef.current ?? "none"} code=${event.code} location=${event.location}`);
         return;
       }
 
@@ -261,11 +271,11 @@ export function HotkeySettings() {
       const preview = [...captureKeysRef.current].sort((left, right) => left - right);
       setCaptureKeysPreview(preview);
       logHotkeyUi(
-        `browser keydown code=${event.code} location=${event.location} key=0x${key.toString(16).toUpperCase()} pressed=${formatKeys(preview)}`,
+        `browser keydown trace_id=${captureTraceRef.current ?? "none"} code=${event.code} location=${event.location} key=0x${key.toString(16).toUpperCase()} pressed=${formatKeys(preview)}`,
       );
 
       if (captureKeysRef.current.size > 2) {
-        logHotkeyUi(`browser capture overflow pressed=${formatKeys(preview)}`);
+        logHotkeyUi(`browser capture overflow trace_id=${captureTraceRef.current ?? "none"} pressed=${formatKeys(preview)}`);
         setToast(TEXT.captureOverflow);
         cancelCapture("overflow");
       }
@@ -277,14 +287,14 @@ export function HotkeySettings() {
 
       const key = normalizeBrowserCapturedVk(event);
       if (key === null) {
-        logHotkeyUi(`browser keyup ignored code=${event.code} location=${event.location}`);
+        logHotkeyUi(`browser keyup ignored trace_id=${captureTraceRef.current ?? "none"} code=${event.code} location=${event.location}`);
         return;
       }
 
       captureKeysRef.current.add(key);
       const snapshot = [...captureKeysRef.current].sort((left, right) => left - right);
       logHotkeyUi(
-        `browser keyup code=${event.code} location=${event.location} key=0x${key.toString(16).toUpperCase()} pressed=${formatKeys(snapshot)}`,
+        `browser keyup trace_id=${captureTraceRef.current ?? "none"} code=${event.code} location=${event.location} key=0x${key.toString(16).toUpperCase()} pressed=${formatKeys(snapshot)}`,
       );
       completeCapture(snapshot, "keyup");
     };
@@ -295,7 +305,16 @@ export function HotkeySettings() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("keyup", handleKeyUp, true);
-      logHotkeyUi("unbind browser capture");
+      const traceId = captureTraceRef.current ?? undefined;
+      logHotkeyUi(`unbind browser capture trace_id=${traceId ?? "none"}`);
+      void resumeHotkeyRuntime(traceId, "capture-cleanup")
+        .then(() => {
+          logHotkeyUi(`runtime hotkey resumed after capture trace_id=${traceId ?? "none"}`);
+        })
+        .catch((error) => {
+          logHotkeyUi(`runtime hotkey resume failed trace_id=${traceId ?? "none"} error=${String(error)}`);
+          setToast(TEXT.captureResumeFailed);
+        });
     };
   }, [capturing, setToast, settings.hotkeyBinding.display]);
 
@@ -310,23 +329,35 @@ export function HotkeySettings() {
 
     if (capturing) {
       logHotkeyUi(
-        `capture button action=stop display=${display} draft=${formatBindingSummary(draftBinding)} settings=${formatBindingSummary(settings.hotkeyBinding)}`,
+        `capture button action=stop trace_id=${captureTraceRef.current ?? "none"} display=${display} draft=${formatBindingSummary(draftBinding)} settings=${formatBindingSummary(settings.hotkeyBinding)}`,
       );
       captureKeysRef.current.clear();
       setCaptureKeysPreview([]);
       setCapturing(false);
       setDisplay(settings.hotkeyBinding.display || TEXT.notSet);
+      captureTraceRef.current = null;
       return;
     }
 
+    const traceId = createTraceId();
+    captureTraceRef.current = traceId;
     logHotkeyUi(
-      `capture button action=start display=${display} draft=${formatBindingSummary(draftBinding)} settings=${formatBindingSummary(settings.hotkeyBinding)}`,
+      `capture button action=start trace_id=${traceId} display=${display} draft=${formatBindingSummary(draftBinding)} settings=${formatBindingSummary(settings.hotkeyBinding)}`,
     );
-    setDraftBinding(null);
-    captureKeysRef.current.clear();
-    setCaptureKeysPreview([]);
-    setDisplay(TEXT.waiting);
-    setCapturing(true);
+    void suspendHotkeyRuntime()
+      .then(() => {
+        logHotkeyUi(`runtime hotkey suspended for capture trace_id=${traceId}`);
+        setDraftBinding(null);
+        captureKeysRef.current.clear();
+        setCaptureKeysPreview([]);
+        setDisplay(TEXT.waiting);
+        setCapturing(true);
+      })
+      .catch((error) => {
+        logHotkeyUi(`runtime hotkey suspend failed trace_id=${traceId} error=${String(error)}`);
+        setToast(TEXT.captureSuspendFailed);
+        captureTraceRef.current = null;
+      });
   };
 
   const activeBinding = draftBinding ?? settings.hotkeyBinding;
@@ -374,15 +405,19 @@ export function HotkeySettings() {
                   return;
                 }
                 const binding = draftBinding;
+                const traceId = captureTraceRef.current ?? createTraceId();
+                captureTraceRef.current = traceId;
                 logHotkeyUi(
-                  `capture apply requested ${formatBindingSummary(binding)} previous=${formatBindingSummary(settings.hotkeyBinding)}`,
+                  `capture apply requested trace_id=${traceId} ${formatBindingSummary(binding)} previous=${formatBindingSummary(settings.hotkeyBinding)}`,
                 );
+                setHotkeyApplyTraceId(traceId);
                 updateSettings({
                   hotkeyBinding: binding,
                 });
                 setDisplay(binding.display || TEXT.notSet);
                 setDraftBinding(null);
-                logHotkeyUi(`capture apply state-updated ${formatBindingSummary(binding)}`);
+                logHotkeyUi(`capture apply state-updated trace_id=${traceId} ${formatBindingSummary(binding)}`);
+                captureTraceRef.current = null;
                 setToast(TEXT.saveSuccess);
               }}
             >

@@ -353,3 +353,32 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
 - Evidence: hotkey logs showed `binding=0xA5` while `pressed=0x9+0xA5`, meaning a stale `Tab` remained in `pressed_keys` before Right Alt was pressed.
 - Root cause: the runtime matcher depends on exact set equality, but system-level flows such as Alt+Tab can miss a later key-up event and leave a ghost key in the pressed set.
 - Fix direction: before each runtime comparison, prune tracked keys that are no longer physically down according to the current keyboard state, then continue normal matching.
+
+## 82. Runtime hotkey was swallowing matched keys instead of observing like the reference implementation
+- Time: 2026-03-30
+- Symptom: after the hotkey implementation landed, matching keys could be blocked from foreground apps because the hook returned an intercepted result on match.
+- Reference comparison: the reference repo hook logs key events and always `CallNextHookEx(...)`; it does not swallow matched hotkeys.
+- Root cause: the migrated Rust runtime kept the old `return LRESULT(1)` behavior for hotkey press/release and `Esc` cancel paths.
+- Fix direction: keep runtime state-machine behavior, but make the low-level hook observe-only so matched keys continue to the foreground app.
+
+## 83. Settings-page capture can still trigger the old registered hotkey if runtime matching is not suspended
+- Time: 2026-03-30
+- Symptom: during settings capture, pressing the same keys as the currently registered hotkey can start recording unexpectedly.
+- Root cause: browser-based settings capture and Rust runtime hotkey matching are separate paths, and runtime matching remains active unless explicitly suspended.
+- Fix direction: suspend runtime hotkey matching before settings capture starts, resume it when capture ends, and keep the saved binding intact.
+
+## 84. The reported 7-8 second recovery after clicking Apply is not explained by any explicit wait in current code
+- Time: 2026-03-30
+- Symptom: after clicking Apply in hotkey settings, runtime hotkey matching appears to recover only after about 7-8 seconds.
+- Current code reading:
+  - `HotkeySettings.tsx` Apply only updates store and shows success toast.
+  - `useHotkey.ts` re-registers on a separate async effect.
+  - `resume_hotkey_runtime()` is triggered from capture cleanup, not from the Apply chain itself.
+  - Existing explicit waits in hotkey code are only around 200ms, 350ms, or a 2s hook startup timeout.
+- Current conclusion:
+  - "Apply does not form a single synchronous close-out chain" is a real design problem.
+  - But that design problem alone does not explain a stable 7-8 second window.
+- Next diagnostic requirement:
+  - add one shared `trace_id` across `capture/apply -> register -> resume -> first post-apply hotkey_state`
+  - then determine whether the delay occurs before register, between register and resume, or after resume while runtime matching is still effectively blocked
+  - preserve the actual order seen in logs, rather than assuming Apply happens before resume

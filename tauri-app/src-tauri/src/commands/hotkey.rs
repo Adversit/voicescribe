@@ -22,16 +22,22 @@ static HOOK_THREAD: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
 static HOOK_THREAD_ID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
 
 const NOT_SET_LABEL: &str = "\u{672a}\u{8bbe}\u{7f6e}";
+const APPLY_TRACE_EVENT_BUDGET: u8 = 24;
+const APPLY_TRACE_WINDOW_SECONDS: u64 = 12;
 
 struct HotkeyRuntime {
     binding: HotkeyBinding,
     pressed_keys: BTreeSet<u32>,
     is_hotkey_active: bool,
+    suspended: bool,
     is_long_press_mode: bool,
     long_press_generation: u64,
     app_handle: Option<AppHandle>,
     last_emitted_event: Option<&'static str>,
     last_emitted_at: Option<Instant>,
+    pending_trace_id: Option<String>,
+    pending_trace_started_at: Option<Instant>,
+    pending_trace_event_budget: u8,
 }
 
 impl Default for HotkeyRuntime {
@@ -40,13 +46,24 @@ impl Default for HotkeyRuntime {
             binding: HotkeyBinding::default(),
             pressed_keys: BTreeSet::new(),
             is_hotkey_active: false,
+            suspended: false,
             is_long_press_mode: false,
             long_press_generation: 0,
             app_handle: None,
             last_emitted_event: None,
             last_emitted_at: None,
+            pending_trace_id: None,
+            pending_trace_started_at: None,
+            pending_trace_event_budget: 0,
         }
     }
+}
+
+#[derive(Clone)]
+struct TraceDiagnosticEvent {
+    trace_id: String,
+    age_ms: u128,
+    remaining_events: u8,
 }
 
 fn runtime() -> &'static Mutex<HotkeyRuntime> {
@@ -122,10 +139,11 @@ fn runtime_state_summary() -> String {
         .lock()
         .map(|guard| {
             format!(
-                "runtime_binding={} runtime_pressed={} runtime_hotkey_active={} runtime_long_press_mode={}",
+                "runtime_binding={} runtime_pressed={} runtime_hotkey_active={} runtime_suspended={} runtime_long_press_mode={}",
                 format_keys(&guard.binding.keys),
                 format_key_set(&guard.pressed_keys),
                 guard.is_hotkey_active,
+                guard.suspended,
                 guard.is_long_press_mode,
             )
         })
@@ -253,6 +271,51 @@ fn should_emit_hotkey_event(event_name: &'static str) -> bool {
     guard.last_emitted_event = Some(event_name);
     guard.last_emitted_at = Some(now);
     true
+}
+
+fn arm_pending_trace(guard: &mut HotkeyRuntime, trace_id: String) {
+    guard.pending_trace_id = Some(trace_id);
+    guard.pending_trace_started_at = Some(Instant::now());
+    guard.pending_trace_event_budget = APPLY_TRACE_EVENT_BUDGET;
+}
+
+fn begin_pending_trace_event() -> Option<TraceDiagnosticEvent> {
+    let mut guard = runtime().lock().ok()?;
+    let trace_id = guard.pending_trace_id.clone()?;
+    let started_at = guard.pending_trace_started_at?;
+    let age = Instant::now().duration_since(started_at);
+
+    if age > Duration::from_secs(APPLY_TRACE_WINDOW_SECONDS) {
+        log_hotkey(format!(
+            "apply_trace expired trace_id={} age_ms={} budget_remaining={}",
+            trace_id,
+            age.as_millis(),
+            guard.pending_trace_event_budget,
+        ));
+        guard.pending_trace_id = None;
+        guard.pending_trace_started_at = None;
+        guard.pending_trace_event_budget = 0;
+        return None;
+    }
+
+    if guard.pending_trace_event_budget == 0 {
+        guard.pending_trace_id = None;
+        guard.pending_trace_started_at = None;
+        return None;
+    }
+
+    guard.pending_trace_event_budget -= 1;
+    let remaining_events = guard.pending_trace_event_budget;
+    if remaining_events == 0 {
+        guard.pending_trace_id = None;
+        guard.pending_trace_started_at = None;
+    }
+
+    Some(TraceDiagnosticEvent {
+        trace_id,
+        age_ms: age.as_millis(),
+        remaining_events,
+    })
 }
 
 fn is_extended_key(flags: u32) -> bool {
@@ -386,8 +449,44 @@ enum HotkeyTransition {
     Released,
 }
 
-fn update_runtime_hotkey_state(key: u32, message: u32) -> Option<HotkeyTransition> {
+fn update_runtime_hotkey_state(
+    key: u32,
+    message: u32,
+    trace: Option<&TraceDiagnosticEvent>,
+) -> Option<HotkeyTransition> {
     let mut guard = runtime().lock().ok()?;
+
+    if guard.suspended {
+        if !guard.pressed_keys.is_empty() || guard.is_hotkey_active || guard.is_long_press_mode {
+            log_hotkey(format!(
+                "hotkey_state skipped_suspended key=0x{:X} message={} pressed={} active={} long_press={}",
+                key,
+                message,
+                format_key_set(&guard.pressed_keys),
+                guard.is_hotkey_active,
+                guard.is_long_press_mode,
+            ));
+        }
+        if let Some(trace) = trace {
+            log_hotkey(format!(
+                "hotkey_state trace_id={} age_ms={} remaining_events={} skipped_suspended key=0x{:X} message={} binding={} pressed={} active={} long_press={}",
+                trace.trace_id,
+                trace.age_ms,
+                trace.remaining_events,
+                key,
+                message,
+                format_keys(&guard.binding.keys),
+                format_key_set(&guard.pressed_keys),
+                guard.is_hotkey_active,
+                guard.is_long_press_mode,
+            ));
+        }
+        guard.pressed_keys.clear();
+        guard.is_hotkey_active = false;
+        guard.is_long_press_mode = false;
+        return None;
+    }
+
     let was_active = guard.is_hotkey_active;
     let stale_keys = prune_stale_pressed_keys(&mut guard.pressed_keys);
 
@@ -423,6 +522,21 @@ fn update_runtime_hotkey_state(key: u32, message: u32) -> Option<HotkeyTransitio
         is_active,
     ));
 
+    if let Some(trace) = trace {
+        log_hotkey(format!(
+            "hotkey_state trace_id={} age_ms={} remaining_events={} key=0x{:X} message={} binding={} pressed={} was_active={} is_active={}",
+            trace.trace_id,
+            trace.age_ms,
+            trace.remaining_events,
+            key,
+            message,
+            format_keys(&guard.binding.keys),
+            format_key_set(&guard.pressed_keys),
+            was_active,
+            is_active,
+        ));
+    }
+
     if !was_active && is_active {
         Some(HotkeyTransition::Pressed)
     } else if was_active && !is_active {
@@ -431,13 +545,31 @@ fn update_runtime_hotkey_state(key: u32, message: u32) -> Option<HotkeyTransitio
         None
     }
 }
-
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let kb = *(lparam.0 as *const KBDLLHOOKSTRUCT);
         let message = wparam.0 as u32;
+        let trace = begin_pending_trace_event();
+        let normalized_key = normalized_vk_from_kb(&kb);
 
-        let Some(key) = normalized_vk_from_kb(&kb) else {
+        if let Some(trace) = trace.as_ref() {
+            let normalized_summary = normalized_key
+                .map(|value| format!("0x{:X}", value))
+                .unwrap_or_else(|| "none".to_string());
+            log_hotkey(format!(
+                "hook_raw trace_id={} age_ms={} remaining_events={} message={} vk=0x{:X} scan=0x{:X} flags=0x{:X} normalized_vk={}",
+                trace.trace_id,
+                trace.age_ms,
+                trace.remaining_events,
+                message,
+                kb.vkCode,
+                kb.scanCode,
+                kb.flags.0,
+                normalized_summary,
+            ));
+        }
+
+        let Some(key) = normalized_key else {
             return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
         };
 
@@ -447,17 +579,14 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         {
             log_hotkey("esc -> cancel");
             emit_event("hotkey-cancel");
-            return LRESULT(1);
         }
 
-        match update_runtime_hotkey_state(key, message) {
+        match update_runtime_hotkey_state(key, message, trace.as_ref()) {
             Some(HotkeyTransition::Pressed) => {
                 handle_hotkey_press_transition();
-                return LRESULT(1);
             }
             Some(HotkeyTransition::Released) => {
                 handle_hotkey_release_transition();
-                return LRESULT(1);
             }
             None => {}
         }
@@ -594,14 +723,77 @@ pub fn debug_hotkey_log(message: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn suspend_hotkey_runtime() -> Result<(), String> {
+    let summary = {
+        let mut guard = runtime()
+            .lock()
+            .map_err(|_| "Hotkey runtime mutex poisoned")?;
+        guard.suspended = true;
+        guard.pressed_keys.clear();
+        guard.is_hotkey_active = false;
+        guard.is_long_press_mode = false;
+        guard.long_press_generation += 1;
+        format!(
+            "runtime_binding={} runtime_pressed={} runtime_hotkey_active={} runtime_suspended={} runtime_long_press_mode={}",
+            format_keys(&guard.binding.keys),
+            format_key_set(&guard.pressed_keys),
+            guard.is_hotkey_active,
+            guard.suspended,
+            guard.is_long_press_mode,
+        )
+    };
+
+    log_hotkey(format!("suspend_hotkey_runtime {}", summary));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resume_hotkey_runtime(
+    trace_id: Option<String>,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let summary = {
+        let mut guard = runtime()
+            .lock()
+            .map_err(|_| "Hotkey runtime mutex poisoned")?;
+        guard.suspended = false;
+        guard.pressed_keys.clear();
+        guard.is_hotkey_active = false;
+        guard.is_long_press_mode = false;
+        guard.long_press_generation += 1;
+        if let Some(trace_id) = trace_id.clone() {
+            arm_pending_trace(&mut guard, trace_id);
+        }
+        format!(
+            "runtime_binding={} runtime_pressed={} runtime_hotkey_active={} runtime_suspended={} runtime_long_press_mode={}",
+            format_keys(&guard.binding.keys),
+            format_key_set(&guard.pressed_keys),
+            guard.is_hotkey_active,
+            guard.suspended,
+            guard.is_long_press_mode,
+        )
+    };
+
+    log_hotkey(format!(
+        "resume_hotkey_runtime trace_id={} reason={} {}",
+        trace_id.as_deref().unwrap_or("none"),
+        reason.as_deref().unwrap_or("unspecified"),
+        summary,
+    ));
+    Ok(())
+}
+
+#[tauri::command]
 pub fn register_hotkey_binding(
     app: AppHandle,
     state: State<'_, HotkeyState>,
     binding: HotkeyBinding,
+    trace_id: Option<String>,
 ) -> Result<(), String> {
     let binding = sanitize_binding(binding)?;
     log_hotkey(format!(
-        "register_hotkey_binding request keys={} display={} {}",
+        "register_hotkey_binding request trace_id={} keys={} display={} {}",
+        trace_id.as_deref().unwrap_or("none"),
         format_keys(&binding.keys),
         binding.display,
         runtime_state_summary(),
@@ -616,10 +808,14 @@ pub fn register_hotkey_binding(
     guard.pressed_keys.clear();
     guard.is_hotkey_active = false;
     guard.is_long_press_mode = false;
+    if let Some(trace_id) = trace_id.clone() {
+        arm_pending_trace(&mut guard, trace_id);
+    }
     drop(guard);
 
     log_hotkey(format!(
-        "register_hotkey_binding keys={} display={} {}",
+        "register_hotkey_binding trace_id={} keys={} display={} {}",
+        trace_id.as_deref().unwrap_or("none"),
         format_keys(&binding.keys),
         binding.display,
         runtime_state_summary(),
@@ -627,7 +823,6 @@ pub fn register_hotkey_binding(
 
     ensure_hook_thread()
 }
-
 #[tauri::command]
 pub fn unregister_hotkey(state: State<'_, HotkeyState>) -> Result<(), String> {
     *state.binding.lock().map_err(|_| "Hotkey mutex poisoned")? = HotkeyBinding {

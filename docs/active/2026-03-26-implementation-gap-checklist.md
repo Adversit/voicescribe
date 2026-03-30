@@ -106,7 +106,8 @@
   - Long-press start, release-to-stop, single-tap toggle, and `Esc` cancel stay unchanged
   - Runtime hook is now only responsible for global hotkey matching, not settings capture
   - Runtime must recover from stale pressed keys when the OS misses a key-up event, otherwise single-key bindings can get blocked by a ghost key such as `Tab`
-
+  - Runtime hook must remain observe-only; matched keys are not swallowed from the foreground application
+  - Settings-page capture must suspend runtime hotkey matching without deleting the registered binding
 - `HK-05` Dual registration entry removal: `completed`
   - [useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts) remains the only formal registration entry
   - [HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) no longer calls `registerHotkeyBinding(...)` directly
@@ -137,6 +138,20 @@
 - `HK-10` 测试文档回写：`已完成`
   - 上述验证结果必须先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md)
   - 若出现新问题，必须同步写入 [2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-session-bug-log.md)
+
+## 2026-03-30 Apply Trace Diagnostic Checklist
+
+- `HK-11` Apply trace timeline diagnostics: `code complete, manual verification pending`
+  - Use one `trace_id` for the same capture/apply attempt
+  - Logs must connect `capture apply requested -> useHotkey register -> resume_hotkey_runtime -> first hotkey_state`
+  - This round is diagnostic only; it does not change official hotkey behavior
+
+- `HK-12` Apply raw hook-event diagnostics: `code complete, manual verification pending`
+  - Reuse the same `trace_id` from `capture/apply`
+  - Log a bounded number of post-Apply raw hook events with `message / vk / scanCode / flags / normalized_vk`
+  - Log the corresponding `pressed_keys` and `binding` after runtime-state update
+  - Keep the tracing window bounded so old `trace_id` does not leak into unrelated long-running input
+  - This round remains diagnostic only; it does not change the official hotkey matcher
 
 ## Phase 5
 - `P5-01` embedded Python 资源与安装态闭环：`部分完成`

@@ -1,0 +1,175 @@
+﻿[1774863121] frontend bind hotkey listeners start
+[1774863121] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774863121] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863121] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863121] hook_status context=ensure_hook_thread:enter slot_present=false thread_id_present=false thread_finished=false
+[1774863121] ensure_hook_thread: starting
+[1774863121] ensure_hook_thread: SetWindowsHookExW succeeded
+[1774863121] ensure_hook_thread: startup confirmed
+[1774863121] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774863121] frontend bind hotkey listeners success
+[1774863134] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774863138] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774863138] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774863138] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774863138] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863138] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863138] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863138] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863138] ensure_hook_thread: already running
+[1774863138] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774863147] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774863149] frontend hotkey-settings capture apply requested display=左 Alt keys=0xA4 previous=display=右 Alt keys=0xA5
+[1774863149] frontend hotkey-settings capture apply state-updated display=左 Alt keys=0xA4
+[1774863149] frontend use-hotkey register requested keys=164 display=左 Alt
+[1774863149] register_hotkey_binding request keys=0xA4 display=左 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863149] register_hotkey_binding keys=0xA4 display=左 Alt runtime_binding=0xA4 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863149] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863149] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863149] ensure_hook_thread: already running
+[1774863149] frontend use-hotkey register succeeded keys=164 display=左 Alt
+[1774863152] frontend hotkey-settings capture button action=start display=左 Alt draft=null settings=display=左 Alt keys=0xA4
+[1774863156] frontend hotkey-settings capture button action=start display=A draft=display=A keys=0x41 settings=display=左 Alt keys=0xA4
+[1774863159] frontend hotkey-settings capture apply requested display=A+S keys=0x41 + 0x53 previous=display=左 Alt keys=0xA4
+[1774863159] frontend hotkey-settings capture apply state-updated display=A+S keys=0x41 + 0x53
+[1774863159] frontend use-hotkey register requested keys=65+83 display=A+S
+[1774863159] register_hotkey_binding request keys=0x41+0x53 display=A+S runtime_binding=0xA4 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863159] register_hotkey_binding keys=0x41+0x53 display=A+S runtime_binding=0x41+0x53 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863159] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863159] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863159] ensure_hook_thread: already running
+[1774863159] frontend use-hotkey register succeeded keys=65+83 display=A+S
+[1774863160] frontend hotkey-settings capture button action=start display=A+S draft=null settings=display=A+S keys=0x41 + 0x53
+[1774863161] frontend hotkey-settings capture button action=start display=右 Alt draft=display=右 Alt keys=0xA5 settings=display=A+S keys=0x41 + 0x53
+[1774863163] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=A+S keys=0x41 + 0x53
+[1774863163] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774863163] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774863163] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0x41+0x53 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863163] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863163] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863163] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863163] ensure_hook_thread: already running
+[1774863163] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774863290] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774863291] frontend hotkey-settings capture apply requested display=A keys=0x41 previous=display=右 Alt keys=0xA5
+[1774863291] frontend hotkey-settings capture apply state-updated display=A keys=0x41
+[1774863291] frontend use-hotkey register requested keys=65 display=A
+[1774863291] register_hotkey_binding request keys=0x41 display=A runtime_binding=0xA5 runtime_pressed=0x9 runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863291] register_hotkey_binding keys=0x41 display=A runtime_binding=0x41 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863291] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863291] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863291] ensure_hook_thread: already running
+[1774863291] frontend use-hotkey register succeeded keys=65 display=A
+[1774863294] frontend hotkey-settings capture button action=start display=A draft=null settings=display=A keys=0x41
+[1774863296] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=A keys=0x41
+[1774863296] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774863296] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774863296] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0x41 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863296] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863296] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863296] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863296] ensure_hook_thread: already running
+[1774863296] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774863479] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774863482] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774863482] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774863482] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774863482] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863482] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774863482] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774863482] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774863482] ensure_hook_thread: already running
+[1774863482] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774874231] frontend bind hotkey listeners start
+[1774874231] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774874231] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774874231] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774874231] hook_status context=ensure_hook_thread:enter slot_present=false thread_id_present=false thread_finished=false
+[1774874231] ensure_hook_thread: starting
+[1774874231] ensure_hook_thread: SetWindowsHookExW succeeded
+[1774874231] ensure_hook_thread: startup confirmed
+[1774874231] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774874231] frontend bind hotkey listeners success
+[1774874586] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774874588] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774874588] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774874588] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774874588] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774874588] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774874588] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774874588] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774874588] ensure_hook_thread: already running
+[1774874588] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774874593] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774874596] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774874596] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774874596] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774874596] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774874596] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_long_press_mode=false
+[1774874596] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774874596] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774874596] ensure_hook_thread: already running
+[1774874596] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774875971] frontend bind hotkey listeners start
+[1774875971] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774875971] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774875971] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774875971] hook_status context=ensure_hook_thread:enter slot_present=false thread_id_present=false thread_finished=false
+[1774875971] ensure_hook_thread: starting
+[1774875971] ensure_hook_thread: SetWindowsHookExW succeeded
+[1774875971] ensure_hook_thread: startup confirmed
+[1774875971] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774875971] frontend bind hotkey listeners success
+[1774876137] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774876137] suspend_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=true runtime_long_press_mode=false
+[1774876138] resume_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876139] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774876139] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774876139] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774876139] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876139] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876139] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774876139] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774876139] ensure_hook_thread: already running
+[1774876139] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774876893] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774876893] suspend_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=true runtime_long_press_mode=false
+[1774876897] resume_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876901] frontend hotkey-settings capture button action=start display=I draft=display=I keys=0x49 settings=display=右 Alt keys=0xA5
+[1774876901] suspend_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=true runtime_long_press_mode=false
+[1774876902] frontend hotkey-settings capture button action=stop display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774876902] resume_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876903] frontend hotkey-settings capture button action=start display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774876903] suspend_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=true runtime_long_press_mode=false
+[1774876904] resume_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876906] frontend hotkey-settings capture apply requested display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774876906] frontend hotkey-settings capture apply state-updated display=右 Alt keys=0xA5
+[1774876906] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774876906] register_hotkey_binding request keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876906] register_hotkey_binding keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774876906] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774876906] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774876906] ensure_hook_thread: already running
+[1774876906] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774878636] frontend bind hotkey listeners start
+[1774878636] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774878636] register_hotkey_binding request trace_id=none keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=f
+[1774878636] register_hotkey_binding trace_id=none keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_press_mode=false
+[1774878636] hook_status context=ensure_hook_thread:enter slot_present=false thread_id_present=false thread_finished=false
+[1774878636] ensure_hook_thread: starting
+[1774878636] ensure_hook_thread: SetWindowsHookExW succeeded
+[1774878636] ensure_hook_thread: startup confirmed
+[1774878636] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774878636] frontend bind hotkey listeners success
+[1774878718] frontend hotkey-settings capture button action=start trace_id=hotkey-apply-1774878718246-c834c0 display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774878718] suspend_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=true runtime_long_press_mode=false
+[1774878719] resume_hotkey_runtime trace_id=hotkey-apply-1774878718246-c834c0 reason=capture-cleanup runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime
+[1774878720] frontend hotkey-settings capture apply requested trace_id=hotkey-apply-1774878718246-c834c0 display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774878720] frontend hotkey-settings capture apply state-updated trace_id=hotkey-apply-1774878718246-c834c0 display=右 Alt keys=0xA5
+[1774878720] frontend use-hotkey register requested trace_id=hotkey-apply-1774878718246-c834c0 keys=165 display=右 Alt
+[1774878720] register_hotkey_binding request trace_id=hotkey-apply-1774878718246-c834c0 keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=fa
+[1774878720] register_hotkey_binding trace_id=hotkey-apply-1774878718246-c834c0 keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runt
+[1774878720] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774878720] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774878720] ensure_hook_thread: already running
+[1774878720] frontend use-hotkey register succeeded trace_id=hotkey-apply-1774878718246-c834c0 keys=165 display=右 Alt

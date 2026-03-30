@@ -20,6 +20,10 @@ function formatBindingForLog(keys: number[], display: string): string {
   return `keys=${keySummary} display=${display}`;
 }
 
+function formatTraceForLog(traceId: string | null): string {
+  return traceId ? ` trace_id=${traceId}` : "";
+}
+
 export function useHotkey() {
   const setAudioLevel = useAppStore((state) => state.setAudioLevel);
   const setToast = useAppStore((state) => state.setToast);
@@ -119,22 +123,28 @@ export function useHotkey() {
     }
 
     let cancelled = false;
-    void debugHotkeyLog(`use-hotkey register requested ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`).catch(
-      () => undefined,
-    );
+    const traceId = useAppStore.getState().hotkeyApplyTraceId;
+    void debugHotkeyLog(
+      `use-hotkey register requested${formatTraceForLog(traceId)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
+    ).catch(() => undefined);
 
-    void registerHotkeyBinding(hotkeyBinding)
+    void registerHotkeyBinding(hotkeyBinding, traceId ?? undefined)
       .then(() => {
-        void debugHotkeyLog(`use-hotkey register succeeded ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`).catch(
-          () => undefined,
-        );
+        void debugHotkeyLog(
+          `use-hotkey register succeeded${formatTraceForLog(traceId)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
+        ).catch(() => undefined);
       })
       .catch((error) => {
-        void debugHotkeyLog(`use-hotkey register failed error=${String(error)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`).catch(
-          () => undefined,
-        );
+        void debugHotkeyLog(
+          `use-hotkey register failed${formatTraceForLog(traceId)} error=${String(error)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
+        ).catch(() => undefined);
         if (!cancelled) {
           setToast(error instanceof Error ? error.message : REGISTER_HOTKEY_ERROR);
+        }
+      })
+      .finally(() => {
+        if (traceId && useAppStore.getState().hotkeyApplyTraceId === traceId) {
+          useAppStore.getState().setHotkeyApplyTraceId(null);
         }
       });
 

@@ -1,0 +1,118 @@
+﻿[1774878636] frontend overlay bind start
+[1774878636] frontend overlay bind success
+[1774878636] frontend overlay-ready emitted to main
+[1774878636] frontend bind hotkey listeners start
+[1774878636] frontend bind tray listeners start
+[1774878636] frontend overlay-ready received
+[1774878636] frontend use-hotkey register requested keys=165 display=右 Alt
+[1774878636] register_hotkey_binding request trace_id=none keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runti
+[1774878636] register_hotkey_binding trace_id=none keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=false runtime_long_
+[1774878636] hook_status context=ensure_hook_thread:enter slot_present=false thread_id_present=false thread_finished=false
+[1774878636] ensure_hook_thread: starting
+[1774878636] ensure_hook_thread: SetWindowsHookExW succeeded
+[1774878636] ensure_hook_thread: startup confirmed
+[1774878636] frontend use-hotkey register succeeded keys=165 display=右 Alt
+[1774878636] frontend bind tray listeners success
+[1774878636] frontend bind hotkey listeners success
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=false is_active=true
+[1774878678] emit_event hotkey-start-recording
+[1774878678] emit_event delivered_to=main name=hotkey-start-recording
+[1774878678] frontend received hotkey-start-recording
+[1774878678] frontend beginRecordingSession start
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878678] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] frontend beginRecordingSession startRecording success
+[1774878679] frontend beginRecordingSession showOverlay start
+[1774878679] frontend showOverlay invoke start mode=recording
+[1774878679] frontend showOverlay invoke success
+[1774878679] frontend waitForOverlayReady immediate
+[1774878679] frontend pushOverlayState mode=recording canCancel=true canStop=true
+[1774878679] frontend showOverlay completed mode=recording
+[1774878679] frontend overlay received state mode=recording canCancel=true canStop=true
+[1774878679] frontend beginRecordingSession showOverlay success
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878679] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=260 binding=0xA5 pressed=0xA5 was_active=true is_active=true
+[1774878680] hotkey_state key=0xA5 message=257 binding=0xA5 pressed=[] was_active=true is_active=false
+[1774878680] emit_event hotkey-stop-recording
+[1774878680] emit_event delivered_to=main name=hotkey-stop-recording
+[1774878680] frontend received hotkey-stop-recording
+[1774878680] frontend finishRecordingSession start engine=funasr model=seaco-paraformer
+[1774878680] frontend finishRecordingSession status duration=1.2449272 minMs=1000
+[1774878680] frontend finishRecordingSession pushOverlayState transcribing
+[1774878680] frontend pushOverlayState mode=transcribing canCancel=false canStop=false
+[1774878680] frontend finishRecordingSession stopRecording start
+[1774878680] frontend overlay received state mode=transcribing canCancel=false canStop=false
+[1774878680] frontend finishRecordingSession stopRecording success audioPath=C:\Users\DingK\AppData\Local\Temp\voicescribe_recording_1774878678589.wav
+[1774878680] frontend finishRecordingSession transcribeAudio start engine=funasr model=seaco-paraformer
+[1774878704] frontend finishRecordingSession transcribeAudio success textLength=0 segments=0
+[1774878704] hotkey_state key=0xA2 message=256 binding=0xA5 pressed=0xA2 was_active=false is_active=false
+[1774878704] hotkey_state key=0x56 message=256 binding=0xA5 pressed=0x56+0xA2 was_active=false is_active=false
+[1774878704] hotkey_state key=0x56 message=257 binding=0xA5 pressed=0xA2 was_active=false is_active=false
+[1774878704] hotkey_state key=0xA2 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878704] frontend hideOverlay start
+[1774878704] frontend pushOverlayState mode=hidden canCancel=false canStop=false
+[1774878704] frontend overlay received state mode=hidden canCancel=false canStop=false
+[1774878704] frontend hideOverlay success
+[1774878704] frontend finishRecordingSession finally completed
+[1774878718] frontend hotkey-settings capture button action=start trace_id=hotkey-apply-1774878718246-c834c0 display=右 Alt draft=null settings=display=右 Alt keys=0xA5
+[1774878718] suspend_hotkey_runtime runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_suspended=true runtime_long_press_mode=false
+[1774878718] frontend hotkey-settings runtime hotkey suspended for capture trace_id=hotkey-apply-1774878718246-c834c0
+[1774878718] frontend hotkey-settings bind browser capture start trace_id=hotkey-apply-1774878718246-c834c0
+[1774878719] frontend hotkey-settings browser keydown trace_id=hotkey-apply-1774878718246-c834c0 code=AltRight location=2 key=0xA5 pressed=0xA5
+[1774878719] frontend hotkey-settings browser keyup trace_id=hotkey-apply-1774878718246-c834c0 code=AltRight location=2 key=0xA5 pressed=0xA5
+[1774878719] frontend hotkey-settings browser capture complete trace_id=hotkey-apply-1774878718246-c834c0 reason=keyup display=右 Alt keys=0xA5
+[1774878719] frontend hotkey-settings unbind browser capture trace_id=hotkey-apply-1774878718246-c834c0
+[1774878719] resume_hotkey_runtime trace_id=hotkey-apply-1774878718246-c834c0 reason=capture-cleanup runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_sus
+[1774878719] frontend hotkey-settings runtime hotkey resumed after capture trace_id=hotkey-apply-1774878718246-c834c0
+[1774878720] frontend hotkey-settings capture apply requested trace_id=hotkey-apply-1774878718246-c834c0 display=右 Alt keys=0xA5 previous=display=右 Alt keys=0xA5
+[1774878720] frontend hotkey-settings capture apply state-updated trace_id=hotkey-apply-1774878718246-c834c0 display=右 Alt keys=0xA5
+[1774878720] frontend use-hotkey register requested trace_id=hotkey-apply-1774878718246-c834c0 keys=165 display=右 Alt
+[1774878720] register_hotkey_binding request trace_id=hotkey-apply-1774878718246-c834c0 keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false 
+[1774878720] register_hotkey_binding trace_id=hotkey-apply-1774878718246-c834c0 keys=0xA5 display=右 Alt runtime_binding=0xA5 runtime_pressed=[] runtime_hotkey_active=false runtime_
+[1774878720] hook_status context=ensure_hook_thread:enter slot_present=true thread_id_present=true thread_finished=false
+[1774878720] ensure_hook_thread existing_slot thread_id_present=true thread_finished=false
+[1774878720] ensure_hook_thread: already running
+[1774878720] frontend use-hotkey register succeeded trace_id=hotkey-apply-1774878718246-c834c0 keys=165 display=右 Alt

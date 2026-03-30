@@ -6,7 +6,10 @@ use commands::{
         cancel_recording, delete_audio_file, get_recording_status, start_recording, stop_recording,
     },
     backend::{backend_status, start_backend, stop_backend, transcribe},
-    hotkey::{debug_hotkey_log, get_hotkey_display, register_hotkey_binding, unregister_hotkey},
+    hotkey::{
+        debug_hotkey_log, get_hotkey_display, register_hotkey_binding, resume_hotkey_runtime,
+        suspend_hotkey_runtime, unregister_hotkey,
+    },
     text_input::output_text,
 };
 use state::{BackendProcessState, HotkeyState, RecordingState};
@@ -180,6 +183,8 @@ pub fn run() {
             backend_status,
             transcribe,
             debug_hotkey_log,
+            suspend_hotkey_runtime,
+            resume_hotkey_runtime,
             register_hotkey_binding,
             unregister_hotkey,
             get_hotkey_display,

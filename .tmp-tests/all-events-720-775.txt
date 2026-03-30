@@ -1,0 +1,23 @@
+﻿[1774878773] hotkey_state key=0x44 message=256 binding=0xA5 pressed=0x44 was_active=false is_active=false
+[1774878773] hotkey_state trace_id=hotkey-apply-1774878718246-c834c0 key=0x44 message=256 binding=0xA5 pressed=0x44 was_active=false is_active=false
+[1774878773] hotkey_state key=0x44 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878774] hotkey_state key=0x55 message=256 binding=0xA5 pressed=0x55 was_active=false is_active=false
+[1774878774] hotkey_state key=0x55 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878774] hotkey_state key=0x8 message=256 binding=0xA5 pressed=0x8 was_active=false is_active=false
+[1774878774] hotkey_state key=0x8 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878774] hotkey_state key=0x8 message=256 binding=0xA5 pressed=0x8 was_active=false is_active=false
+[1774878774] hotkey_state key=0x8 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878774] hotkey_state key=0x8 message=256 binding=0xA5 pressed=0x8 was_active=false is_active=false
+[1774878774] hotkey_state key=0x8 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878774] hotkey_state key=0xA0 message=256 binding=0xA5 pressed=0xA0 was_active=false is_active=false
+[1774878775] hotkey_state key=0xA0 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878775] hotkey_state key=0x44 message=256 binding=0xA5 pressed=0x44 was_active=false is_active=false
+[1774878775] hotkey_state key=0x44 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878775] hotkey_state key=0x55 message=256 binding=0xA5 pressed=0x55 was_active=false is_active=false
+[1774878775] hotkey_state key=0x55 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878775] hotkey_state key=0x51 message=256 binding=0xA5 pressed=0x51 was_active=false is_active=false
+[1774878775] hotkey_state key=0x55 message=256 binding=0xA5 pressed=0x51+0x55 was_active=false is_active=false
+[1774878775] hotkey_state key=0x51 message=257 binding=0xA5 pressed=0x55 was_active=false is_active=false
+[1774878775] hotkey_state key=0x55 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
+[1774878775] hotkey_state key=0x20 message=256 binding=0xA5 pressed=0x20 was_active=false is_active=false
+[1774878775] hotkey_state key=0x20 message=257 binding=0xA5 pressed=[] was_active=false is_active=false
