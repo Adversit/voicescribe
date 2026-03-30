@@ -13,9 +13,6 @@ export async function backendStatus(): Promise<BackendRuntimeStatus> {
   return invoke("backend_status");
 }
 
-export async function registerHotkey(modifiers: number, keyCode: number): Promise<void> {
-  await invoke("register_hotkey", { modifiers, keyCode });
-}
 
 export async function registerHotkeyBinding(binding: HotkeyBinding): Promise<void> {
   await invoke("register_hotkey_binding", { binding });
@@ -28,6 +25,7 @@ export async function getHotkeyDisplay(): Promise<string> {
 export async function debugHotkeyLog(message: string): Promise<void> {
   await invoke("debug_hotkey_log", { message });
 }
+
 
 export async function startRecording(): Promise<string> {
   return invoke("start_recording");

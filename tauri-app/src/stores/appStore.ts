@@ -1,4 +1,4 @@
-﻿import { create } from "zustand";
+import { create } from "zustand";
 import { Store } from "@tauri-apps/plugin-store";
 import * as backendApi from "../api/backend";
 import * as tauriApi from "../api/tauri";
@@ -31,17 +31,22 @@ const SETTINGS_STORE_FILE = "voicescribe-settings.json";
 const SETTINGS_STORE_ENTRY = "settings";
 const MAX_TRANSCRIPTION_HISTORY = 20;
 
+type LegacyHotkeyBinding = {
+  primaryCode?: string;
+  primaryKeyCode?: number;
+  display?: string;
+  modifiers?: {
+    ctrl?: boolean;
+    shift?: boolean;
+    win?: boolean;
+    altLeft?: boolean;
+    altRight?: boolean;
+  };
+};
+
 const defaultHotkeyBinding: HotkeyBinding = {
-  primaryCode: "KeyR",
-  primaryKeyCode: 82,
-  display: "Ctrl+Shift+R",
-  modifiers: {
-    ctrl: true,
-    shift: true,
-    win: false,
-    altLeft: false,
-    altRight: false,
-  },
+  keys: [0xA5],
+  display: "\u53f3 Alt",
 };
 
 const defaultSettings: AppSettings = {
@@ -56,8 +61,6 @@ const defaultSettings: AppSettings = {
   enableAISummary: false,
   retainAudio: false,
   launchAtLogin: false,
-  hotkeyModifiers: 0x3,
-  hotkeyKeyCode: 82,
   hotkeyBinding: defaultHotkeyBinding,
 };
 
@@ -68,18 +71,150 @@ function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+function hotkeyLabelFromKey(key: number): string {
+  switch (key) {
+    case 0xA0:
+      return "\u5de6 Shift";
+    case 0xA1:
+      return "\u53f3 Shift";
+    case 0xA2:
+      return "\u5de6 Ctrl";
+    case 0xA3:
+      return "\u53f3 Ctrl";
+    case 0xA4:
+      return "\u5de6 Alt";
+    case 0xA5:
+      return "\u53f3 Alt";
+    case 0x5B:
+      return "\u5de6 Win";
+    case 0x5C:
+      return "\u53f3 Win";
+    case 0x1B:
+      return "Esc";
+    case 0x0D:
+      return "\u56de\u8f66";
+    case 0x20:
+      return "\u7a7a\u683c";
+    case 0x09:
+      return "Tab";
+    case 0x08:
+      return "\u9000\u683c";
+    case 0x25:
+      return "\u5de6";
+    case 0x26:
+      return "\u4e0a";
+    case 0x27:
+      return "\u53f3";
+    case 0x28:
+      return "\u4e0b";
+    default:
+      if (key >= 0x30 && key <= 0x39) {
+        return String.fromCharCode(key);
+      }
+      if (key >= 0x41 && key <= 0x5A) {
+        return String.fromCharCode(key);
+      }
+      if (key >= 0x70 && key <= 0x7B) {
+        return `F${key - 0x6F}`;
+      }
+      return `VK_${key}`;
+  }
+}
+
+function buildHotkeyDisplay(keys: number[]): string {
+  return keys.map((key) => hotkeyLabelFromKey(key)).join("+");
+}
+
+function normalizeHotkeyKeys(input: unknown): number[] {
+  if (!Array.isArray(input)) {
+    return defaultHotkeyBinding.keys;
+  }
+
+  const keys = [...new Set(input.filter((value): value is number => Number.isInteger(value) && value > 0))].sort(
+    (left, right) => left - right,
+  );
+
+  if (keys.length === 1 || keys.length === 2) {
+    return keys;
+  }
+
+  return defaultHotkeyBinding.keys;
+}
+
+function legacyPrimaryKeyFromBinding(value: LegacyHotkeyBinding): number | null {
+  switch (value.primaryCode) {
+    case "ShiftLeft":
+      return 0xA0;
+    case "ShiftRight":
+      return 0xA1;
+    case "ControlLeft":
+      return 0xA2;
+    case "ControlRight":
+      return 0xA3;
+    case "AltLeft":
+      return 0xA4;
+    case "AltRight":
+      return 0xA5;
+    case "MetaLeft":
+      return 0x5B;
+    case "MetaRight":
+      return 0x5C;
+    default:
+      return Number.isInteger(value.primaryKeyCode) && (value.primaryKeyCode ?? -1) > 0
+        ? (value.primaryKeyCode as number)
+        : null;
+  }
+}
+
+function migrateLegacyHotkeyBinding(value: unknown): HotkeyBinding | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const legacy = value as LegacyHotkeyBinding;
+  const keys = new Set<number>();
+  if (legacy.modifiers?.ctrl) keys.add(0xA2);
+  if (legacy.modifiers?.shift) keys.add(0xA0);
+  if (legacy.modifiers?.win) keys.add(0x5B);
+  if (legacy.modifiers?.altLeft) keys.add(0xA4);
+  if (legacy.modifiers?.altRight) keys.add(0xA5);
+
+  const primaryKey = legacyPrimaryKeyFromBinding(legacy);
+  if (primaryKey !== null) {
+    keys.add(primaryKey);
+  }
+
+  const normalized = [...keys].sort((left, right) => left - right);
+  if (normalized.length !== 1 && normalized.length !== 2) {
+    return null;
+  }
+
+  return {
+    keys: normalized,
+    display: buildHotkeyDisplay(normalized),
+  };
+}
+
+function normalizeHotkeyBinding(value: unknown): HotkeyBinding {
+  if (value && typeof value === "object" && Array.isArray((value as HotkeyBinding).keys)) {
+    const keys = normalizeHotkeyKeys((value as HotkeyBinding).keys);
+    return {
+      keys,
+      display: buildHotkeyDisplay(keys),
+    };
+  }
+
+  const migrated = migrateLegacyHotkeyBinding(value);
+  if (migrated) {
+    return migrated;
+  }
+
+  return defaultHotkeyBinding;
+}
+
 function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
   const next = { ...defaultSettings, ...(value ?? {}) };
-  next.hotkeyBinding = value?.hotkeyBinding
-    ? {
-        ...defaultHotkeyBinding,
-        ...value.hotkeyBinding,
-        modifiers: {
-          ...defaultHotkeyBinding.modifiers,
-          ...(value.hotkeyBinding.modifiers ?? {}),
-        },
-      }
-    : defaultHotkeyBinding;
+  next.hotkeyBinding = normalizeHotkeyBinding(value?.hotkeyBinding);
   return next;
 }
 

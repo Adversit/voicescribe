@@ -15,6 +15,11 @@ const CANCEL_RECORDING_ERROR = "\u53d6\u6d88\u5f55\u97f3\u5931\u8d25";
 const HOTKEY_LISTENER_ERROR = "\u70ed\u952e\u76d1\u542c\u6ce8\u518c\u5931\u8d25";
 const REGISTER_HOTKEY_ERROR = "\u6ce8\u518c\u5feb\u6377\u952e\u5931\u8d25";
 
+function formatBindingForLog(keys: number[], display: string): string {
+  const keySummary = keys.length > 0 ? keys.join("+") : "none";
+  return `keys=${keySummary} display=${display}`;
+}
+
 export function useHotkey() {
   const setAudioLevel = useAppStore((state) => state.setAudioLevel);
   const setToast = useAppStore((state) => state.setToast);
@@ -114,12 +119,24 @@ export function useHotkey() {
     }
 
     let cancelled = false;
+    void debugHotkeyLog(`use-hotkey register requested ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`).catch(
+      () => undefined,
+    );
 
-    void registerHotkeyBinding(hotkeyBinding).catch((error) => {
-      if (!cancelled) {
-        setToast(error instanceof Error ? error.message : REGISTER_HOTKEY_ERROR);
-      }
-    });
+    void registerHotkeyBinding(hotkeyBinding)
+      .then(() => {
+        void debugHotkeyLog(`use-hotkey register succeeded ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`).catch(
+          () => undefined,
+        );
+      })
+      .catch((error) => {
+        void debugHotkeyLog(`use-hotkey register failed error=${String(error)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`).catch(
+          () => undefined,
+        );
+        if (!cancelled) {
+          setToast(error instanceof Error ? error.message : REGISTER_HOTKEY_ERROR);
+        }
+      });
 
     return () => {
       cancelled = true;

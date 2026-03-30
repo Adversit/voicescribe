@@ -1,6 +1,6 @@
 # 2026-03-26 实现差距修复清单
 
-更新时间：2026-03-29
+更新时间：2026-03-30
 
 上游基线：
 - [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
@@ -28,6 +28,7 @@
 
 当前主要剩余问题：
 - 热键、录音、文本输出仍需人工桌面验收
+- 快捷键仍需按 2026-03-30 新 spec 完成一次模型重构，不能继续以旧 `primaryCode / primaryKeyCode / modifiers` 结构验收
 - 安装态 embedded Python 冷启动仍需最终验收
   - 该项属于最后阶段的封装/打包验收，不作为当前前序功能调试阻塞项
 - GitHub Actions 仍需远端验证
@@ -47,7 +48,7 @@
   - 已完成安装态模拟下的运行时目录创建、`backend/` 资源同步、`backend/venv` 创建与 `/health` 启动验证。
   - 当前最小闭环已足够支撑前序功能开发、联调与验收；剩余缺口只在最终封装阶段对真实 embedded payload 的安装态冷启动验证。
   - 现阶段保留 `部分完成` 的原因，不是前序功能不可继续，而是尚未进入“真实安装包 + 真实 python-embed 资源”这条最终交付链路。
-- `P3-02` 全局热键完整行为：`代码已完成，待人工验收`
+- `P3-02` 全局热键完整行为：`部分完成`
 - `P3-03` 音频录制链路：`代码已完成，待人工验收`
 - `P3-04` 文本输出能力：`代码已完成，待人工验收`
 
@@ -70,8 +71,71 @@
   - 已支持流式与非流式结果自动入库、复制、下载、删除与清空。
 - `F1-03` 通用页流式传输/AI 摘要/保留音频开关：`代码已完成，待人工验收`
   - 已建立字段、默认值与约束关系，`AI 摘要总结` 受 `启用流式传输` 开关约束。
-- `F1-04` 快捷键真实录制：`代码已完成，待人工验收`
-  - 已替代旧数字 keycode 录入，支持单键、组合键与左右 `Alt` 区分。
+- `F1-04` 快捷键真实录制：`部分完成`
+  - 已替代旧数字 keycode 录入，但当前仍保留旧 `primaryCode / primaryKeyCode / modifiers` 模型与双注册入口，尚未达到 2026-03-30 新 spec 要求。
+
+## 2026-03-30 快捷键模型重构执行清单
+
+上游约束：
+- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md) 中“2026-03-30 快捷键模型重构补充”
+
+状态说明：
+- 本节未全部完成前，不得宣称“快捷键录制问题已修复”。
+- 本节完成后，`P3-02` 与 `F1-04` 才允许回到“代码已完成，待人工验收”。
+
+- `HK-01` 新快捷键模型落地：`已完成`
+  - TypeScript 与 Rust 统一改为 `HotkeyBinding { keys: number[], display: string }`。
+  - `keys` 只允许 1 键或 2 键，且为 Windows Virtual-Key。
+
+- `HK-02` 旧字段删除：`已完成`
+  - 删除 `primaryCode`
+  - 删除 `primaryKeyCode`
+  - 删除 `modifiers`
+  - 删除与上述字段绑定的前端展示和持久化逻辑
+
+- `HK-03` Browser capture migration: `code complete, manual verification pending`
+  - Settings-page capture now uses current-window browser `keydown/keyup`
+  - Capture still produces `keys[]`
+  - Both single-key and two-key capture are supported
+  - Left/right Alt are mapped from `event.code` to Windows VK explicitly
+  - Old Rust `start_hotkey_capture / stop_hotkey_capture / hotkey-capture-complete / CaptureState` are removed
+
+- `HK-04` Rust runtime matching rewrite: `code complete, manual verification pending`
+  - Removed `primary key + modifiers` matching
+  - Matching rule is now `current pressed set == registered set`
+  - Long-press start, release-to-stop, single-tap toggle, and `Esc` cancel stay unchanged
+  - Runtime hook is now only responsible for global hotkey matching, not settings capture
+
+- `HK-05` Dual registration entry removal: `completed`
+  - [useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts) remains the only formal registration entry
+  - [HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) no longer calls `registerHotkeyBinding(...)` directly
+
+- `HK-06` Chinese UI restoration: `completed`
+  - Settings-page prompts, save messages, and unset labels must remain Chinese in product UI
+
+- `HK-07` One-time legacy settings migration: `code complete, manual verification pending`
+  - Old `primaryCode / primaryKeyCode / modifiers` are migrated to `keys[]` at startup
+  - Failed migration falls back to the default binding
+  - Persistence writes only the new structure going forward
+
+- `HK-08` Logging and regression checks: `code complete, manual verification pending`
+  - Logs must cover settings-page start capture, browser `keydown/keyup`, overflow/cancel/complete, apply, and `useHotkey.ts -> register_hotkey_binding -> hotkey.rs`
+  - Inspect `C:\Users\DingK\AppData\Local\Temp\voicescribe-hotkey.log`
+  - Machine checks completed: `cargo fmt`, `cargo check`, `npm run build`
+  - Manual checks still required: capture `A`, left `Alt`, right `Alt`, `Right Alt + A`, then confirm apply and runtime matching logs
+  - If AltGr records as `Ctrl + Right Alt`, phase 1 keeps the actual 2-key combo
+
+- `HK-09` Build and startup verification: `completed`
+  - `cargo check`
+  - `npm run build`
+  - `cmd /c scripts/start_windows_system.bat`
+  - `cargo check`
+  - `npm run build`
+  - `cmd /c scripts/start_windows_system.bat`
+
+- `HK-10` 测试文档回写：`已完成`
+  - 上述验证结果必须先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md)
+  - 若出现新问题，必须同步写入 [2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-session-bug-log.md)
 
 ## Phase 5
 - `P5-01` embedded Python 资源与安装态闭环：`部分完成`

@@ -1,4 +1,4 @@
-﻿export type OutputMode = "directInput" | "clipboard" | "both";
+export type OutputMode = "directInput" | "clipboard" | "both";
 export type HistoryMode = "stream" | "non-stream";
 
 export interface EngineInfo {
@@ -93,19 +93,9 @@ export interface RealtimeSessionState {
   error: string | null;
 }
 
-export interface HotkeyModifiersDetailed {
-  ctrl: boolean;
-  shift: boolean;
-  win: boolean;
-  altLeft: boolean;
-  altRight: boolean;
-}
-
 export interface HotkeyBinding {
-  primaryCode: string;
-  primaryKeyCode: number;
+  keys: number[];
   display: string;
-  modifiers: HotkeyModifiersDetailed;
 }
 
 export interface AppSettings {
@@ -120,8 +110,6 @@ export interface AppSettings {
   enableAISummary: boolean;
   retainAudio: boolean;
   launchAtLogin: boolean;
-  hotkeyModifiers: number;
-  hotkeyKeyCode: number;
   hotkeyBinding: HotkeyBinding;
 }
 

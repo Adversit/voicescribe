@@ -83,25 +83,271 @@
 2. 350ms 双击阈值保持一致。
 3. 快捷键事件需完整桥接到前端录音流。
 
-### 5.3 音频录制
+## 2026-03-30 快捷键模型重构补充
 
-1. 固定为 16kHz、单声道、16-bit PCM WAV。
-2. 支持临时文件录制。
-3. 支持实时音量反馈与取消删除录音文件。
+本补充用于收口当前“快捷键录制与运行时命中不是同一套模型”的问题。后续实现必须按本节执行，不再继续兼容 `primaryCode + primaryKeyCode + modifiers` 旧结构。
 
-### 5.4 文本输出
+### A. 单一真相
 
-1. 支持剪贴板、直接输入、两者都执行。
-2. 支持前台窗口恢复。
-3. 支持失败时回退到剪贴板模式。
+1. 快捷键的唯一真相在 Rust 运行时，由 [hotkey.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\hotkey.rs) 持有。
+2. 前端只保存和展示 Rust 产出的快捷键结果，不再自行定义匹配规则，不再自行拼装“主键 / 修饰键”语义。
+3. 快捷键模型统一为“1 个或 2 个 Windows 原生键位”，不再区分“主键”和“修饰键”字段。
+4. 左右 `Alt` 必须按 Windows 原生键位区分，不能退化为单一 `Alt`。
 
-### 5.5 实时转录、历史记录与快捷键录制专题
+### B. 新数据结构
 
-该专题的正式需求与实现约束由以下两份文档单独管理：
-- [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
-- [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+TypeScript 与 Rust 的结构统一为：
 
-主线要求同步补充如下：
+```ts
+type HotkeyBinding = {
+  keys: number[];   // 长度只能是 1 或 2；元素为 Windows Virtual-Key；升序且唯一
+  display: string;  // 由 Rust 统一生成，前端直接展示
+};
+```
+
+约束如下：
+
+1. `keys.length` 只能是 `1` 或 `2`。
+2. `keys` 必须去重并排序后再落盘。
+3. 左右键使用 Windows 原生 VK 区分，至少包括：
+   - `VK_LMENU (0xA4)`
+   - `VK_RMENU (0xA5)`
+4. 若未来需要扩展左右 `Ctrl`、左右 `Shift`、左右 `Win`，也只能按同一 `keys[]` 结构扩展，不能重新引入“主键 / 修饰键”拆分。
+
+### C. Input / Output Contract
+
+Runtime commands stay in Rust, but settings-page capture now uses browser events and still produces the same `HotkeyBinding` structure.
+
+1. Settings-page capture input
+   - Input: current-window `keydown/keyup` `KeyboardEvent.code`
+   - Output: frontend draft `HotkeyBinding { keys: number[], display: string }`
+   - Constraint: only 1-key or 2-key bindings are allowed; capture state exists only in the page
+
+2. `register_hotkey_binding(binding: HotkeyBinding) -> Result<(), String>`
+   - Input: `{ keys: number[], display: string }`
+   - Effect: writes the binding into Rust runtime state and ensures the hook thread exists
+   - Constraint: accepts only 1-key or 2-key bindings
+
+3. `debug_hotkey_log(message: String) -> Result<(), String>`
+   - Input: frontend trace text
+   - Effect: writes browser-capture/apply/re-register diagnostics into the shared hotkey log
+
+4. `get_hotkey_display() -> Result<String, String>`
+   - Input: none
+   - Output: current registered display text; returns `???` when unset
+
+### D. Capture Logic
+
+Settings-page capture now uses current-window browser `keydown/keyup`; runtime global hotkey listening still uses Rust `WH_KEYBOARD_LL`.
+
+Constraints:
+
+1. Clicking Start Capture only flips frontend `capturing=true` and binds current-window listeners; it no longer invokes Rust `start_hotkey_capture()`
+2. Capture must map `KeyboardEvent.code` to Windows VK; do not capture by `event.key`
+3. Left/right Alt must remain explicit: `AltLeft -> 0xA4`, `AltRight -> 0xA5`
+4. Capture accepts only 1 or 2 keys
+   - single key: press then release the same key to complete
+   - two keys: once the 2-key set exists, complete on `keyup`
+5. More than 2 keys is overflow: do not create a binding; show the frontend overflow message and exit that capture attempt
+6. `Esc` only cancels the current draft capture; it does not mutate the saved binding
+7. Phase 1 does not fold AltGr; if the browser reports `Ctrl + RightAlt`, persist the actual 2-key combo
+8. Clicking Apply only writes the draft into store; actual re-registration still flows through `useHotkey.ts -> register_hotkey_binding(...)`
+
+
+匹配状态机固定为：
+
+1. 运行时维护一个“当前按下集合” `pressed_keys`。
+2. 每次键盘事件都把原始事件归一化到 Windows VK，再更新 `pressed_keys`。
+3. 当 `pressed_keys` 与已注册 `binding.keys` 完全相等时，视为“当前热键处于按下态”。
+4. 当状态从“不相等”变为“相等”时，触发热键按下分支。
+5. 当状态从“相等”变为“不相等”时，触发热键释放分支。
+6. 长按、单击切换、`Esc` 取消的上层录音行为继续复用现有状态机，但输入条件改为新的集合相等判定。
+
+运行时状态约束补充如下：
+
+1. `register_hotkey_binding(...)` only updates saved binding and runtime matching state.
+2. Hook events are normalized to Windows VK before runtime matching; settings-page capture no longer branches inside the hook.
+3. Browser capture and runtime matching must still agree on the same left/right Alt normalization targets.
+4. Right Alt must normalize to `VK_RMENU (0xA5)` consistently; do not collapse it into a generic Alt key.
+
+### F. 前端注册路径
+
+必须删除双注册入口，只保留一条正式注册路径：
+
+1. 设置页录制完成后，只允许更新 store 中的 `settings.hotkeyBinding`。
+2. 真正调用 `registerHotkeyBinding(...)` 的入口只保留在 [useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts)。
+3. [HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) 不再直接调用 `registerHotkeyBinding(...)`。
+4. 前端界面必须保持中文；录制提示、保存成功、失败提示、未设置文案都必须为中文。
+
+### G. 需要一起修改的文件
+
+本次重构至少需要同步修改以下文件：
+
+1. [docs/active/2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md)
+2. [tauri-app/src/types/index.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\types\index.ts)
+3. [tauri-app/src/stores/appStore.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\stores\appStore.ts)
+4. [tauri-app/src/pages/HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx)
+5. [tauri-app/src/hooks/useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts)
+6. [tauri-app/src/api/tauri.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\api\tauri.ts)
+7. [tauri-app/src-tauri/src/state.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\state.rs)
+8. [tauri-app/src-tauri/src/commands/hotkey.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\hotkey.rs)
+9. [tauri-app/src-tauri/src/lib.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\lib.rs)
+
+### H. 需要删除的旧逻辑
+
+以下旧逻辑必须一起删除，不能半删半留：
+
+1. `HotkeyBinding.primaryCode`
+2. `HotkeyBinding.primaryKeyCode`
+3. `HotkeyBinding.modifiers`
+4. Rust 侧 `build_binding_from_capture(...)` 的“主键 + 修饰键”组装语义
+5. Rust 侧 `modifiers_match(...)`
+6. Rust 侧 `primary_key_matches(...)`
+7. 前端基于旧结构的主键/修饰键展示逻辑
+8. [HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx) 里的直接注册入口
+9. 任意浏览器 `KeyboardEvent` 录制残留或旧兼容适配逻辑
+10. 录制态与运行态共用同一份 `active / pressed_keys` 状态的混合实现
+
+### I. 旧设置迁移规则
+
+旧设置兼容只做一次迁移，不继续保留旧接口长期共存：
+
+1. 若本地已保存旧结构 `primaryCode / primaryKeyCode / modifiers`，启动时只做一次转换为 `keys[]`。
+2. 转换失败时，直接回退到默认快捷键，不保留半兼容状态。
+3. 一旦迁移完成，持久化层只允许写入新结构。
+
+### J. 验收标准
+
+以下全部满足，才可宣称热键重构完成：
+
+1. 设置页中文界面恢复完整，且文案不是临时英文占位。
+2. 可录制单键。
+3. 可录制双键。
+4. 左 `Alt` 与右 `Alt` 可分别录制，并在运行时命中时表现不同。
+5. 保存后重启应用，快捷键仍可恢复。
+6. 长按开始 / 松开停止行为正常。
+7. 单击开始 / 再按一次停止行为正常。
+8. 录音中按 `Esc` 可取消。
+9. `cargo check`、`npm run build`、`cmd /c scripts/start_windows_system.bat` 通过。
+10. 上述测试结果先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md)，再对外汇报。
+
+### K. 风险说明
+
+本节的目标是降低“半迁移、双逻辑并存”带来的新 bug 风险，但不能把“写了 spec”本身当作“保证一次实现绝对无 bug”。真正的风险控制手段是：
+
+1. 单一模型
+2. 删除旧逻辑而不是并存
+3. 实现后按验收标准逐条验证并写入测试文档
+
+## 2026-03-30 快捷键录制最小探针模式补充
+
+当出现“开始录制后无响应，且多轮修改仍未确认根因”的情况时，必须先进入最小探针模式，而不是继续直接修改录制完成、保存或重新注册逻辑。
+
+When capture appears unresponsive, enter minimal probe mode before changing apply/save/re-register logic again.
+
+### A. Goal
+
+1. Confirm whether browser `keydown/keyup` events enter the settings-page capture listener.
+2. Confirm whether normalized VK output and draft binding assembly match the user input sequence.
+3. Do not blame persistence, apply, or runtime re-register paths before the first two points are proven.
+
+### B. Probe Constraints
+
+1. Only add minimal observation logs in [HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx), [useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts), and [hotkey.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\hotkey.rs).
+2. Probe mode does not add a second listener source and does not change the hotkey model again.
+3. Probe logs should prioritize: browser `code/location`, normalized VK, current capture set, apply, and re-register results.
+4. If no browser key events arrive during capture, investigate the current-window input path first.
+5. If browser capture works but runtime behavior diverges, investigate normalization parity and runtime matching only then.
+
+### C. Minimal Manual Regression
+
+探针模式下只做最小回归，不测保存和应用：
+
+1. 打开快捷键页。
+2. 点击“开始录制”。
+3. 按一次 `A`。
+4. 按一次右 `Alt`。
+5. 点击“停止录制”。
+6. 仅根据热键日志判断事件是否进入 hook 与 capture 分支。
+
+## 2026-03-30 hook 生命周期自检补充
+
+当最小探针模式证明“录制窗口内没有任何键盘事件进入当前 hook 回调链路”时，下一步必须先检测 hook 生命周期本身，而不是继续修改 capture 完成逻辑。
+
+### A. 检测目标
+
+1. 证明 `ensure_hook_thread()` 判断“already running”时，底层 hook 线程是否真的仍然存活。
+2. 检测 `HOOK_THREAD`、`HOOK_THREAD_ID`、线程句柄完成态是否存在不一致。
+3. 记录 hook 线程退出时机与退出原因。
+
+### B. 最小自检接口
+
+Rust 热键模块允许增加最小自检接口，仅用于本地诊断：
+
+1. 返回 `hook_thread_slot_present`
+2. 返回 `hook_thread_id_present`
+3. 返回 `hook_thread_finished`
+4. 返回 `capture_active`
+5. 返回 `capture_generation`
+
+该接口只用于诊断，不改变录制与运行时业务逻辑。
+
+### C. 生命周期要求
+
+1. hook 线程退出时必须写日志。
+2. `ensure_hook_thread()` 不允许只根据 `HOOK_THREAD.is_some()` 判断线程仍然有效。
+3. 若检测到“句柄仍在，但线程已退出”或“thread id 丢失但 slot 仍在”的陈旧状态，后续实现必须先清理陈旧状态，再决定是否重建。
+
+## 2026-03-30 Capture-To-Apply Diagnostics Supplement
+
+This supplement covers one shared log timeline for `start capture -> browser key events -> stop/apply -> re-register`. Runtime matching semantics do not change.
+
+### A. Source Of Truth
+
+1. Temporary settings-page capture state lives in frontend `capturing / draftBinding / captureKeys`.
+2. Saved binding and runtime match state still live in Rust `HotkeyRuntime`.
+3. Cross-layer diagnosis uses the existing `voicescribe-hotkey.log`; no extra persisted fields or second log file are introduced.
+
+### B. Logging Contract
+
+1. Start-capture logs must include button click, current `capturing / draftBinding / settings.hotkeyBinding`, and browser-listener binding.
+2. Capture-event logs must include browser `keydown/keyup`, normalized Windows VK, and current capture set / overflow / cancel / complete state.
+3. Stop/apply logs must include stop-or-cancel action, apply click, and store-driven `registerHotkeyBinding(...)` start/success/failure.
+4. All new logs continue to write into `C:\Users\DingK\AppData\Local\Temp\voicescribe-hotkey.log`.
+
+### C. Files That Must Change Together
+
+1. `docs/active/2026-03-25-voicescribe-windows-spec.md`
+2. `docs/active/2026-03-26-implementation-gap-checklist.md`
+3. `tauri-app/src/pages/HotkeySettings.tsx`
+4. `tauri-app/src/api/tauri.ts`
+5. `tauri-app/src/hooks/useHotkey.ts`
+6. `tauri-app/src-tauri/src/commands/hotkey.rs`
+7. `tauri-app/src-tauri/src/lib.rs`
+
+### D. Old Logic Removal
+
+1. Remove settings-page dependencies on `start_hotkey_capture()` / `stop_hotkey_capture()` / `hotkey-capture-complete`.
+2. Remove Rust-side settings-only `CaptureState` and related capture commands.
+3. Do not introduce a second Windows hook, a second log file, or a second persistence structure.
+
+### E. Acceptance
+
+1. After clicking Start Capture, logs show the frontend button action and browser listener binding.
+2. During capture, pressing `A`, left `Alt`, right `Alt`, or a 2-key combo produces browser `keydown/keyup` plus normalized VK logs.
+3. After clicking Apply, logs show frontend apply, store-driven re-register, and Rust `register_hotkey_binding`.
+4. Runtime hotkey matching is still validated by Rust hook logs; settings-page capture no longer needs a Rust capture branch.
+
+### F. Failure Branches
+
+1. No browser `keydown/keyup` arrives during capture.
+2. More than 2 keys triggers overflow.
+3. User stops capture without a draft binding.
+4. Apply succeeds in UI state but re-register fails.
+5. Browser-captured binding and Rust runtime match behavior diverge.
+
+### 5.3 RT / History / Hotkey Bundle
+### 5.3 ????
 1. 当前主窗口侧边栏允许扩展为 7 个页面：通用、引擎、实时转录、历史记录、热词、说话人、快捷键。
 2. 通用页允许增加 `启用流式传输`、`AI 摘要总结`、`保留音频` 三个全局开关。
 3. `启用流式传输` 开启后，历史记录需要自动记录流式和非流式结果。
@@ -226,14 +472,16 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 4. 说话人注册、说话人识别、带说话人标签的转录，必须都能证明各自依赖的模型已实际加载并被使用，而不是仅在健康检查里显示依赖包可用。
 ## 2026-03-29 FunASR / Torch 运行时探测补充
 
-- Windows 下不能只用 importlib.find_spec() 判断 FunASR / 说话人模型可用性；必须补充真实运行时探测，至少覆盖 	orch 导入、unasr.AutoModel 导入，以及对应异常日志。
+- Windows 下不能只用 importlib.find_spec() 判断 FunASR / 说话人模型可用性；必须补充真实运行时探测，至少覆盖 	orch 导入、
+unasr.AutoModel 导入，以及对应异常日志。
 - /health 与模型状态展示必须区分“包存在”和“运行时可加载”。出现 	orch DLL 初始化失败时，不能继续把 FunASR / speaker feature 标记为可用。
 - 说话人识别、说话人分离、转录三条链路都要给出明确日志：模型名、加载入口、运行时探测结果、失败异常。
 - 当前已定位的 Windows 真实风险是 	orch 导入阶段抛出 WinError 1114，需要在模型链路验收前先收口该运行时问题。
 
 ## 2026-03-29 外部分离模型路径补充
 
-- SpeakerDiarizer 的外部分离模型不能继续用 unasr.AutoModel 直接加载 speaker-diarization 仓库 ID；当前可验证可用的路径是 modelscope 的 SegmentationClusteringPipeline。
+- SpeakerDiarizer 的外部分离模型不能继续用 
+unasr.AutoModel 直接加载 speaker-diarization 仓库 ID；当前可验证可用的路径是 modelscope 的 SegmentationClusteringPipeline。
 - iic/speech_campplus_speaker-diarization_common 在本机已验证可初始化 pipeline，但 Windows 下必须先提供 16kHz / mono wav，否则会触发 	orchaudio sox extension is not supported on Windows。
 - 因此外部分离链路在实现上需要：补齐 modelscope 运行时依赖、Windows 侧输入预重采样到 16k、把 pipeline 输出统一转换为 [{start,end,speaker}] 结构。
 - 主转录链路仍优先使用 FunASR 内置 speaker 标签；外部分离链路作为补充能力和回退路径，需要能独立加载并可单独验证。

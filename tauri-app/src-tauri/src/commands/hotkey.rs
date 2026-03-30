@@ -1,5 +1,6 @@
 use crate::commands::audio::recording_active;
-use crate::state::{HotkeyBinding, HotkeyModifiersDetailed, HotkeyState};
+use crate::state::{HotkeyBinding, HotkeyState};
+use std::collections::BTreeSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::{mpsc, Mutex, OnceLock};
@@ -9,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LWIN, VK_RWIN, VK_SHIFT};
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
     HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
@@ -20,9 +21,12 @@ static HOTKEY_RUNTIME: OnceLock<Mutex<HotkeyRuntime>> = OnceLock::new();
 static HOOK_THREAD: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
 static HOOK_THREAD_ID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
 
+const NOT_SET_LABEL: &str = "\u{672a}\u{8bbe}\u{7f6e}";
+
 struct HotkeyRuntime {
     binding: HotkeyBinding,
-    is_pressed: bool,
+    pressed_keys: BTreeSet<u32>,
+    is_hotkey_active: bool,
     is_long_press_mode: bool,
     long_press_generation: u64,
     app_handle: Option<AppHandle>,
@@ -34,7 +38,8 @@ impl Default for HotkeyRuntime {
     fn default() -> Self {
         Self {
             binding: HotkeyBinding::default(),
-            is_pressed: false,
+            pressed_keys: BTreeSet::new(),
+            is_hotkey_active: false,
             is_long_press_mode: false,
             long_press_generation: 0,
             app_handle: None,
@@ -46,6 +51,28 @@ impl Default for HotkeyRuntime {
 
 fn runtime() -> &'static Mutex<HotkeyRuntime> {
     HOTKEY_RUNTIME.get_or_init(|| Mutex::new(HotkeyRuntime::default()))
+}
+
+fn log_hook_runtime_status(context: &str) {
+    let (hook_thread_slot_present, hook_thread_finished) = hook_thread()
+        .lock()
+        .map(|guard| {
+            let slot_present = guard.is_some();
+            let finished = guard
+                .as_ref()
+                .map(|handle| handle.is_finished())
+                .unwrap_or(false);
+            (slot_present, finished)
+        })
+        .unwrap_or((false, false));
+    let hook_thread_id_present = hook_thread_id()
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false);
+    log_hotkey(format!(
+        "hook_status context={} slot_present={} thread_id_present={} thread_finished={}",
+        context, hook_thread_slot_present, hook_thread_id_present, hook_thread_finished,
+    ));
 }
 
 fn hook_thread() -> &'static Mutex<Option<JoinHandle<()>>> {
@@ -74,14 +101,128 @@ pub(crate) fn log_hotkey(message: impl AsRef<str>) {
     }
 }
 
+fn format_keys(keys: &[u32]) -> String {
+    if keys.is_empty() {
+        return "[]".to_string();
+    }
+
+    keys.iter()
+        .map(|key| format!("0x{:X}", key))
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn format_key_set(keys: &BTreeSet<u32>) -> String {
+    let values = keys.iter().copied().collect::<Vec<_>>();
+    format_keys(&values)
+}
+
+fn runtime_state_summary() -> String {
+    runtime()
+        .lock()
+        .map(|guard| {
+            format!(
+                "runtime_binding={} runtime_pressed={} runtime_hotkey_active={} runtime_long_press_mode={}",
+                format_keys(&guard.binding.keys),
+                format_key_set(&guard.pressed_keys),
+                guard.is_hotkey_active,
+                guard.is_long_press_mode,
+            )
+        })
+        .unwrap_or_else(|_| "runtime_state=lock_error".to_string())
+}
+
+fn normalize_binding_keys(keys: &[u32]) -> Vec<u32> {
+    let normalized = keys
+        .iter()
+        .copied()
+        .filter(|key| *key > 0)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    if normalized.len() == 1 || normalized.len() == 2 {
+        normalized
+    } else {
+        Vec::new()
+    }
+}
+
+fn hotkey_label_from_vk(vk: u32) -> String {
+    match vk {
+        0xA0 => "\u{5de6} Shift".to_string(),
+        0xA1 => "\u{53f3} Shift".to_string(),
+        0xA2 => "\u{5de6} Ctrl".to_string(),
+        0xA3 => "\u{53f3} Ctrl".to_string(),
+        0xA4 => "\u{5de6} Alt".to_string(),
+        0xA5 => "\u{53f3} Alt".to_string(),
+        0x5B => "\u{5de6} Win".to_string(),
+        0x5C => "\u{53f3} Win".to_string(),
+        0x1B => "Esc".to_string(),
+        0x0D => "\u{56de}\u{8f66}".to_string(),
+        0x20 => "\u{7a7a}\u{683c}".to_string(),
+        0x09 => "Tab".to_string(),
+        0x08 => "\u{9000}\u{683c}".to_string(),
+        0x25 => "\u{5de6}".to_string(),
+        0x26 => "\u{4e0a}".to_string(),
+        0x27 => "\u{53f3}".to_string(),
+        0x28 => "\u{4e0b}".to_string(),
+        0x30..=0x39 | 0x41..=0x5A => char::from_u32(vk)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| format!("VK_{}", vk)),
+        0x70..=0x7B => format!("F{}", vk - 0x6F),
+        _ => format!("VK_{}", vk),
+    }
+}
+
+fn display_from_keys(keys: &[u32]) -> String {
+    if keys.is_empty() {
+        return NOT_SET_LABEL.to_string();
+    }
+
+    keys.iter()
+        .map(|key| hotkey_label_from_vk(*key))
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+fn sanitize_binding(mut binding: HotkeyBinding) -> Result<HotkeyBinding, String> {
+    let keys = normalize_binding_keys(&binding.keys);
+    if keys.is_empty() {
+        return Err("Hotkey binding must contain one or two keys".to_string());
+    }
+
+    binding.keys = keys;
+    binding.display = display_from_keys(&binding.keys);
+    Ok(binding)
+}
+
+fn binding_matches_pressed(binding: &HotkeyBinding, pressed_keys: &BTreeSet<u32>) -> bool {
+    let binding_keys = normalize_binding_keys(&binding.keys);
+    if binding_keys.is_empty() {
+        return false;
+    }
+
+    binding_keys.len() == pressed_keys.len()
+        && binding_keys
+            .iter()
+            .copied()
+            .eq(pressed_keys.iter().copied())
+}
+
 fn emit_event(name: &str) {
     log_hotkey(format!("emit_event {name}"));
-    let app = runtime().lock().ok().and_then(|guard| guard.app_handle.clone());
+    let app = runtime()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.app_handle.clone());
     if let Some(app) = app {
         if let Some(window) = app.get_webview_window("main") {
             match window.emit(name, ()) {
                 Ok(()) => log_hotkey(format!("emit_event delivered_to=main name={name}")),
-                Err(err) => log_hotkey(format!("emit_event failed_to_main name={name} error={err}")),
+                Err(err) => {
+                    log_hotkey(format!("emit_event failed_to_main name={name} error={err}"))
+                }
             }
         } else {
             log_hotkey("emit_event skipped: main window missing");
@@ -90,6 +231,7 @@ fn emit_event(name: &str) {
         log_hotkey("emit_event skipped: app_handle missing");
     }
 }
+
 fn should_emit_hotkey_event(event_name: &'static str) -> bool {
     let mut guard = match runtime().lock() {
         Ok(guard) => guard,
@@ -113,120 +255,31 @@ fn should_emit_hotkey_event(event_name: &'static str) -> bool {
     true
 }
 
-fn is_key_down(vk: i32) -> bool {
-    unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
-}
-
-fn normalized_modifier_state(primary_code: &str) -> HotkeyModifiersDetailed {
-    let mut ctrl = is_key_down(0x11) || is_key_down(0xA2) || is_key_down(0xA3);
-    let mut shift = is_key_down(VK_SHIFT.0 as i32) || is_key_down(0xA0) || is_key_down(0xA1);
-    let mut win = is_key_down(VK_LWIN.0 as i32) || is_key_down(VK_RWIN.0 as i32);
-    let mut alt_left = is_key_down(0xA4);
-    let mut alt_right = is_key_down(0xA5);
-
-    match primary_code {
-        "ControlLeft" | "ControlRight" => ctrl = false,
-        "ShiftLeft" | "ShiftRight" => shift = false,
-        "MetaLeft" | "MetaRight" => win = false,
-        "AltLeft" | "AltRight" => {
-            alt_left = false;
-            alt_right = false;
-        }
-        _ => {}
-    }
-
-    HotkeyModifiersDetailed {
-        ctrl,
-        shift,
-        win,
-        alt_left,
-        alt_right,
-    }
-}
-fn modifiers_match(binding: &HotkeyBinding) -> bool {
-    let current = normalized_modifier_state(&binding.primary_code);
-    current.ctrl == binding.modifiers.ctrl
-        && current.shift == binding.modifiers.shift
-        && current.win == binding.modifiers.win
-        && current.alt_left == binding.modifiers.alt_left
-        && current.alt_right == binding.modifiers.alt_right
-}
-
 fn is_extended_key(flags: u32) -> bool {
     flags & 0x01 != 0
 }
 
-fn primary_key_matches(binding: &HotkeyBinding, kb: &KBDLLHOOKSTRUCT) -> bool {
+fn normalized_vk_from_kb(kb: &KBDLLHOOKSTRUCT) -> Option<u32> {
     let vk = kb.vkCode;
     let scan = kb.scanCode;
     let extended = is_extended_key(kb.flags.0);
 
-    match binding.primary_code.as_str() {
-        "AltLeft" => scan == 56 && !extended,
-        "AltRight" => {
-            vk == 0xA5
-                || (scan == 56
-                    && (extended
-                        || (!binding.modifiers.ctrl
-                            && !binding.modifiers.shift
-                            && !binding.modifiers.win
-                            && !binding.modifiers.alt_left
-                            && !binding.modifiers.alt_right)))
-        }
-        "ControlLeft" => scan == 29 && !extended,
-        "ControlRight" => scan == 29 && extended,
-        "ShiftLeft" => scan == 42,
-        "ShiftRight" => scan == 54,
-        "MetaLeft" => vk == 0x5B,
-        "MetaRight" => vk == 0x5C,
-        _ => binding.primary_key_code >= 0 && vk == binding.primary_key_code as u32,
-    }
-}
-
-fn matches_hotkey(kb: &KBDLLHOOKSTRUCT) -> bool {
-    let guard = match runtime().lock() {
-        Ok(guard) => guard,
-        Err(_) => return false,
+    let normalized = match (vk, scan, extended) {
+        (_, 42, _) => 0xA0,
+        (_, 54, _) => 0xA1,
+        (_, 29, false) => 0xA2,
+        (_, 29, true) => 0xA3,
+        (0xA4, _, _) => 0xA4,
+        (0xA5, _, _) => 0xA5,
+        (_, 56, false) => 0xA4,
+        (_, 56, true) => 0xA5,
+        (0x5B, _, _) => 0x5B,
+        (0x5C, _, _) => 0x5C,
+        _ if vk > 0 => vk,
+        _ => return None,
     };
 
-    guard.binding.primary_key_code >= 0
-        && primary_key_matches(&guard.binding, kb)
-        && modifiers_match(&guard.binding)
-}
-fn log_hotkey_candidate(kb: &KBDLLHOOKSTRUCT, message: u32) {
-    let guard = match runtime().lock() {
-        Ok(guard) => guard,
-        Err(_) => return,
-    };
-
-    let current = normalized_modifier_state(&guard.binding.primary_code);
-    let modifiers_ok = current.ctrl == guard.binding.modifiers.ctrl
-        && current.shift == guard.binding.modifiers.shift
-        && current.win == guard.binding.modifiers.win
-        && current.alt_left == guard.binding.modifiers.alt_left
-        && current.alt_right == guard.binding.modifiers.alt_right;
-
-    log_hotkey(format!(
-        "hotkey_candidate display={} primary_code={} primary_key_code={} vk={} scan={} flags={} message={} expected_modifiers=ctrl:{} shift:{} win:{} alt_left:{} alt_right:{} current_modifiers=ctrl:{} shift:{} win:{} alt_left:{} alt_right:{} modifiers_match={}",
-        guard.binding.display,
-        guard.binding.primary_code,
-        guard.binding.primary_key_code,
-        kb.vkCode,
-        kb.scanCode,
-        kb.flags.0,
-        message,
-        guard.binding.modifiers.ctrl,
-        guard.binding.modifiers.shift,
-        guard.binding.modifiers.win,
-        guard.binding.modifiers.alt_left,
-        guard.binding.modifiers.alt_right,
-        current.ctrl,
-        current.shift,
-        current.win,
-        current.alt_left,
-        current.alt_right,
-        modifiers_ok,
-    ));
+    Some(normalized)
 }
 
 fn spawn_long_press_timer(generation: u64) {
@@ -238,7 +291,7 @@ fn spawn_long_press_timer(generation: u64) {
                 Err(_) => return,
             };
 
-            if guard.is_pressed
+            if guard.is_hotkey_active
                 && !guard.is_long_press_mode
                 && guard.long_press_generation == generation
                 && !recording_active()
@@ -256,22 +309,20 @@ fn spawn_long_press_timer(generation: u64) {
         }
     });
 }
-fn handle_key_down() {
+
+fn handle_hotkey_press_transition() {
     let long_press_generation = {
         let mut guard = match runtime().lock() {
             Ok(guard) => guard,
             Err(_) => return,
         };
 
-        if guard.is_pressed {
-            return;
-        }
-
-        guard.is_pressed = true;
         guard.long_press_generation += 1;
+        guard.is_long_press_mode = false;
         log_hotkey(format!(
-            "key_down armed generation={} binding={}",
-            guard.long_press_generation, guard.binding.display
+            "hotkey_press_transition binding={} pressed={}",
+            format_keys(&guard.binding.keys),
+            format_key_set(&guard.pressed_keys)
         ));
         guard.long_press_generation
     };
@@ -279,22 +330,17 @@ fn handle_key_down() {
     spawn_long_press_timer(long_press_generation);
 }
 
-fn handle_key_up() {
+fn handle_hotkey_release_transition() {
     let event_name = {
         let mut guard = match runtime().lock() {
             Ok(guard) => guard,
             Err(_) => return,
         };
 
-        if !guard.is_pressed {
-            return;
-        }
-
-        guard.is_pressed = false;
         guard.long_press_generation += 1;
         let event_name = if guard.is_long_press_mode {
             if recording_active() {
-                log_hotkey("key_up -> stop after long press");
+                log_hotkey("hotkey_release -> stop after long press");
                 Some("hotkey-stop-recording")
             } else {
                 None
@@ -317,18 +363,58 @@ fn handle_key_up() {
     }
 }
 
+enum HotkeyTransition {
+    Pressed,
+    Released,
+}
+
+fn update_runtime_hotkey_state(key: u32, message: u32) -> Option<HotkeyTransition> {
+    let mut guard = runtime().lock().ok()?;
+    let was_active = guard.is_hotkey_active;
+
+    match message {
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            guard.pressed_keys.insert(key);
+        }
+        WM_KEYUP | WM_SYSKEYUP => {
+            guard.pressed_keys.remove(&key);
+        }
+        _ => return None,
+    }
+
+    let is_active = binding_matches_pressed(&guard.binding, &guard.pressed_keys);
+    guard.is_hotkey_active = is_active;
+
+    log_hotkey(format!(
+        "hotkey_state key=0x{:X} message={} binding={} pressed={} was_active={} is_active={}",
+        key,
+        message,
+        format_keys(&guard.binding.keys),
+        format_key_set(&guard.pressed_keys),
+        was_active,
+        is_active,
+    ));
+
+    if !was_active && is_active {
+        Some(HotkeyTransition::Pressed)
+    } else if was_active && !is_active {
+        Some(HotkeyTransition::Released)
+    } else {
+        None
+    }
+}
+
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let kb = *(lparam.0 as *const KBDLLHOOKSTRUCT);
         let message = wparam.0 as u32;
 
-        if kb.vkCode == 0xA4 || kb.vkCode == 0xA5 || kb.vkCode == 0x11 || kb.vkCode == 0xA2 || kb.vkCode == 0xA3 || kb.vkCode == 0x10 || kb.vkCode == 0xA0 || kb.vkCode == 0xA1 || kb.vkCode == VK_LWIN.0 as u32 || kb.vkCode == VK_RWIN.0 as u32 {
-            log_hotkey(format!("raw_modifier_event vk={} scan={} flags={} message={}", kb.vkCode, kb.scanCode, kb.flags.0, message));
-            log_hotkey_candidate(&kb, message);
-        }
+        let Some(key) = normalized_vk_from_kb(&kb) else {
+            return CallNextHookEx(HHOOK::default(), code, wparam, lparam);
+        };
 
         if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
-            && kb.vkCode == VK_ESCAPE.0 as u32
+            && key == VK_ESCAPE.0 as u32
             && recording_active()
         {
             log_hotkey("esc -> cancel");
@@ -336,19 +422,16 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             return LRESULT(1);
         }
 
-        if matches_hotkey(&kb) {
-            log_hotkey(format!("matches_hotkey vk={} scan={} flags={} message={}", kb.vkCode, kb.scanCode, kb.flags.0, message));
-            match message {
-                WM_KEYDOWN | WM_SYSKEYDOWN => {
-                    handle_key_down();
-                    return LRESULT(1);
-                }
-                WM_KEYUP | WM_SYSKEYUP => {
-                    handle_key_up();
-                    return LRESULT(1);
-                }
-                _ => {}
+        match update_runtime_hotkey_state(key, message) {
+            Some(HotkeyTransition::Pressed) => {
+                handle_hotkey_press_transition();
+                return LRESULT(1);
             }
+            Some(HotkeyTransition::Released) => {
+                handle_hotkey_release_transition();
+                return LRESULT(1);
+            }
+            None => {}
         }
     }
 
@@ -356,8 +439,23 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 }
 
 fn ensure_hook_thread() -> Result<(), String> {
-    let mut thread_guard = hook_thread().lock().map_err(|_| "Hotkey thread mutex poisoned")?;
+    log_hook_runtime_status("ensure_hook_thread:enter");
+    let mut thread_guard = hook_thread()
+        .lock()
+        .map_err(|_| "Hotkey thread mutex poisoned")?;
     if thread_guard.is_some() {
+        let hook_thread_finished = thread_guard
+            .as_ref()
+            .map(|handle| handle.is_finished())
+            .unwrap_or(false);
+        let hook_thread_id_present = hook_thread_id()
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false);
+        log_hotkey(format!(
+            "ensure_hook_thread existing_slot thread_id_present={} thread_finished={}",
+            hook_thread_id_present, hook_thread_finished
+        ));
         log_hotkey("ensure_hook_thread: already running");
         return Ok(());
     }
@@ -373,7 +471,9 @@ fn ensure_hook_thread() -> Result<(), String> {
         let module = match GetModuleHandleW(None) {
             Ok(module) => module,
             Err(err) => {
-                log_hotkey(format!("ensure_hook_thread: GetModuleHandleW failed: {err}"));
+                log_hotkey(format!(
+                    "ensure_hook_thread: GetModuleHandleW failed: {err}"
+                ));
                 let _ = startup_tx.send(Err(format!("GetModuleHandleW failed: {err}")));
                 if let Ok(mut thread_id_guard) = hook_thread_id().lock() {
                     *thread_id_guard = None;
@@ -389,7 +489,9 @@ fn ensure_hook_thread() -> Result<(), String> {
                 hook
             }
             Err(err) => {
-                log_hotkey(format!("ensure_hook_thread: SetWindowsHookExW failed: {err}"));
+                log_hotkey(format!(
+                    "ensure_hook_thread: SetWindowsHookExW failed: {err}"
+                ));
                 let _ = startup_tx.send(Err(format!("SetWindowsHookExW failed: {err}")));
                 if let Ok(mut thread_id_guard) = hook_thread_id().lock() {
                     *thread_id_guard = None;
@@ -399,12 +501,22 @@ fn ensure_hook_thread() -> Result<(), String> {
         };
 
         let mut message = MSG::default();
-        while GetMessageW(&mut message, None, 0, 0).as_bool() {}
+        loop {
+            let get_message_result = GetMessageW(&mut message, None, 0, 0);
+            if !get_message_result.as_bool() {
+                log_hotkey(format!(
+                    "hook_thread:message_loop_exit result={}",
+                    get_message_result.0
+                ));
+                break;
+            }
+        }
 
         let _ = UnhookWindowsHookEx(hook);
         if let Ok(mut thread_id_guard) = hook_thread_id().lock() {
             *thread_id_guard = None;
         }
+        log_hotkey("hook_thread:exiting");
     });
 
     match startup_rx.recv_timeout(Duration::from_secs(2)) {
@@ -427,88 +539,24 @@ fn ensure_hook_thread() -> Result<(), String> {
 }
 
 fn shutdown_hook_thread() -> Result<(), String> {
-    if let Some(thread_id) = *hook_thread_id().lock().map_err(|_| "Hotkey thread mutex poisoned")? {
+    if let Some(thread_id) = *hook_thread_id()
+        .lock()
+        .map_err(|_| "Hotkey thread mutex poisoned")?
+    {
         unsafe {
             let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
     }
 
-    if let Some(handle) = hook_thread().lock().map_err(|_| "Hotkey thread mutex poisoned")?.take() {
+    if let Some(handle) = hook_thread()
+        .lock()
+        .map_err(|_| "Hotkey thread mutex poisoned")?
+        .take()
+    {
         let _ = handle.join();
     }
 
     Ok(())
-}
-
-fn format_key(key_code: i32) -> String {
-    match key_code {
-        0x30..=0x39 | 0x41..=0x5A => char::from_u32(key_code as u32)
-            .map(|ch| ch.to_string())
-            .unwrap_or_else(|| key_code.to_string()),
-        0x70..=0x7B => format!("F{}", key_code - 0x6F),
-        0xA4 => "AltLeft".to_string(),
-        0xA5 => "AltRight".to_string(),
-        0xA2 => "CtrlLeft".to_string(),
-        0xA3 => "CtrlRight".to_string(),
-        0xA0 => "ShiftLeft".to_string(),
-        0xA1 => "ShiftRight".to_string(),
-        _ => key_code.to_string(),
-    }
-}
-
-fn build_binding_from_legacy(modifiers: u32, key_code: i32) -> HotkeyBinding {
-    let mut parts = Vec::new();
-    let mut detailed = HotkeyModifiersDetailed {
-        ctrl: false,
-        shift: false,
-        win: false,
-        alt_left: false,
-        alt_right: false,
-    };
-
-    if modifiers & 0x1 != 0 {
-        parts.push("Ctrl".to_string());
-        detailed.ctrl = true;
-    }
-    if modifiers & 0x2 != 0 {
-        parts.push("Shift".to_string());
-        detailed.shift = true;
-    }
-    if modifiers & 0x4 != 0 {
-        parts.push("Alt".to_string());
-        detailed.alt_left = true;
-    }
-    if modifiers & 0x8 != 0 {
-        parts.push("Win".to_string());
-        detailed.win = true;
-    }
-    if key_code >= 0 {
-        parts.push(format_key(key_code));
-    }
-
-    HotkeyBinding {
-        primary_code: format_key(key_code),
-        primary_key_code: key_code,
-        display: if parts.is_empty() { "未设置".to_string() } else { parts.join("+") },
-        modifiers: detailed,
-    }
-}
-
-fn mask_from_binding(binding: &HotkeyBinding) -> u32 {
-    let mut mask = 0;
-    if binding.modifiers.ctrl {
-        mask |= 0x1;
-    }
-    if binding.modifiers.shift {
-        mask |= 0x2;
-    }
-    if binding.modifiers.alt_left || binding.modifiers.alt_right {
-        mask |= 0x4;
-    }
-    if binding.modifiers.win {
-        mask |= 0x8;
-    }
-    mask
 }
 
 #[tauri::command]
@@ -518,51 +566,56 @@ pub fn debug_hotkey_log(message: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn register_hotkey(app: AppHandle, state: State<'_, HotkeyState>, modifiers: u32, key_code: i32) -> Result<(), String> {
-    let binding = build_binding_from_legacy(modifiers, key_code);
-    register_hotkey_binding(app, state, binding)
-}
-
-#[tauri::command]
 pub fn register_hotkey_binding(
     app: AppHandle,
     state: State<'_, HotkeyState>,
     binding: HotkeyBinding,
 ) -> Result<(), String> {
-    *state.modifiers.lock().map_err(|_| "Hotkey mutex poisoned")? = mask_from_binding(&binding);
-    *state.key_code.lock().map_err(|_| "Hotkey mutex poisoned")? = binding.primary_key_code;
+    let binding = sanitize_binding(binding)?;
+    log_hotkey(format!(
+        "register_hotkey_binding request keys={} display={} {}",
+        format_keys(&binding.keys),
+        binding.display,
+        runtime_state_summary(),
+    ));
     *state.binding.lock().map_err(|_| "Hotkey mutex poisoned")? = binding.clone();
-    log_hotkey(format!("register_hotkey_binding display={} primary_code={} primary_key_code={} modifiers=ctrl:{} shift:{} win:{} alt_left:{} alt_right:{}", binding.display, binding.primary_code, binding.primary_key_code, binding.modifiers.ctrl, binding.modifiers.shift, binding.modifiers.win, binding.modifiers.alt_left, binding.modifiers.alt_right));
 
-    let mut guard = runtime().lock().map_err(|_| "Hotkey runtime mutex poisoned")?;
-    guard.binding = binding;
+    let mut guard = runtime()
+        .lock()
+        .map_err(|_| "Hotkey runtime mutex poisoned")?;
+    guard.binding = binding.clone();
     guard.app_handle = Some(app);
+    guard.pressed_keys.clear();
+    guard.is_hotkey_active = false;
+    guard.is_long_press_mode = false;
     drop(guard);
+
+    log_hotkey(format!(
+        "register_hotkey_binding keys={} display={} {}",
+        format_keys(&binding.keys),
+        binding.display,
+        runtime_state_summary(),
+    ));
 
     ensure_hook_thread()
 }
 
 #[tauri::command]
 pub fn unregister_hotkey(state: State<'_, HotkeyState>) -> Result<(), String> {
-    *state.modifiers.lock().map_err(|_| "Hotkey mutex poisoned")? = 0;
-    *state.key_code.lock().map_err(|_| "Hotkey mutex poisoned")? = -1;
     *state.binding.lock().map_err(|_| "Hotkey mutex poisoned")? = HotkeyBinding {
-        primary_code: String::new(),
-        primary_key_code: -1,
-        display: "未设置".to_string(),
-        modifiers: HotkeyModifiersDetailed {
-            ctrl: false,
-            shift: false,
-            win: false,
-            alt_left: false,
-            alt_right: false,
-        },
+        keys: Vec::new(),
+        display: NOT_SET_LABEL.to_string(),
     };
 
-    let mut guard = runtime().lock().map_err(|_| "Hotkey runtime mutex poisoned")?;
-    guard.binding.primary_key_code = -1;
-    guard.binding.display = "未设置".to_string();
-    guard.is_pressed = false;
+    let mut guard = runtime()
+        .lock()
+        .map_err(|_| "Hotkey runtime mutex poisoned")?;
+    guard.binding = HotkeyBinding {
+        keys: Vec::new(),
+        display: NOT_SET_LABEL.to_string(),
+    };
+    guard.pressed_keys.clear();
+    guard.is_hotkey_active = false;
     guard.is_long_press_mode = false;
     drop(guard);
 
@@ -571,9 +624,13 @@ pub fn unregister_hotkey(state: State<'_, HotkeyState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_hotkey_display(state: State<'_, HotkeyState>) -> Result<String, String> {
-    let binding = state.binding.lock().map_err(|_| "Hotkey mutex poisoned")?.clone();
+    let binding = state
+        .binding
+        .lock()
+        .map_err(|_| "Hotkey mutex poisoned")?
+        .clone();
     if binding.display.is_empty() {
-        Ok("未设置".to_string())
+        Ok(NOT_SET_LABEL.to_string())
     } else {
         Ok(binding.display)
     }

@@ -2,9 +2,11 @@ mod commands;
 mod state;
 
 use commands::{
-    audio::{cancel_recording, delete_audio_file, get_recording_status, start_recording, stop_recording},
+    audio::{
+        cancel_recording, delete_audio_file, get_recording_status, start_recording, stop_recording,
+    },
     backend::{backend_status, start_backend, stop_backend, transcribe},
-    hotkey::{debug_hotkey_log, get_hotkey_display, register_hotkey, register_hotkey_binding, unregister_hotkey},
+    hotkey::{debug_hotkey_log, get_hotkey_display, register_hotkey_binding, unregister_hotkey},
     text_input::output_text,
 };
 use state::{BackendProcessState, HotkeyState, RecordingState};
@@ -47,20 +49,21 @@ fn ensure_overlay_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String
         return Ok(window);
     }
 
-    let mut builder = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
-        .title("VoiceScribe Overlay")
-        .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
-        .resizable(false)
-        .maximizable(false)
-        .minimizable(false)
-        .closable(false)
-        .decorations(false)
-        .visible(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(false);
+    let mut builder =
+        WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
+            .title("VoiceScribe Overlay")
+            .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
+            .resizable(false)
+            .maximizable(false)
+            .minimizable(false)
+            .closable(false)
+            .decorations(false)
+            .visible(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false);
 
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone()).map_err(|err| err.to_string())?;
@@ -89,7 +92,11 @@ fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_autostart::Builder::new().arg("--from-autostart").build())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg("--from-autostart")
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -98,13 +105,23 @@ pub fn run() {
         .manage(RecordingState::default())
         .setup(|app| {
             let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
-            let start_recording = MenuItemBuilder::with_id("start-recording", "开始录音").build(app)?;
-            let stop_recording = MenuItemBuilder::with_id("stop-recording", "停止录音并转录").build(app)?;
-            let cancel_recording = MenuItemBuilder::with_id("cancel-recording", "取消当前录音").build(app)?;
+            let start_recording =
+                MenuItemBuilder::with_id("start-recording", "开始录音").build(app)?;
+            let stop_recording =
+                MenuItemBuilder::with_id("stop-recording", "停止录音并转录").build(app)?;
+            let cancel_recording =
+                MenuItemBuilder::with_id("cancel-recording", "取消当前录音").build(app)?;
             let copy_latest = MenuItemBuilder::with_id("copy-latest", "复制最近转录").build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "退出 VoiceScribe").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&show, &start_recording, &stop_recording, &cancel_recording, &copy_latest, &quit])
+                .items(&[
+                    &show,
+                    &start_recording,
+                    &stop_recording,
+                    &cancel_recording,
+                    &copy_latest,
+                    &quit,
+                ])
                 .build()?;
 
             let mut tray_builder = TrayIconBuilder::with_id("main-tray")
@@ -163,7 +180,6 @@ pub fn run() {
             backend_status,
             transcribe,
             debug_hotkey_log,
-            register_hotkey,
             register_hotkey_binding,
             unregister_hotkey,
             get_hotkey_display,
