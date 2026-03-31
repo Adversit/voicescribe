@@ -4,8 +4,8 @@
 
 对照对象：
 
-- 基线计划：[0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
-- 当前正式 spec：[2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md)
+- 基线计划：[0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
+- 当前正式 spec：[2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-voicescribe-windows-spec.md)
 - 旧版归档 spec：[2026-03-25-voicescribe-windows-spec-v1-archived.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\2026-03-25-voicescribe-windows-spec-v1-archived.md)
 
 本文档的目的不是分析代码，而是回答两个问题：

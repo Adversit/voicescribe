@@ -3,7 +3,7 @@
 更新时间：2026-03-25
 
 基线文档：
-- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
+- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
 - [0325项目初始.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\0325项目初始.md)
 - 现有 macOS 实现目录 [app](D:\learn\AIGC\voicescribe\0324\voicescribe\app)
 

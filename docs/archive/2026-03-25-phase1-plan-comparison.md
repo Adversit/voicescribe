@@ -3,7 +3,7 @@
 更新时间：2026-03-25
 
 对照基线：
-- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
+- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
 - 当前实现代码基线（截至本次会话工作区）
 
 本文档只分析 `Phase 1: 后端跨平台适配` 是否按计划落实，不覆盖 Phase 2-5。

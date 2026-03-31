@@ -3,20 +3,20 @@
 更新时间：2026-03-29
 
 基线文档：
-- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
+- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
 - [0325项目初始.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\0325项目初始.md)
 - 现有 macOS 实现目录 [app](D:\learn\AIGC\voicescribe\0324\voicescribe\app)
-- 界面专项计划 [2026-03-27-ui-imitation-plan.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-27-ui-imitation-plan.md)
-- 专题需求文档 [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
-- 专题 Spec [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
-- 专题测试报告 [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
+- 界面专项计划 [2026-03-27-ui-imitation-plan.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-27-ui-imitation-plan.md)
+- 专题需求文档 [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
+- 专题 Spec [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+- 专题测试报告 [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
 
-本文档是当前唯一正式 spec。如与当前代码、临时说明或旧版 spec 冲突，一律以 [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md) 与本文档为准。
+本文档是当前唯一正式 spec。如与当前代码、临时说明或旧版 spec 冲突，一律以 [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md) 与本文档为准。
 
 ## 1. Source of Truth
 
 优先级从高到低如下：
-1. [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
+1. [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
 2. 本正式 spec
 3. 原始 macOS 行为基线 [app](D:\learn\AIGC\voicescribe\0324\voicescribe\app)
 4. 当前实现代码
@@ -188,7 +188,7 @@ Constraints:
 
 本次重构至少需要同步修改以下文件：
 
-1. [docs/active/2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md)
+1. [docs/archive/phase1/2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-voicescribe-windows-spec.md)
 2. [tauri-app/src/types/index.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\types\index.ts)
 3. [tauri-app/src/stores/appStore.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\stores\appStore.ts)
 4. [tauri-app/src/pages/HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx)
@@ -234,7 +234,7 @@ Constraints:
 7. 单击开始 / 再按一次停止行为正常。
 8. 录音中按 `Esc` 可取消。
 9. `cargo check`、`npm run build`、`cmd /c scripts/start_windows_system.bat` 通过。
-10. 上述测试结果先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md)，再对外汇报。
+10. 上述测试结果先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md)，再对外汇报。
 
 ### K. 风险说明
 
@@ -322,8 +322,8 @@ This supplement covers one shared log timeline for `start capture -> browser key
 
 ### C. Files That Must Change Together
 
-1. `docs/active/2026-03-25-voicescribe-windows-spec.md`
-2. `docs/active/2026-03-26-implementation-gap-checklist.md`
+1. `docs/archive/phase1/2026-03-25-voicescribe-windows-spec.md`
+2. `docs/archive/phase1/2026-03-26-implementation-gap-checklist.md`
 3. `tauri-app/src/pages/HotkeySettings.tsx`
 4. `tauri-app/src/api/tauri.ts`
 5. `tauri-app/src/hooks/useHotkey.ts`
@@ -460,20 +460,20 @@ Windows 版设置窗口必须采用“侧边栏 + 原生设置页”结构，并
 
 ### 8.3 测试文档规则
 
-没有写进 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md) 的，一律视为没测。
+没有写进 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md) 的，一律视为没测。
 
 ## 9. 历史文档索引
 
 - 旧版 spec： [2026-03-25-voicescribe-windows-spec-v1-archived.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\2026-03-25-voicescribe-windows-spec-v1-archived.md)
-- Session Bug Log： [2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-session-bug-log.md)
+- Session Bug Log： [2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-session-bug-log.md)
 - Phase 1 对照： [2026-03-25-phase1-plan-comparison.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\2026-03-25-phase1-plan-comparison.md)
 - Plan/Spec 一致性核对： [2026-03-26-plan-spec-consistency-check.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\2026-03-26-plan-spec-consistency-check.md)
-- 实时转录专题需求： [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
-- 实时转录专题 Spec： [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
-- 实时转录专题测试报告： [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
-- 录音悬浮窗专题需求： [2026-03-29-overlay-recording-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-requirements.md)
-- 录音悬浮窗专题 Spec： [2026-03-29-overlay-recording-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-spec.md)
-- 录音悬浮窗专题测试报告： [2026-03-29-overlay-recording-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-test-report.md)
+- 实时转录专题需求： [2026-03-28-rt-history-hotkey-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-requirements.md)
+- 实时转录专题 Spec： [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+- 实时转录专题测试报告： [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)
+- 录音悬浮窗专题需求： [2026-03-29-overlay-recording-requirements.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-overlay-recording\2026-03-29-overlay-recording-requirements.md)
+- 录音悬浮窗专题 Spec： [2026-03-29-overlay-recording-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-overlay-recording\2026-03-29-overlay-recording-spec.md)
+- 录音悬浮窗专题测试报告： [2026-03-29-overlay-recording-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-overlay-recording\2026-03-29-overlay-recording-test-report.md)
 
 ## 2026-03-29 录音悬浮窗专题补充
 
@@ -506,7 +506,7 @@ unasr.AutoModel 直接加载 speaker-diarization 仓库 ID；当前可验证可�
 
 - Windows 下不能把 `Whisper available=true` 直接视为“Whisper 稳定可用”；本轮已发现 `faster-whisper / ctranslate2` 在 `WhisperModel(...)` 初始化阶段可触发 native 崩溃。
 - 因此 Windows 端允许对 Whisper 引擎增加实现级回退：优先尝试 `faster-whisper`，若运行时探测或真实加载失败，则切换到 `openai-whisper`，优先保证存在一条稳定的 Whisper 转录链路。
-- 测试与汇报时必须区分 “FunASR 稳定链路” 与 “Whisper 稳定链路”；未写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md) 的，仍视为未验证。
+- 测试与汇报时必须区分 “FunASR 稳定链路” 与 “Whisper 稳定链路”；未写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md) 的，仍视为未验证。
 
 ## 2026-03-29 FunASR GPU 运行时补充
 

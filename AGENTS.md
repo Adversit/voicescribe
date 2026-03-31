@@ -5,19 +5,22 @@ Default branch: `0325main`
 
 Read these first:
 1. `docs/active/协作约定.md`
-2. `docs/active/0325第一阶段改造计划.md`
-3. `docs/active/2026-03-25-voicescribe-windows-spec.md`
-4. `docs/active/2026-03-26-implementation-gap-checklist.md`
-5. `docs/active/第一阶段测试.md`
-6. `docs/active/2026-03-25-session-bug-log.md`
+2. `docs/active/2026-03-31-phase-status.md`
+3. If touching archived Phase 1 logic, also read:
+   - `docs/archive/phase1/0325第一阶段改造计划.md`
+   - `docs/archive/phase1/2026-03-25-voicescribe-windows-spec.md`
+   - `docs/archive/phase1/2026-03-26-implementation-gap-checklist.md`
+   - `docs/archive/phase1/第一阶段测试.md`
+   - `docs/archive/phase1/2026-03-25-session-bug-log.md`
 
-Priority: `plan > spec > checklist > code`
+Priority: `active status > relevant archive spec/checklist > code`
 
 Workflow:
 - Update docs before code.
 - Test before reporting.
-- Write test results into `docs/active/第一阶段测试.md` before claiming something is tested.
-- New bugs must be written into `docs/active/2026-03-25-session-bug-log.md`.
+- If the work is still Phase 1 tail-closeout, write test results into `docs/archive/phase1/第一阶段测试.md` before claiming something is tested.
+- If the work is still Phase 1 tail-closeout, write new bugs into `docs/archive/phase1/2026-03-25-session-bug-log.md`.
+- If a new phase starts, create new active docs instead of continuing to expand archived planning docs.
 - Packaging is a final-stage task unless it blocks earlier debugging.
 
 Model path rule:

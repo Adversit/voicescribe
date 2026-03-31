@@ -3,10 +3,10 @@
 更新时间：2026-03-30
 
 上游基线：
-- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
-- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md)
-- [2026-03-27-ui-imitation-plan.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-27-ui-imitation-plan.md)
-- [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
+- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-voicescribe-windows-spec.md)
+- [2026-03-27-ui-imitation-plan.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-27-ui-imitation-plan.md)
+- [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
 
 本文档不是新的技术方案，只负责记录当前代码与 `plan/spec` 的剩余差距。
 
@@ -60,9 +60,9 @@
 - `P4-02` 引擎页统一模型语义：`已完成`
 - `P4-03` 托盘能力与图标：`代码已完成，待人工验收`
 - `P4-04` 实时转录与历史记录专题：`代码已完成，待人工验收`
-  - 该专题已拆分到 [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
+  - 该专题已拆分到 [2026-03-28-rt-history-hotkey-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-28-rt-history-hotkey-spec.md)
   - 代码层已完成侧边栏新增页面、流式时间线、历史记录存储与下载能力。
-  - 本轮自动化验证见 [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)。
+  - 本轮自动化验证见 [2026-03-29-rt-history-hotkey-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-rt-history-hotkey\2026-03-29-rt-history-hotkey-test-report.md)。
 
 ## Feature Topic
 - `F1-01` 实时转录页：`代码已完成，待人工验收`
@@ -77,7 +77,7 @@
 ## 2026-03-30 快捷键模型重构执行清单
 
 上游约束：
-- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md) 中“2026-03-30 快捷键模型重构补充”
+- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-voicescribe-windows-spec.md) 中“2026-03-30 快捷键模型重构补充”
 
 状态说明：
 - 本节未全部完成前，不得宣称“快捷键录制问题已修复”。
@@ -136,8 +136,8 @@
   - `cmd /c scripts/start_windows_system.bat`
 
 - `HK-10` 测试文档回写：`已完成`
-  - 上述验证结果必须先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md)
-  - 若出现新问题，必须同步写入 [2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-session-bug-log.md)
+  - 上述验证结果必须先写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md)
+  - 若出现新问题，必须同步写入 [2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-session-bug-log.md)
 
 ## 2026-03-30 Apply Trace Diagnostic Checklist
 
@@ -193,7 +193,7 @@
 
 - P4-02 转录模型链路新增 Windows 子问题：`faster-whisper / ctranslate2` 在本机对 `WhisperModel(...)` 初始化会发生 native 崩溃，不能继续把 Whisper 标记为“稳定可验收”。
 - 本轮若继续收口 Whisper，需要优先验证 `openai-whisper` 是否可作为 Windows 下的稳定实现回退；若可行，再把默认实现调整为“优先 faster-whisper，失败时回退 openai-whisper”。
-- 在该回退链路未写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md) 前，Whisper 仍视为未完成验收。
+- 在该回退链路未写入 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md) 前，Whisper 仍视为未完成验收。
 
 ## 2026-03-29 Whisper Windows 回退结果
 
@@ -214,4 +214,4 @@
 
 - P4-02 录音悬浮窗当前新增专题级问题：首次不稳定显示、显示后无法稳定通过快捷键或按钮关闭、实时音量反馈不可信、视觉形态偏离目标。
 - 该项不再视为“单纯样式优化”，而是“overlay 事件桥接 + 录音流状态收口 + 真实音量反馈 + 视觉重构”的组合工作。
-- 在该专题测试结果写入 [2026-03-29-overlay-recording-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\feature-overlay-recording\2026-03-29-overlay-recording-test-report.md) 和 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\第一阶段测试.md) 前，不得视为已验收。
+- 在该专题测试结果写入 [2026-03-29-overlay-recording-test-report.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\feature-overlay-recording\2026-03-29-overlay-recording-test-report.md) 和 [第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md) 前，不得视为已验收。

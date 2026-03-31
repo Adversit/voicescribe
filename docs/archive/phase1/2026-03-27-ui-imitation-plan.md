@@ -3,8 +3,8 @@
 更新时间：2026-03-28
 
 基线来源：
-- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\0325第一阶段改造计划.md)
-- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\active\2026-03-25-voicescribe-windows-spec.md)
+- [0325第一阶段改造计划.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\0325第一阶段改造计划.md)
+- [2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-voicescribe-windows-spec.md)
 - 原生 macOS 界面实现目录 [app](D:\learn\AIGC\voicescribe\0324\voicescribe\app)
 - Typeless 窗口缩放参考截图 `docs/assets/references/typeless/`
 
