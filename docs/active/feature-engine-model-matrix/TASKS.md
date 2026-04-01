@@ -112,17 +112,17 @@
 
 - [x] T44 扩展 [tauri.ts](/D:/learn/AIGC/voicescribe/0324/voicescribe/tauri-app/src/api/tauri.ts) 的转录请求结构
 - [x] T45 扩展 [backend.rs](/D:/learn/AIGC/voicescribe/0324/voicescribe/tauri-app/src-tauri/src/commands/backend.rs) 的 `transcribe` 命令参数
-- [ ] T46 在 [lib.rs](/D:/learn/AIGC/voicescribe/0324/voicescribe/tauri-app/src-tauri/src/lib.rs) 注册新增凭据命令
-- [ ] T47 新增 Windows Credential Manager 的读 / 写 / 覆盖 / 删除命令
+- [x] T46 在 [lib.rs](/D:/learn/AIGC/voicescribe/0324/voicescribe/tauri-app/src-tauri/src/lib.rs) 注册新增凭据命令
+- [x] T47 新增 Windows Credential Manager 的读 / 写 / 覆盖 / 删除命令
 - [x] T48 保持 Tauri 只处理原生能力，不在 Rust 层维护兼容矩阵
 
 ## 10. 下载与凭据任务
 
-- [ ] T49 建立“按模型需要 token”判断与前端弹窗触发链路
-- [ ] T50 新增 token 输入弹窗组件
-- [ ] T51 token 保存到 Windows Credential Manager，而不是 `.env` 或普通设置文件
-- [ ] T52 已保存 token 的模型再次下载时不重复弹窗
-- [ ] T53 下载失败时保留失败原因并允许重试
+- [x] T49 建立“按模型需要 token”判断与前端弹窗触发链路
+- [x] T50 新增 token 输入弹窗组件
+- [x] T51 token 保存到 Windows Credential Manager，而不是 `.env` 或普通设置文件
+- [x] T52 已保存 token 的模型再次下载时不重复弹窗
+- [x] T53 下载失败时保留失败原因并允许重试
 - [ ] T54 所有新模型主下载路径固定在 [models](/D:/learn/AIGC/voicescribe/0324/voicescribe/models)
 
 ## 11. 加载与执行链路任务

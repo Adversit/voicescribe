@@ -1,5 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { loadEngineSelection } from "../api/backend";
+import {
+  deleteModelDownloadToken,
+  getModelDownloadToken,
+  saveModelDownloadToken,
+} from "../api/tauri";
+import { TokenPromptDialog } from "../components/TokenPromptDialog";
 import {
   SettingsField,
   SettingsPage,
@@ -182,6 +188,32 @@ function ModelSection(props: ModelSectionProps) {
   );
 }
 
+type TokenPromptState = {
+  model: ModelStatus;
+  token: string;
+  error: string | null;
+  busy: boolean;
+  hasStoredToken: boolean;
+};
+
+function looksLikeCredentialError(message: string | null | undefined) {
+  if (!message) {
+    return false;
+  }
+
+  const lowered = message.toLowerCase();
+  return [
+    "token",
+    "credential",
+    "auth",
+    "unauthorized",
+    "forbidden",
+    "permission",
+    "401",
+    "403",
+  ].some((keyword) => lowered.includes(keyword));
+}
+
 export function EngineSettings() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
@@ -192,6 +224,7 @@ export function EngineSettings() {
   const refreshModels = useModelStore((state) => state.refresh);
   const startDownload = useModelStore((state) => state.startDownload);
   const deleteModel = useModelStore((state) => state.deleteModel);
+  const [tokenPrompt, setTokenPrompt] = useState<TokenPromptState | null>(null);
 
   useEffect(() => {
     if (!backendConnected) {
@@ -242,108 +275,244 @@ export function EngineSettings() {
     });
   };
 
+  const openTokenPrompt = (model: ModelStatus, token: string, error: string | null, hasStoredToken: boolean) => {
+    setTokenPrompt({
+      model,
+      token,
+      error,
+      busy: false,
+      hasStoredToken,
+    });
+  };
+
+  const closeTokenPrompt = () => {
+    setTokenPrompt(null);
+  };
+
+  const beginDownload = async (model: ModelStatus, token?: string) => {
+    await startDownload(model.category, model.engine, model.model, token);
+    setToast(`${model.display_name} 下载已开始`);
+  };
+
+  const handleDownload = async (model: ModelStatus) => {
+    try {
+      if (!model.requires_token) {
+        await beginDownload(model);
+        return;
+      }
+
+      const savedToken = await getModelDownloadToken(model.category, model.engine, model.model);
+      const needsPrompt = !savedToken || looksLikeCredentialError(model.error);
+      if (needsPrompt) {
+        openTokenPrompt(
+          model,
+          savedToken ?? "",
+          looksLikeCredentialError(model.error) ? model.error : null,
+          Boolean(savedToken),
+        );
+        return;
+      }
+
+      await beginDownload(model, savedToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "模型下载启动失败";
+      if (model.requires_token && looksLikeCredentialError(message)) {
+        openTokenPrompt(model, "", message, false);
+      } else {
+        setToast(message);
+      }
+    }
+  };
+
+  const submitTokenPrompt = async () => {
+    if (!tokenPrompt) {
+      return;
+    }
+
+    const token = tokenPrompt.token.trim();
+    if (!token) {
+      setTokenPrompt((current) => (current ? { ...current, error: "Token 不能为空" } : current));
+      return;
+    }
+
+    setTokenPrompt((current) => (current ? { ...current, busy: true, error: null } : current));
+    try {
+      await saveModelDownloadToken(
+        tokenPrompt.model.category,
+        tokenPrompt.model.engine,
+        tokenPrompt.model.model,
+        token,
+      );
+      await beginDownload(tokenPrompt.model, token);
+      closeTokenPrompt();
+    } catch (error) {
+      setTokenPrompt((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              hasStoredToken: true,
+              error: error instanceof Error ? error.message : "保存 token 或启动下载失败",
+            }
+          : current,
+      );
+    }
+  };
+
+  const clearStoredToken = async () => {
+    if (!tokenPrompt) {
+      return;
+    }
+
+    try {
+      await deleteModelDownloadToken(
+        tokenPrompt.model.category,
+        tokenPrompt.model.engine,
+        tokenPrompt.model.model,
+      );
+      setTokenPrompt((current) =>
+        current
+          ? {
+              ...current,
+              token: "",
+              error: null,
+              busy: false,
+              hasStoredToken: false,
+            }
+          : current,
+      );
+      setToast(`已清除 ${tokenPrompt.model.display_name} 的已存 token`);
+    } catch (error) {
+      setTokenPrompt((current) =>
+        current
+          ? {
+              ...current,
+              error: error instanceof Error ? error.message : "清除 token 失败",
+            }
+          : current,
+      );
+    }
+  };
+
   return (
-    <SettingsPage
-      title="引擎"
-      description="按引擎联动管理 ASR、说话人分离和说话人映射模型。默认组合会自动带出，但你可以在兼容范围内改。"
-    >
-      <SettingsSection
-        title="引擎与当前组合"
-        description="先决定当前引擎，再按需预加载整套组合。"
-        actions={
-          <>
-            <button type="button" onClick={() => void refreshModels()} className={secondaryButtonClassName}>
-              刷新
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                void loadEngineSelection(
-                  settings.selectedEngine,
-                  currentSelection.asrModel,
-                  currentSelection.diarizationModel,
-                  currentSelection.speakerMappingModel,
-                )
-                  .then(() => setToast("当前组合加载成功"))
-                  .catch((error) => setToast(error instanceof Error ? error.message : "组合加载失败"))
-              }
-              className={primaryButtonClassName}
-            >
-              预加载当前组合
-            </button>
-          </>
-        }
+    <>
+      <SettingsPage
+        title="引擎"
+        description="按引擎联动管理 ASR、说话人分离和说话人映射模型。默认组合会自动带出，但你可以在兼容范围内改。"
       >
-        <div className="grid gap-3 md:grid-cols-2">
-          <SettingsField label="选择引擎" hint={engineDescriptions[settings.selectedEngine] ?? "当前引擎描述待补充。"}>
-            <select
-              value={settings.selectedEngine}
-              onChange={(event) => {
-                const next = event.target.value;
-                const match = availableEngines.find((engine) => engine.name === next);
-                updateSettings({
-                  selectedEngine: next,
-                  engineSelections: {
-                    ...settings.engineSelections,
-                    [next]: settings.engineSelections[next]
-                      ?? match?.default_selection
-                      ?? defaultSelectionForEngine(next),
-                  },
-                });
-              }}
-              className={selectClassName}
-            >
-              {availableEngines.map((engine) => (
-                <option key={engine.name} value={engine.name}>
-                  {engine.display_name ?? engine.name}
-                </option>
-              ))}
-            </select>
-          </SettingsField>
+        <SettingsSection
+          title="引擎与当前组合"
+          description="先决定当前引擎，再按需预加载整套组合。"
+          actions={
+            <>
+              <button type="button" onClick={() => void refreshModels()} className={secondaryButtonClassName}>
+                刷新
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void loadEngineSelection(
+                    settings.selectedEngine,
+                    currentSelection.asrModel,
+                    currentSelection.diarizationModel,
+                    currentSelection.speakerMappingModel,
+                  )
+                    .then(() => setToast("当前组合加载成功"))
+                    .catch((error) => setToast(error instanceof Error ? error.message : "组合加载失败"))
+                }
+                className={primaryButtonClassName}
+              >
+                预加载当前组合
+              </button>
+            </>
+          }
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <SettingsField label="选择引擎" hint={engineDescriptions[settings.selectedEngine] ?? "当前引擎描述待补充。"}>
+              <select
+                value={settings.selectedEngine}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  const match = availableEngines.find((engine) => engine.name === next);
+                  updateSettings({
+                    selectedEngine: next,
+                    engineSelections: {
+                      ...settings.engineSelections,
+                      [next]: settings.engineSelections[next]
+                        ?? match?.default_selection
+                        ?? defaultSelectionForEngine(next),
+                    },
+                  });
+                }}
+                className={selectClassName}
+              >
+                {availableEngines.map((engine) => (
+                  <option key={engine.name} value={engine.name}>
+                    {engine.display_name ?? engine.name}
+                  </option>
+                ))}
+              </select>
+            </SettingsField>
 
-          <SettingsField label="当前默认组合">
-            <div className="rounded-[12px] border border-line bg-panel px-3 py-3 text-sm text-ink/70">
-              {currentSelection.asrModel} / {currentSelection.diarizationModel} / {currentSelection.speakerMappingModel}
-            </div>
-          </SettingsField>
-        </div>
-      </SettingsSection>
+            <SettingsField label="当前默认组合">
+              <div className="rounded-[12px] border border-line bg-panel px-3 py-3 text-sm text-ink/70">
+                {currentSelection.asrModel} / {currentSelection.diarizationModel} / {currentSelection.speakerMappingModel}
+              </div>
+            </SettingsField>
+          </div>
+        </SettingsSection>
 
-      <ModelSection
-        title="ASR 模型"
-        description="当前引擎下的可用 ASR 模型。"
-        category="asr"
-        selectedValue={currentSelection.asrModel}
-        options={selectedEngineInfo?.asr_models ?? []}
-        displayModels={asrModels}
-        onSelect={(value) => updateEngineSelection({ asrModel: value })}
-        onDownload={(model) => void startDownload(model.category, model.engine, model.model)}
-        onDelete={(model) => void deleteModel(model.category, model.engine, model.model)}
+        <ModelSection
+          title="ASR 模型"
+          description="当前引擎下的可用 ASR 模型。"
+          category="asr"
+          selectedValue={currentSelection.asrModel}
+          options={selectedEngineInfo?.asr_models ?? []}
+          displayModels={asrModels}
+          onSelect={(value) => updateEngineSelection({ asrModel: value })}
+          onDownload={(model) => void handleDownload(model)}
+          onDelete={(model) => void deleteModel(model.category, model.engine, model.model)}
+        />
+
+        <ModelSection
+          title="说话人分离模型"
+          description="只显示当前引擎兼容的分离模型。"
+          category="diarization"
+          selectedValue={currentSelection.diarizationModel}
+          options={selectedEngineInfo?.diarization_models ?? []}
+          displayModels={diarizationModels}
+          onSelect={(value) => updateEngineSelection({ diarizationModel: value })}
+          onDownload={(model) => void handleDownload(model)}
+          onDelete={(model) => void deleteModel(model.category, model.engine, model.model)}
+        />
+
+        <ModelSection
+          title="说话人映射模型"
+          description="只显示当前引擎兼容的映射 / 识别模型。"
+          category="speaker_mapping"
+          selectedValue={currentSelection.speakerMappingModel}
+          options={selectedEngineInfo?.speaker_mapping_models ?? []}
+          displayModels={mappingModels}
+          onSelect={(value) => updateEngineSelection({ speakerMappingModel: value })}
+          onDownload={(model) => void handleDownload(model)}
+          onDelete={(model) => void deleteModel(model.category, model.engine, model.model)}
+        />
+      </SettingsPage>
+
+      <TokenPromptDialog
+        open={tokenPrompt !== null}
+        modelName={tokenPrompt?.model.display_name ?? ""}
+        token={tokenPrompt?.token ?? ""}
+        error={tokenPrompt?.error ?? null}
+        busy={tokenPrompt?.busy ?? false}
+        hasStoredToken={tokenPrompt?.hasStoredToken ?? false}
+        onTokenChange={(value) =>
+          setTokenPrompt((current) => (current ? { ...current, token: value, error: null } : current))
+        }
+        onSubmit={() => void submitTokenPrompt()}
+        onCancel={closeTokenPrompt}
+        onClearStoredToken={() => void clearStoredToken()}
       />
-
-      <ModelSection
-        title="说话人分离模型"
-        description="只显示当前引擎兼容的分离模型。"
-        category="diarization"
-        selectedValue={currentSelection.diarizationModel}
-        options={selectedEngineInfo?.diarization_models ?? []}
-        displayModels={diarizationModels}
-        onSelect={(value) => updateEngineSelection({ diarizationModel: value })}
-        onDownload={(model) => void startDownload(model.category, model.engine, model.model)}
-        onDelete={(model) => void deleteModel(model.category, model.engine, model.model)}
-      />
-
-      <ModelSection
-        title="说话人映射模型"
-        description="只显示当前引擎兼容的映射 / 识别模型。"
-        category="speaker_mapping"
-        selectedValue={currentSelection.speakerMappingModel}
-        options={selectedEngineInfo?.speaker_mapping_models ?? []}
-        displayModels={mappingModels}
-        onSelect={(value) => updateEngineSelection({ speakerMappingModel: value })}
-        onDownload={(model) => void startDownload(model.category, model.engine, model.model)}
-        onDelete={(model) => void deleteModel(model.category, model.engine, model.model)}
-      />
-    </SettingsPage>
+    </>
   );
 }

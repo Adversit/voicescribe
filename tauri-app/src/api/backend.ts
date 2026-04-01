@@ -96,11 +96,21 @@ export async function listModels(): Promise<ModelStatus[]> {
   return response.json();
 }
 
-export async function downloadModel(category: string, engine: string, model: string): Promise<void> {
+export async function downloadModel(
+  category: string,
+  engine: string,
+  model: string,
+  token?: string,
+): Promise<void> {
   const response = await request(`${BASE_URL}/models/download`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ category, engine, model }).toString(),
+    body: new URLSearchParams({
+      category,
+      engine,
+      model,
+      ...(token ? { token } : {}),
+    }).toString(),
   });
   await ensureOk(response);
 }

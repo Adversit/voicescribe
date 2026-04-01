@@ -293,10 +293,25 @@
   - `/transcribe` 在 `enable_diarization=false` 时回显的 `diarization_model / speaker_mapping_model` 为 `null`
 - 备注：A7/A8/A9/A10/A11 已勾选；本轮为 mock 契约验证，不代表真实模型运行时全部完成
 
+### [Token-Backend] token 下载契约烟雾测试
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，`backend/server.py --mock --host 127.0.0.1 --port 8881`
+- 输入：
+  - `POST /models/download` with `category=diarization engine=diarization model=pyannote-3.1`
+  - `POST /models/download` with `category=diarization engine=diarization model=pyannote-3.1 token=dummy-test-token`
+- 结果：通过
+- 证据：
+  - 不带 token 时返回 HTTP `400`
+  - 带 token 时返回 `{"status":"started","category":"diarization","engine":"diarization","model":"pyannote-3.1"}`
+  - `/models` 中 `pyannote-3.1` 仍标记 `requires_token=true`、`downloadable=true`
+- 备注：验证的是后端 token 契约，不代表真实网络下载已经成功
+
 ## 11. 当前阻塞与待人工验收
 
-- A5 `Tauri` 新增凭据命令尚未实现，当前不能勾选
+- A5 `Tauri` 凭据命令已实现并通过编译，但还未做桌面端实际调用验收
 - A6 还未通过桌面端真实 `invoke` 链路验证扩展后的转录 payload
 - M1-M42 绝大多数 UI / 交互 / 真实模型能力项仍待人工验收
 - `3d-speaker` 与 `pyannote-3.1` 当前只进入目录和界面范围，运行时尚未正式接通
-- token 弹窗与 Windows Credential Manager 仍未实现，M20-M24、F5-F7 当前不能通过
+- token 弹窗与 Windows Credential Manager 已实现代码链，但 M20-M24、F5-F7 仍待桌面端手动验收

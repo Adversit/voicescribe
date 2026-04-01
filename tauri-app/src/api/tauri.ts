@@ -86,3 +86,28 @@ export async function transcribeAudio(payload: {
 export async function outputText(mode: string, text: string): Promise<void> {
   await invoke("output_text", { mode, text });
 }
+
+export async function getModelDownloadToken(
+  category: string,
+  engine: string,
+  model: string,
+): Promise<string | null> {
+  return invoke("get_model_download_token", { category, engine, model });
+}
+
+export async function saveModelDownloadToken(
+  category: string,
+  engine: string,
+  model: string,
+  token: string,
+): Promise<void> {
+  await invoke("save_model_download_token", { category, engine, model, token });
+}
+
+export async function deleteModelDownloadToken(
+  category: string,
+  engine: string,
+  model: string,
+): Promise<void> {
+  await invoke("delete_model_download_token", { category, engine, model });
+}

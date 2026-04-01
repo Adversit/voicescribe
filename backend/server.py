@@ -1062,6 +1062,7 @@ async def _download_hf_snapshot(
     repo_id: str,
     target_dir: Path,
     category: str = "asr",
+    token: Optional[str] = None,
 ) -> None:
     key = f"{category}:{_category_bucket(category, engine)}:{model_name}"
     state = model_downloads.setdefault(key, {})
@@ -1083,6 +1084,7 @@ async def _download_hf_snapshot(
             snapshot_download,
             repo_id=repo_id,
             local_dir=str(target_dir),
+            token=token,
         )
 
         size_bytes = _path_size(Path(local_dir))
@@ -1107,6 +1109,7 @@ async def _download_hf_file(
     filename: str,
     target_dir: Path,
     category: str = "asr",
+    token: Optional[str] = None,
 ) -> None:
     key = f"{category}:{_category_bucket(category, engine)}:{model_name}"
     state = model_downloads.setdefault(key, {})
@@ -1130,6 +1133,7 @@ async def _download_hf_file(
             repo_id=repo_id,
             filename=filename,
             local_dir=str(target_dir),
+            token=token,
         )
 
         size_bytes = _path_size(Path(local_file))
@@ -1332,6 +1336,7 @@ async def download_model(
                     spec["repo_id"],
                     _model_storage_path(engine, model, category="diarization"),
                     category="diarization",
+                    token=token,
                 )
             )
         else:

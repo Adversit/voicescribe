@@ -6,6 +6,9 @@ use commands::{
         cancel_recording, delete_audio_file, get_recording_status, start_recording, stop_recording,
     },
     backend::{backend_status, start_backend, stop_backend, transcribe},
+    credentials::{
+        delete_model_download_token, get_model_download_token, save_model_download_token,
+    },
     hotkey::{
         debug_hotkey_log, get_hotkey_display, register_hotkey_binding, resume_hotkey_runtime,
         suspend_hotkey_runtime, unregister_hotkey,
@@ -194,6 +197,9 @@ pub fn run() {
             delete_audio_file,
             get_recording_status,
             output_text,
+            get_model_download_token,
+            save_model_download_token,
+            delete_model_download_token,
             show_overlay,
             hide_overlay
         ])

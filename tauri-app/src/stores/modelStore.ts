@@ -5,7 +5,7 @@ import type { ModelCategory, ModelStatus } from "../types";
 interface ModelStore {
   models: ModelStatus[];
   refresh: () => Promise<void>;
-  startDownload: (category: ModelCategory, engine: string, model: string) => Promise<void>;
+  startDownload: (category: ModelCategory, engine: string, model: string, token?: string) => Promise<void>;
   deleteModel: (category: ModelCategory, engine: string, model: string) => Promise<void>;
 }
 
@@ -31,7 +31,7 @@ export const useModelStore = create<ModelStore>((set, get) => ({
       }, POLL_INTERVAL_MS);
     }
   },
-  startDownload: async (category, engine, model) => {
+  startDownload: async (category, engine, model, token) => {
     set((state) => ({
       models: state.models.map((item) =>
         item.category === category && item.engine === engine && item.model === model
@@ -44,8 +44,11 @@ export const useModelStore = create<ModelStore>((set, get) => ({
           : item,
       ),
     }));
-    await backendApi.downloadModel(category, engine, model);
-    await get().refresh();
+    try {
+      await backendApi.downloadModel(category, engine, model, token);
+    } finally {
+      await get().refresh();
+    }
   },
   deleteModel: async (category, engine, model) => {
     await backendApi.deleteModel(category, engine, model);
