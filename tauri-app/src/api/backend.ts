@@ -66,7 +66,11 @@ export async function loadEngine(engine: string, model: string): Promise<void> {
   const response = await request(`${BASE_URL}/load`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ asr_engine: engine, asr_model: model }).toString(),
+    body: new URLSearchParams({
+      asr_engine: engine,
+      asr_model: model,
+      load_source: "manual_preload",
+    }).toString(),
   });
   await ensureOk(response);
 }
@@ -85,6 +89,7 @@ export async function loadEngineSelection(
       asr_model: asrModel,
       diarization_model: diarizationModel,
       speaker_mapping_model: speakerMappingModel,
+      load_source: "manual_preload",
     }).toString(),
   });
   await ensureOk(response);

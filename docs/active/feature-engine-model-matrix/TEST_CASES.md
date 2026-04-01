@@ -181,7 +181,7 @@
 ### 6.5 不兼容组合
 
 - [ ] F10 前端尽量在选择阶段阻止不兼容组合
-- [ ] F11 若仍收到不兼容请求，后端明确拒绝执行
+- [x] F11 若仍收到不兼容请求，后端明确拒绝执行
 
 ### 6.6 运行时环境缺失
 
@@ -308,6 +308,33 @@
   - `/models` 中 `pyannote-3.1` 仍标记 `requires_token=true`、`downloadable=true`
 - 备注：验证的是后端 token 契约，不代表真实网络下载已经成功
 
+### [Load-Source] 手动预加载与自动加载日志区分
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，`python -u backend/server.py --mock --host 127.0.0.1 --port 8885`
+- 输入：
+  - `POST /load` with `load_source=manual_preload`
+  - `POST /transcribe` with `enable_diarization=true`
+- 结果：通过
+- 证据：
+  - 日志命中 `[Load:manual_preload] Mock load engine=funasr model=seaco-paraformer ...`
+  - 日志命中 `[Load:auto_on_demand] Mock load engine=whisper model=large-v3 ...`
+- 备注：本轮验证的是日志区分语义；真实非 mock 运行时仍待人工验收
+
+### [Compat-Backend] 不兼容组合后端拒绝执行
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，`python -u backend/server.py --mock --host 127.0.0.1 --port 8886`
+- 输入：
+  - `POST /load` with `asr_engine=whisper asr_model=large-v3 diarization_model=funasr_builtin speaker_mapping_model=campp`
+- 结果：通过
+- 证据：
+  - HTTP 状态码为 `400`
+  - 响应体为 `{"detail":"Incompatible diarization model for engine whisper: funasr_builtin"}`
+- 备注：F11 已勾选；F10 仍待前端选择阶段的人工验收
+
 ## 11. 当前阻塞与待人工验收
 
 - A5 `Tauri` 凭据命令已实现并通过编译，但还未做桌面端实际调用验收
@@ -315,3 +342,4 @@
 - M1-M42 绝大多数 UI / 交互 / 真实模型能力项仍待人工验收
 - `3d-speaker` 与 `pyannote-3.1` 当前只进入目录和界面范围，运行时尚未正式接通
 - token 弹窗与 Windows Credential Manager 已实现代码链，但 M20-M24、F5-F7 仍待桌面端手动验收
+- 失效组合标红逻辑已实现代码链，但 T38 仍待页面人工确认视觉表现

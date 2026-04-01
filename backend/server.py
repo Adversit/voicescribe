@@ -320,6 +320,26 @@ def _find_model_definition(category: str, engine: str, model: str) -> Optional[d
             return spec
     return None
 
+
+def _validate_engine_selection(
+    engine: str,
+    asr_model: str,
+    diarization_model: Optional[str],
+    speaker_mapping_model: Optional[str],
+) -> None:
+    engine_spec = ENGINE_CATALOG.get(engine)
+    if not engine_spec:
+        raise HTTPException(400, f"Unknown engine: {engine}")
+
+    if asr_model not in engine_spec.get("asr_models", []):
+        raise HTTPException(400, f"Incompatible ASR model for engine {engine}: {asr_model}")
+
+    if diarization_model and diarization_model not in engine_spec.get("diarization_models", []):
+        raise HTTPException(400, f"Incompatible diarization model for engine {engine}: {diarization_model}")
+
+    if speaker_mapping_model and speaker_mapping_model not in engine_spec.get("speaker_mapping_models", []):
+        raise HTTPException(400, f"Incompatible speaker mapping model for engine {engine}: {speaker_mapping_model}")
+
 def _load_registry() -> dict:
     try:
         if MODEL_REGISTRY_PATH.exists():
@@ -709,6 +729,7 @@ async def ensure_engine_loaded(
     enable_diarization: bool = False,
     diarization_model: Optional[str] = None,
     speaker_mapping_model: Optional[str] = None,
+    load_source: str = "auto_on_demand",
 ):
     global engines
 
@@ -721,11 +742,14 @@ async def ensure_engine_loaded(
     ):
         if engine != "funasr" or not enable_diarization or existing.get("diarization", False):
             print(
-                f"[Load] Reusing engine={engine} model={model} diarization={existing.get('diarization', False)}"
+                f"[Load:{load_source}] Reusing engine={engine} model={model} diarization={existing.get('diarization', False)}"
             )
             return existing
 
     if MOCK_MODE:
+        print(
+            f"[Load:{load_source}] Mock load engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model}"
+        )
         engines[engine] = {
             "engine": None,
             "model": model,
@@ -736,7 +760,7 @@ async def ensure_engine_loaded(
         return engines[engine]
 
     print(
-        f"[Load] Loading engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model}"
+        f"[Load:{load_source}] Loading engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model}"
     )
 
     if engine == "whisper":
@@ -812,6 +836,7 @@ async def ensure_engine_loaded(
         raise HTTPException(400, f"Unknown engine: {engine}")
 
     print(f"[Load] Loaded engine={engine} model={model} runtime={engines[engine]}")
+    print(f"[Load:{load_source}] Loaded engine={engine} model={model}")
     return engines[engine]
 
 
@@ -1472,6 +1497,7 @@ async def load_engine(
     asr_model: Optional[str] = Form(None),
     diarization_model: Optional[str] = Form(None),
     speaker_mapping_model: Optional[str] = Form(None),
+    load_source: Optional[str] = Form(None),
     enable_diarization: Optional[bool] = Form(None),
     request: Request = None,
 ):
@@ -1483,8 +1509,10 @@ async def load_engine(
             model = model or request.query_params.get("model") or request.query_params.get("asr_model")
             diarization_model = diarization_model or request.query_params.get("diarization_model")
             speaker_mapping_model = speaker_mapping_model or request.query_params.get("speaker_mapping_model")
+            load_source = load_source or request.query_params.get("load_source")
     if engine is None or model is None:
         raise HTTPException(422, "Missing engine/model")
+    _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
 
     await ensure_engine_loaded(
         engine,
@@ -1492,6 +1520,7 @@ async def load_engine(
         bool(enable_diarization),
         diarization_model=diarization_model,
         speaker_mapping_model=speaker_mapping_model,
+        load_source=load_source or "manual_preload",
     )
     return {
         "status": "loaded",
@@ -1551,11 +1580,20 @@ async def transcribe(
     try:
         engine = asr_engine or engine
         model = asr_model or model
+        _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
         print(
             f"[Transcribe] Request received filename={audio.filename or ''} engine={engine} model={model} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} language={language} diarization={enable_diarization} ai_refine={enable_ai_refine} size_bytes={len(content)}"
         )
 
         if MOCK_MODE:
+            await ensure_engine_loaded(
+                engine,
+                model,
+                bool(enable_diarization),
+                diarization_model=diarization_model,
+                speaker_mapping_model=speaker_mapping_model,
+                load_source="auto_on_demand",
+            )
             result = mock_transcribe(tmp_path, language)
             if enable_ai_refine and AI_REFINE_AVAILABLE:
                 refiner = AIRefiner()
@@ -1579,6 +1617,7 @@ async def transcribe(
             bool(enable_diarization),
             diarization_model=diarization_model,
             speaker_mapping_model=speaker_mapping_model,
+            load_source="auto_on_demand",
         )
         eng = entry["engine"]
 

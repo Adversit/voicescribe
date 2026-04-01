@@ -109,6 +109,7 @@ type ModelSectionProps = {
   description: string;
   category: ModelCategory;
   selectedValue: string;
+  invalidReason?: string | null;
   options: string[];
   displayModels: ModelStatus[];
   onSelect: (value: string) => void;
@@ -122,6 +123,7 @@ function ModelSection(props: ModelSectionProps) {
     description,
     category,
     selectedValue,
+    invalidReason,
     options,
     displayModels,
     onSelect,
@@ -139,7 +141,7 @@ function ModelSection(props: ModelSectionProps) {
         <select
           value={selectedValue}
           onChange={(event) => onSelect(event.target.value)}
-          className={selectClassName}
+          className={`${selectClassName} ${invalidReason ? "border-[#c53030] text-[#9b2c2c]" : ""}`}
         >
           {options.map((model) => (
             <option key={model} value={model}>
@@ -147,20 +149,35 @@ function ModelSection(props: ModelSectionProps) {
             </option>
           ))}
         </select>
+        {invalidReason ? <div className="mt-2 text-xs text-[#9b2c2c]">当前选择失效：{invalidReason}</div> : null}
       </SettingsField>
 
       <div className="mt-4 list-scroll space-y-2">
         {displayModels.map((model) => (
-          <div key={`${category}-${model.engine}-${model.model}`} className="rounded-[12px] border border-line bg-panel px-3.5 py-3">
+          <div
+            key={`${category}-${model.engine}-${model.model}`}
+            className={`rounded-[12px] bg-panel px-3.5 py-3 ${
+              model.model === selectedValue && invalidReason
+                ? "border border-[#c53030] bg-[#fff5f5]"
+                : "border border-line"
+            }`}
+          >
             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-ink">{model.display_name}</div>
-                <div className="mt-1 text-xs text-ink/58">状态：{renderStatus(model)}</div>
-                <div className="mt-0.5 text-xs text-ink/46">
+                <div className={`truncate text-sm font-semibold ${model.model === selectedValue && invalidReason ? "text-[#9b2c2c]" : "text-ink"}`}>
+                  {model.display_name}
+                </div>
+                <div className={`mt-1 text-xs ${model.model === selectedValue && invalidReason ? "text-[#9b2c2c]" : "text-ink/58"}`}>
+                  状态：{renderStatus(model)}
+                </div>
+                <div className={`mt-0.5 text-xs ${model.model === selectedValue && invalidReason ? "text-[#9b2c2c]" : "text-ink/46"}`}>
                   大小：{formatBytes(model.size_bytes)} · 已下载：{formatBytes(model.downloaded_bytes)}
                 </div>
                 {model.requires_token ? <div className="mt-1 text-xs text-ink/46">下载需要 token</div> : null}
                 {model.error ? <div className="mt-1 text-xs text-[#9c4221]">{model.error}</div> : null}
+                {model.model === selectedValue && invalidReason ? (
+                  <div className="mt-1 text-xs text-[#9b2c2c]">当前选择失效，需要手动修复或重新选择。</div>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
                 {model.available && model.downloadable ? (
@@ -212,6 +229,43 @@ function looksLikeCredentialError(message: string | null | undefined) {
     "401",
     "403",
   ].some((keyword) => lowered.includes(keyword));
+}
+
+function getSelectionInvalidReason(
+  selectedValue: string,
+  options: string[],
+  displayModels: ModelStatus[],
+): string | null {
+  if (options.length === 0 && displayModels.length === 0) {
+    return null;
+  }
+
+  if (!selectedValue) {
+    return "未选择模型";
+  }
+
+  if (!options.includes(selectedValue)) {
+    return "当前引擎下不再兼容该模型";
+  }
+
+  const selectedModel = displayModels.find((item) => item.model === selectedValue);
+  if (!selectedModel) {
+    return "模型目录中已不存在该项";
+  }
+
+  if (selectedModel.error && !selectedModel.downloading) {
+    return selectedModel.error;
+  }
+
+  if (!selectedModel.available && selectedModel.downloadable) {
+    return "模型未下载或已被删除";
+  }
+
+  if (!selectedModel.available && !selectedModel.downloadable) {
+    return "当前运行环境不可用";
+  }
+
+  return null;
 }
 
 export function EngineSettings() {
@@ -274,6 +328,27 @@ export function EngineSettings() {
       },
     });
   };
+
+  const asrInvalidReason = getSelectionInvalidReason(
+    currentSelection.asrModel,
+    selectedEngineInfo?.asr_models ?? [],
+    asrModels,
+  );
+  const diarizationInvalidReason = getSelectionInvalidReason(
+    currentSelection.diarizationModel,
+    selectedEngineInfo?.diarization_models ?? [],
+    diarizationModels,
+  );
+  const mappingInvalidReason = getSelectionInvalidReason(
+    currentSelection.speakerMappingModel,
+    selectedEngineInfo?.speaker_mapping_models ?? [],
+    mappingModels,
+  );
+  const comboInvalidReasons = [
+    asrInvalidReason ? `ASR：${asrInvalidReason}` : null,
+    diarizationInvalidReason ? `分离：${diarizationInvalidReason}` : null,
+    mappingInvalidReason ? `映射：${mappingInvalidReason}` : null,
+  ].filter(Boolean) as string[];
 
   const openTokenPrompt = (model: ModelStatus, token: string, error: string | null, hasStoredToken: boolean) => {
     setTokenPrompt({
@@ -455,8 +530,21 @@ export function EngineSettings() {
             </SettingsField>
 
             <SettingsField label="当前默认组合">
-              <div className="rounded-[12px] border border-line bg-panel px-3 py-3 text-sm text-ink/70">
+              <div
+                className={`rounded-[12px] px-3 py-3 text-sm ${
+                  comboInvalidReasons.length > 0
+                    ? "border border-[#c53030] bg-[#fff5f5] text-[#9b2c2c]"
+                    : "border border-line bg-panel text-ink/70"
+                }`}
+              >
                 {currentSelection.asrModel} / {currentSelection.diarizationModel} / {currentSelection.speakerMappingModel}
+                {comboInvalidReasons.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-xs">
+                    {comboInvalidReasons.map((reason) => (
+                      <div key={reason}>{reason}</div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </SettingsField>
           </div>
@@ -467,6 +555,7 @@ export function EngineSettings() {
           description="当前引擎下的可用 ASR 模型。"
           category="asr"
           selectedValue={currentSelection.asrModel}
+          invalidReason={asrInvalidReason}
           options={selectedEngineInfo?.asr_models ?? []}
           displayModels={asrModels}
           onSelect={(value) => updateEngineSelection({ asrModel: value })}
@@ -479,6 +568,7 @@ export function EngineSettings() {
           description="只显示当前引擎兼容的分离模型。"
           category="diarization"
           selectedValue={currentSelection.diarizationModel}
+          invalidReason={diarizationInvalidReason}
           options={selectedEngineInfo?.diarization_models ?? []}
           displayModels={diarizationModels}
           onSelect={(value) => updateEngineSelection({ diarizationModel: value })}
@@ -491,6 +581,7 @@ export function EngineSettings() {
           description="只显示当前引擎兼容的映射 / 识别模型。"
           category="speaker_mapping"
           selectedValue={currentSelection.speakerMappingModel}
+          invalidReason={mappingInvalidReason}
           options={selectedEngineInfo?.speaker_mapping_models ?? []}
           displayModels={mappingModels}
           onSelect={(value) => updateEngineSelection({ speakerMappingModel: value })}
