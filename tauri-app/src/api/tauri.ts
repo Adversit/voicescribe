@@ -61,8 +61,10 @@ export async function deleteAudioFile(path: string): Promise<void> {
 
 export async function transcribeAudio(payload: {
   audioPath: string;
-  engine: string;
-  model: string;
+  asrEngine: string;
+  asrModel: string;
+  diarizationModel: string | null;
+  speakerMappingModel: string | null;
   language: string;
   enableDiarization: boolean;
   hotwords: string;
@@ -70,8 +72,10 @@ export async function transcribeAudio(payload: {
 }): Promise<TranscribeResult> {
   return invoke("transcribe", {
     audioPath: payload.audioPath,
-    engine: payload.engine,
-    model: payload.model,
+    asrEngine: payload.asrEngine,
+    asrModel: payload.asrModel,
+    diarizationModel: payload.diarizationModel,
+    speakerMappingModel: payload.speakerMappingModel,
     language: payload.language,
     enableDiarization: payload.enableDiarization,
     hotwords: payload.hotwords,

@@ -1,12 +1,12 @@
 import { create } from "zustand";
 import * as backendApi from "../api/backend";
-import type { ModelStatus } from "../types";
+import type { ModelCategory, ModelStatus } from "../types";
 
 interface ModelStore {
   models: ModelStatus[];
   refresh: () => Promise<void>;
-  startDownload: (engine: string, model: string) => Promise<void>;
-  deleteModel: (engine: string, model: string) => Promise<void>;
+  startDownload: (category: ModelCategory, engine: string, model: string) => Promise<void>;
+  deleteModel: (category: ModelCategory, engine: string, model: string) => Promise<void>;
 }
 
 const POLL_INTERVAL_MS = 1500;
@@ -31,10 +31,10 @@ export const useModelStore = create<ModelStore>((set, get) => ({
       }, POLL_INTERVAL_MS);
     }
   },
-  startDownload: async (engine, model) => {
+  startDownload: async (category, engine, model) => {
     set((state) => ({
       models: state.models.map((item) =>
-        item.engine === engine && item.model === model
+        item.category === category && item.engine === engine && item.model === model
           ? {
               ...item,
               downloading: true,
@@ -44,11 +44,11 @@ export const useModelStore = create<ModelStore>((set, get) => ({
           : item,
       ),
     }));
-    await backendApi.downloadModel(engine, model);
+    await backendApi.downloadModel(category, engine, model);
     await get().refresh();
   },
-  deleteModel: async (engine, model) => {
-    await backendApi.deleteModel(engine, model);
+  deleteModel: async (category, engine, model) => {
+    await backendApi.deleteModel(category, engine, model);
     await get().refresh();
   },
 }));

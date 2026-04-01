@@ -66,7 +66,26 @@ export async function loadEngine(engine: string, model: string): Promise<void> {
   const response = await request(`${BASE_URL}/load`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ engine, model }).toString(),
+    body: new URLSearchParams({ asr_engine: engine, asr_model: model }).toString(),
+  });
+  await ensureOk(response);
+}
+
+export async function loadEngineSelection(
+  asrEngine: string,
+  asrModel: string,
+  diarizationModel: string,
+  speakerMappingModel: string,
+): Promise<void> {
+  const response = await request(`${BASE_URL}/load`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      asr_engine: asrEngine,
+      asr_model: asrModel,
+      diarization_model: diarizationModel,
+      speaker_mapping_model: speakerMappingModel,
+    }).toString(),
   });
   await ensureOk(response);
 }
@@ -77,20 +96,20 @@ export async function listModels(): Promise<ModelStatus[]> {
   return response.json();
 }
 
-export async function downloadModel(engine: string, model: string): Promise<void> {
+export async function downloadModel(category: string, engine: string, model: string): Promise<void> {
   const response = await request(`${BASE_URL}/models/download`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ engine, model }).toString(),
+    body: new URLSearchParams({ category, engine, model }).toString(),
   });
   await ensureOk(response);
 }
 
-export async function deleteModel(engine: string, model: string): Promise<void> {
+export async function deleteModel(category: string, engine: string, model: string): Promise<void> {
   const response = await request(`${BASE_URL}/models/delete`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ engine, model }).toString(),
+    body: new URLSearchParams({ category, engine, model }).toString(),
   });
   await ensureOk(response);
 }

@@ -6,6 +6,8 @@ import { getAutostartEnabled, setAutostartEnabled } from "../lib/autostart";
 import type {
   AppSettings,
   BackendRuntimeStatus,
+  EngineSelection,
+  EngineSelections,
   EngineInfo,
   HistoryRecord,
   HotkeyBinding,
@@ -49,9 +51,37 @@ const defaultHotkeyBinding: HotkeyBinding = {
   display: "\u53f3 Alt",
 };
 
+const defaultEngineSelections: EngineSelections = {
+  funasr: {
+    asrModel: "seaco-paraformer",
+    diarizationModel: "funasr_builtin",
+    speakerMappingModel: "campp",
+  },
+  qwen3_asr: {
+    asrModel: "qwen3-asr-1.7b",
+    diarizationModel: "3d-speaker",
+    speakerMappingModel: "campp",
+  },
+  whisper: {
+    asrModel: "large-v3",
+    diarizationModel: "3d-speaker",
+    speakerMappingModel: "campp",
+  },
+  whispercpp: {
+    asrModel: "base",
+    diarizationModel: "3d-speaker",
+    speakerMappingModel: "campp",
+  },
+  parakeet: {
+    asrModel: "parakeet-ctc-1.1b",
+    diarizationModel: "3d-speaker",
+    speakerMappingModel: "campp",
+  },
+};
+
 const defaultSettings: AppSettings = {
   selectedEngine: "funasr",
-  selectedModel: "seaco-paraformer",
+  engineSelections: defaultEngineSelections,
   language: "zh",
   enableDiarization: false,
   outputMode: "directInput",
@@ -212,8 +242,58 @@ function normalizeHotkeyBinding(value: unknown): HotkeyBinding {
   return defaultHotkeyBinding;
 }
 
+function cloneEngineSelections(source: EngineSelections): EngineSelections {
+  return Object.fromEntries(
+    Object.entries(source).map(([engine, selection]) => [engine, { ...selection }]),
+  );
+}
+
+function mergeEngineSelections(value: Partial<EngineSelections> | undefined): EngineSelections {
+  const next = cloneEngineSelections(defaultEngineSelections);
+  if (!value) {
+    return next;
+  }
+
+  for (const [engine, selection] of Object.entries(value)) {
+    if (!selection) {
+      continue;
+    }
+    next[engine] = {
+      ...(next[engine] ?? defaultEngineSelections.funasr),
+      ...selection,
+    };
+  }
+  return next;
+}
+
+function getSelectionForEngine(settings: Pick<AppSettings, "selectedEngine" | "engineSelections">): EngineSelection {
+  return settings.engineSelections[settings.selectedEngine]
+    ?? defaultEngineSelections[settings.selectedEngine]
+    ?? defaultEngineSelections.funasr;
+}
+
 function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
-  const next = { ...defaultSettings, ...(value ?? {}) };
+  const partial = value ?? {};
+  const next = {
+    ...defaultSettings,
+    ...partial,
+    engineSelections: mergeEngineSelections(partial.engineSelections),
+  };
+
+  const legacySelectedModel = (partial as Partial<AppSettings> & { selectedModel?: string }).selectedModel;
+  if (legacySelectedModel) {
+    const selectedEngine = partial.selectedEngine ?? defaultSettings.selectedEngine;
+    next.engineSelections[selectedEngine] = {
+      ...(next.engineSelections[selectedEngine] ?? defaultEngineSelections.funasr),
+      asrModel: legacySelectedModel,
+    };
+  }
+
+  if (!next.engineSelections[next.selectedEngine]) {
+    next.engineSelections[next.selectedEngine] =
+      defaultEngineSelections[next.selectedEngine] ?? defaultEngineSelections.funasr;
+  }
+
   next.hotkeyBinding = normalizeHotkeyBinding(value?.hotkeyBinding);
   return next;
 }
@@ -298,6 +378,10 @@ function createTranscription(result: TranscribeResult, audioPath: string | null)
     segments,
     engine: result.engine,
     model: result.model,
+    asrEngine: result.asr_engine,
+    asrModel: result.asr_model,
+    diarizationModel: result.diarization_model,
+    speakerMappingModel: result.speaker_mapping_model,
     audioPath,
   };
 }
@@ -527,11 +611,34 @@ export const useAppStore = create<AppStore>((set, get) => ({
       backendApi.listEngines(),
       tauriApi.backendStatus().catch(() => null),
     ]);
+    const currentSettings = get().settings;
+    const nextSelectedEngine = engines.some((engine) => engine.name === currentSettings.selectedEngine)
+      ? currentSettings.selectedEngine
+      : (engines[0]?.name ?? currentSettings.selectedEngine);
+    const nextSelections = cloneEngineSelections(currentSettings.engineSelections);
+    for (const engine of engines) {
+      nextSelections[engine.name] = nextSelections[engine.name]
+        ?? engine.default_selection
+        ?? defaultEngineSelections[engine.name]
+        ?? defaultEngineSelections.funasr;
+    }
     set({
       backendConnected: true,
       availableEngines: engines,
       backendRuntime: runtime,
+      settings: {
+        ...currentSettings,
+        selectedEngine: nextSelectedEngine,
+        engineSelections: nextSelections,
+      },
     });
+    const persistedSettings = {
+      ...currentSettings,
+      selectedEngine: nextSelectedEngine,
+      engineSelections: nextSelections,
+    };
+    persistBrowserSettings(persistedSettings);
+    void persistSettings(persistedSettings).catch(() => undefined);
   },
   startBackend: async () => {
     if (startBackendPromise) {
@@ -555,9 +662,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ backendRuntime: runtime, backendConnected: false, availableEngines: [] });
   },
   loadSelectedEngine: async () => {
-    const { selectedEngine, selectedModel } = get().settings;
-    await backendApi.loadEngine(selectedEngine, selectedModel);
-    set({ toast: `${selectedEngine} / ${selectedModel} 已加载` });
+    const settings = get().settings;
+    const selection = getSelectionForEngine(settings);
+    await backendApi.loadEngineSelection(
+      settings.selectedEngine,
+      selection.asrModel,
+      selection.diarizationModel,
+      selection.speakerMappingModel,
+    );
+    set({
+      toast: `${settings.selectedEngine} / ${selection.asrModel} 已加载`,
+    });
     await get().checkConnection();
   },
   refreshSpeakers: async () => {

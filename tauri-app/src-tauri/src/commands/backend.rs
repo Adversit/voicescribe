@@ -50,6 +50,10 @@ pub struct TranscribeResult {
     pub duration: f64,
     pub engine: String,
     pub model: String,
+    pub asr_engine: String,
+    pub asr_model: String,
+    pub diarization_model: Option<String>,
+    pub speaker_mapping_model: Option<String>,
 }
 
 fn dev_backend_dir() -> PathBuf {
@@ -829,8 +833,10 @@ pub fn backend_status(
 #[tauri::command]
 pub async fn transcribe(
     audio_path: String,
-    engine: String,
-    model: String,
+    asr_engine: String,
+    asr_model: String,
+    diarization_model: Option<String>,
+    speaker_mapping_model: Option<String>,
     language: String,
     enable_diarization: bool,
     hotwords: String,
@@ -844,27 +850,40 @@ pub async fn transcribe(
     let mut last_error = String::from("transcribe failed");
 
     log_hotkey(format!(
-        "backend transcribe request engine={} model={} diarization={} ai_refine={} audio_path={}",
-        engine, model, enable_diarization, enable_ai_refine, audio_path
+        "backend transcribe request engine={} model={} diarization_model={} speaker_mapping_model={} diarization={} ai_refine={} audio_path={}",
+        asr_engine,
+        asr_model,
+        diarization_model.as_deref().unwrap_or("none"),
+        speaker_mapping_model.as_deref().unwrap_or("none"),
+        enable_diarization,
+        enable_ai_refine,
+        audio_path
     ));
 
     for attempt in 1..=30 {
         log_hotkey(format!(
             "backend transcribe attempt={} engine={} model={}",
-            attempt, engine, model
+            attempt, asr_engine, asr_model
         ));
 
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .part(
                 "audio",
                 reqwest::multipart::Part::bytes(file.clone()).file_name("recording.wav"),
             )
-            .text("engine", engine.clone())
-            .text("model", model.clone())
+            .text("asr_engine", asr_engine.clone())
+            .text("asr_model", asr_model.clone())
             .text("language", language.clone())
             .text("enable_diarization", enable_diarization.to_string())
             .text("hotwords", hotwords.clone())
             .text("enable_ai_refine", enable_ai_refine.to_string());
+
+        if let Some(value) = diarization_model.clone() {
+            form = form.text("diarization_model", value);
+        }
+        if let Some(value) = speaker_mapping_model.clone() {
+            form = form.text("speaker_mapping_model", value);
+        }
 
         match client
             .post(format!("{BASE_URL}/transcribe"))

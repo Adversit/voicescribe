@@ -57,6 +57,8 @@ function buildHistoryRecord(payload: {
   duration: number;
   engine: string;
   model: string;
+  diarizationModel: string | null;
+  speakerMappingModel: string | null;
   speakerEntries: HistorySpeakerEntry[];
   summary?: string | null;
   retainAudio: boolean;
@@ -70,6 +72,10 @@ function buildHistoryRecord(payload: {
     duration: payload.duration,
     engine: payload.engine,
     model: payload.model,
+    asr_engine: payload.engine,
+    asr_model: payload.model,
+    diarization_model: payload.diarizationModel,
+    speaker_mapping_model: payload.speakerMappingModel,
     speaker_entries: payload.speakerEntries,
     summary: payload.summary ?? null,
     retain_audio: payload.retainAudio,
@@ -86,8 +92,10 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
     mode: "non-stream",
     text: result.text,
     duration: result.duration,
-    engine: result.engine,
-    model: result.model,
+    engine: result.asr_engine,
+    model: result.asr_model,
+    diarizationModel: result.diarization_model,
+    speakerMappingModel: result.speaker_mapping_model,
     speakerEntries: createSpeakerEntries(result),
     retainAudio: settings.retainAudio,
     audioPath: retainedAudioPath,
@@ -104,8 +112,10 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
       mode: "stream",
       text: streamText,
       duration: result.duration,
-      engine: result.engine,
-      model: result.model,
+      engine: result.asr_engine,
+      model: result.asr_model,
+      diarizationModel: result.diarization_model,
+      speakerMappingModel: result.speaker_mapping_model,
       speakerEntries: realtime.entries.map((entry) => ({
         speaker: entry.speaker,
         text: entry.text,
@@ -164,10 +174,11 @@ export async function beginRecordingSession() {
 export async function finishRecordingSession() {
   const store = useAppStore.getState();
   const settings = store.settings;
+  const activeSelection = settings.engineSelections[settings.selectedEngine];
   const minRecordingDurationMs = MIN_RECORDING_DURATION_MS_BY_ENGINE[settings.selectedEngine] ?? 0;
 
   await debugHotkeyLog(
-    `finishRecordingSession start engine=${settings.selectedEngine} model=${settings.selectedModel}`,
+    `finishRecordingSession start engine=${settings.selectedEngine} model=${activeSelection?.asrModel ?? "unknown"}`,
   ).catch(() => undefined);
 
   const status = minRecordingDurationMs > 0
@@ -213,13 +224,15 @@ export async function finishRecordingSession() {
     }
 
     await debugHotkeyLog(
-      `finishRecordingSession transcribeAudio start engine=${settings.selectedEngine} model=${settings.selectedModel}`,
+      `finishRecordingSession transcribeAudio start engine=${settings.selectedEngine} model=${activeSelection?.asrModel ?? "unknown"}`,
     ).catch(() => undefined);
 
     const result = await transcribeAudio({
       audioPath,
-      engine: settings.selectedEngine,
-      model: settings.selectedModel,
+      asrEngine: settings.selectedEngine,
+      asrModel: activeSelection?.asrModel ?? "",
+      diarizationModel: settings.enableDiarization ? (activeSelection?.diarizationModel ?? null) : null,
+      speakerMappingModel: settings.enableDiarization ? (activeSelection?.speakerMappingModel ?? null) : null,
       language: settings.language,
       enableDiarization: settings.enableDiarization,
       hotwords: settings.hotwords,

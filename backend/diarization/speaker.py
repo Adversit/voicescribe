@@ -17,6 +17,16 @@ from runtime_probe import prepare_windows_runtime
 class SpeakerDiarizer:
     """说话人分离与识别（基于 FunASR）"""
 
+    DIARIZATION_MODEL_MAP = {
+        "campplus-diarization": "iic/speech_campplus_speaker-diarization_common",
+        "sond-diarization": "damo/speech_diarization_sond-zh-cn-alimeeting-16k-n16k4-pytorch",
+    }
+
+    SPEAKER_VERIFICATION_MODEL_MAP = {
+        "campp": "damo/speech_campplus_sv_zh-cn_16k-common",
+        "eres2netv2": "iic/speech_eres2netv2_sv_zh-cn_16k-common",
+    }
+
     def __init__(self, data_dir: str = None):
         """
         Args:
@@ -102,13 +112,32 @@ class SpeakerDiarizer:
         sf.write(tmp_file, resampled, 16000)
         return tmp_file, tmp_file
 
-    def ensure_speaker_verification_loaded(self):
-        if self.sv_model is not None:
+    def _resolve_speaker_verification_model_id(self, logical_model: Optional[str]) -> str:
+        if not logical_model:
+            return os.environ.get(
+                "VOICESCRIBE_SPEAKER_VERIFICATION_MODEL",
+                self.SPEAKER_VERIFICATION_MODEL_MAP["campp"],
+            )
+        return self.SPEAKER_VERIFICATION_MODEL_MAP.get(logical_model, logical_model)
+
+    def _resolve_diarization_model_id(self, logical_model: Optional[str]) -> str:
+        if not logical_model:
+            return os.environ.get(
+                "VOICESCRIBE_DIARIZATION_MODEL",
+                self.DIARIZATION_MODEL_MAP["campplus-diarization"],
+            )
+        if logical_model in {"3d-speaker", "pyannote-3.1"}:
+            raise RuntimeError(f"Diarization model '{logical_model}' is not wired into runtime yet")
+        return self.DIARIZATION_MODEL_MAP.get(logical_model, logical_model)
+
+    def ensure_speaker_verification_loaded(self, logical_model: Optional[str] = None):
+        target_model_id = self._resolve_speaker_verification_model_id(logical_model)
+        if self.sv_model is not None and self.sv_model_id == target_model_id:
             print(f"[Speaker] Speaker verification already loaded: {self.sv_model_id}")
             return self.sv_model
 
         AutoModel = self._import_auto_model()
-        model_id = os.environ.get("VOICESCRIBE_SPEAKER_VERIFICATION_MODEL", "damo/speech_campplus_sv_zh-cn_16k-common")
+        model_id = target_model_id
         model_path = resolve_modelscope_model_dir(model_id)
         print(f"[Speaker] Loading speaker verification model: {model_id} -> {model_path}...")
         self.sv_model = AutoModel(
@@ -119,21 +148,16 @@ class SpeakerDiarizer:
         print(f"[Speaker] Speaker verification model loaded: {model_id}")
         return self.sv_model
 
-    def ensure_diarization_loaded(self):
-        if self.diarization_model is not None:
+    def ensure_diarization_loaded(self, logical_model: Optional[str] = None):
+        target_model_id = self._resolve_diarization_model_id(logical_model)
+        if self.diarization_model is not None and self.diarization_model_id == target_model_id:
             print(
                 f"[Speaker] Diarization model already loaded: {self.diarization_model_id} ({self.diarization_backend})"
             )
             return self.diarization_model
 
         pipeline_factory = self._import_modelscope_pipeline()
-        diarization_candidates = []
-        override = os.environ.get("VOICESCRIBE_DIARIZATION_MODEL")
-        if override:
-            diarization_candidates.append(override)
-        diarization_candidates.extend([
-            "iic/speech_campplus_speaker-diarization_common",
-        ])
+        diarization_candidates = [target_model_id]
 
         last_error = None
         for model_id in diarization_candidates:
@@ -161,11 +185,16 @@ class SpeakerDiarizer:
             raise RuntimeError(f"Failed to load diarization pipeline: {last_error}")
         raise RuntimeError("No diarization model candidates available")
 
-    def load(self, load_diarization: bool = True):
+    def load(
+        self,
+        load_diarization: bool = True,
+        diarization_model: Optional[str] = None,
+        speaker_verification_model: Optional[str] = None,
+    ):
         """Load speaker models required by the current action."""
-        self.ensure_speaker_verification_loaded()
+        self.ensure_speaker_verification_loaded(speaker_verification_model)
         if load_diarization:
-            self.ensure_diarization_loaded()
+            self.ensure_diarization_loaded(diarization_model)
         print(
             f"[Speaker] Speaker models ready: sv={self.sv_model_id}, diarization={self.diarization_model_id}, backend={self.diarization_backend}"
         )

@@ -63,23 +63,23 @@
 
 ### 4.1 前端检查
 
-- [ ] A1 前端类型检查通过
-- [ ] A2 前端构建通过
-- [ ] A3 引擎页相关代码无明显类型回退到 `any`
+- [x] A1 前端类型检查通过
+- [x] A2 前端构建通过
+- [x] A3 引擎页相关代码无明显类型回退到 `any`
 
 ### 4.2 Rust / Tauri 检查
 
-- [ ] A4 Rust 编译通过
+- [x] A4 Rust 编译通过
 - [ ] A5 Tauri 命令注册完整，新增凭据命令可调用
 - [ ] A6 桌面端转录命令能接收扩展后的完整 payload
 
 ### 4.3 后端检查
 
-- [ ] A7 后端启动通过
-- [ ] A8 `/engines` 返回新目录结构
-- [ ] A9 `/models` 返回三类模型统一状态
-- [ ] A10 `/load` 能接收完整模型组合
-- [ ] A11 `/transcribe` 能接收完整模型组合
+- [x] A7 后端启动通过
+- [x] A8 `/engines` 返回新目录结构
+- [x] A9 `/models` 返回三类模型统一状态
+- [x] A10 `/load` 能接收完整模型组合
+- [x] A11 `/transcribe` 能接收完整模型组合
 
 ## 5. 手动功能验收
 
@@ -242,3 +242,61 @@
 3. 手动验收项如果尚未执行，必须明确标记“待人工验收”
 4. 本专题的测试结果优先写回当前专题测试记录；如果后续阶段状态文档指定新的统一测试记录，再按新规则迁移
 5. 新发现的 bug 需要同步写入对应 bug 文档，不能只留在对话里
+
+## 10. 本轮执行记录
+
+### [A1-A3] 前端类型检查、构建与显式 `any` 扫描
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，仓库根目录
+- 输入：
+  - `cmd /c "cd /d tauri-app && npm run build"`
+  - `rg -n "\\bany\\b" tauri-app/src/types/index.ts tauri-app/src/stores/appStore.ts tauri-app/src/stores/modelStore.ts tauri-app/src/api/backend.ts tauri-app/src/api/tauri.ts tauri-app/src/lib/recordingFlow.ts tauri-app/src/pages/EngineSettings.tsx tauri-app/src/pages/GeneralSettings.tsx tauri-app/src/pages/HistoryPage.tsx`
+- 结果：通过
+- 证据：
+  - `npm run build` 实际执行 `tsc --noEmit && vite build`
+  - Vite 生产构建通过
+  - `rg` 未匹配到显式 `any`
+- 备注：A1/A2/A3 已勾选
+
+### [A4] Rust / Tauri 编译检查
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：`tauri-app/src-tauri`
+- 输入：`cargo check`
+- 结果：通过
+- 证据：`Finished 'dev' profile [unoptimized + debuginfo] target(s) in 37.11s`
+- 备注：A4 已勾选；A5/A6 仍待桌面端实际调用验证
+
+### [A7-A11] 后端 mock 启动与接口契约烟雾测试
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，`backend/server.py --mock --host 127.0.0.1 --port 8876/8879/8880`
+- 输入：
+  - `GET /engines`
+  - `GET /models`
+  - `POST /load` with `asr_engine=funasr asr_model=seaco-paraformer diarization_model=funasr_builtin speaker_mapping_model=campp enable_diarization=true`
+  - `POST /transcribe` with `.tmp-tests/silence-6s.wav`
+- 结果：通过
+- 证据：
+  - `/engines` 返回 5 个引擎：`funasr,qwen3_asr,whisper,whispercpp,parakeet`
+  - `FunASR` 默认组合：`seaco-paraformer + funasr_builtin + campp`
+  - `Qwen3-ASR` 默认组合：`qwen3-asr-1.7b + 3d-speaker + campp`
+  - `/models` 返回 25 条模型状态，含 `asr / diarization / speaker_mapping`
+  - `CampPlus Diarization`、`SOND Diarization` 在目录中可见且状态为可用
+  - `pyannote-3.1` 标记 `requires_token=true`
+  - `/load` 返回 `status=loaded`，并回显完整组合字段
+  - `/transcribe` 在 `enable_diarization=true` 时回显 `diarization_model=campplus-diarization`、`speaker_mapping_model=campp`
+  - `/transcribe` 在 `enable_diarization=false` 时回显的 `diarization_model / speaker_mapping_model` 为 `null`
+- 备注：A7/A8/A9/A10/A11 已勾选；本轮为 mock 契约验证，不代表真实模型运行时全部完成
+
+## 11. 当前阻塞与待人工验收
+
+- A5 `Tauri` 新增凭据命令尚未实现，当前不能勾选
+- A6 还未通过桌面端真实 `invoke` 链路验证扩展后的转录 payload
+- M1-M42 绝大多数 UI / 交互 / 真实模型能力项仍待人工验收
+- `3d-speaker` 与 `pyannote-3.1` 当前只进入目录和界面范围，运行时尚未正式接通
+- token 弹窗与 Windows Credential Manager 仍未实现，M20-M24、F5-F7 当前不能通过

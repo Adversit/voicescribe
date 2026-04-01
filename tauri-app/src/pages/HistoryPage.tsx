@@ -106,8 +106,10 @@ export function HistoryPage() {
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-ink/46">
                   <span className="app-chip">{selectedRecord.mode === "stream" ? "流式" : "非流式"}</span>
-                  <span className="app-chip">{selectedRecord.engine}</span>
-                  <span className="app-chip">{selectedRecord.model}</span>
+                  <span className="app-chip">{selectedRecord.asr_engine ?? selectedRecord.engine}</span>
+                  <span className="app-chip">{selectedRecord.asr_model ?? selectedRecord.model}</span>
+                  {selectedRecord.diarization_model ? <span className="app-chip">{selectedRecord.diarization_model}</span> : null}
+                  {selectedRecord.speaker_mapping_model ? <span className="app-chip">{selectedRecord.speaker_mapping_model}</span> : null}
                   <span className="app-chip">{formatDate(selectedRecord.created_at)}</span>
                 </div>
 

@@ -90,8 +90,8 @@ export function GeneralSettings() {
 
       <SettingsSection title="其他" description="保留原生设置页的行式开关布局。">
         <SettingsRow
-          title="说话人识别"
-          description="注册声纹后，转录结果会尽量附带说话人标签。"
+          title="说话人链路"
+          description="开启后，转录会按当前引擎所选的分离模型和映射模型执行；关闭时保留选择但只跑 ASR。"
           control={
             <ToggleSwitch
               checked={settings.enableDiarization}
