@@ -45,6 +45,7 @@ export interface Transcription {
   asrModel: string;
   diarizationModel: string | null;
   speakerMappingModel: string | null;
+  speakerTextAlignmentLimited?: boolean;
   audioPath: string | null;
 }
 
@@ -58,6 +59,7 @@ export interface TranscribeResult {
   asr_model: string;
   diarization_model: string | null;
   speaker_mapping_model: string | null;
+  speaker_text_alignment_limited: boolean;
 }
 
 export interface ModelStatus {

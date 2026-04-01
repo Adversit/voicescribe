@@ -382,6 +382,7 @@ function createTranscription(result: TranscribeResult, audioPath: string | null)
     asrModel: result.asr_model,
     diarizationModel: result.diarization_model,
     speakerMappingModel: result.speaker_mapping_model,
+    speakerTextAlignmentLimited: result.speaker_text_alignment_limited,
     audioPath,
   };
 }

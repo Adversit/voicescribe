@@ -70,8 +70,8 @@
 ### 4.2 Rust / Tauri 检查
 
 - [x] A4 Rust 编译通过
-- [ ] A5 Tauri 命令注册完整，新增凭据命令可调用
-- [ ] A6 桌面端转录命令能接收扩展后的完整 payload
+- [x] A5 Tauri 命令注册完整，新增凭据命令可调用
+- [x] A6 桌面端转录命令能接收扩展后的完整 payload
 
 ### 4.3 后端检查
 
@@ -190,8 +190,8 @@
 
 ### 6.7 Parakeet 受限路径
 
-- [ ] F14 `Parakeet` 结果能力受限时，日志与测试记录明确说明
-- [ ] F15 不把 `Parakeet` 的受限结果误报成“完全支持说话人文本对齐”
+- [x] F14 `Parakeet` 结果能力受限时，日志与测试记录明确说明
+- [x] F15 不把 `Parakeet` 的受限结果误报成“完全支持说话人文本对齐”
 
 ## 7. 回归验证
 
@@ -268,7 +268,7 @@
 - 输入：`cargo check`
 - 结果：通过
 - 证据：`Finished 'dev' profile [unoptimized + debuginfo] target(s) in 37.11s`
-- 备注：A4 已勾选；A5/A6 仍待桌面端实际调用验证
+- 备注：A4 已勾选；A5/A6 在后续 `cargo test` 中补充了直接命令级验证
 
 ### [A7-A11] 后端 mock 启动与接口契约烟雾测试
 
@@ -335,11 +335,58 @@
   - 响应体为 `{"detail":"Incompatible diarization model for engine whisper: funasr_builtin"}`
 - 备注：F11 已勾选；F10 仍待前端选择阶段的人工验收
 
+### [A5-A6] Tauri 凭据命令与扩展转录 payload 自动测试
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：`tauri-app/src-tauri`
+- 输入：`cargo test`
+- 结果：通过
+- 证据：
+  - `commands::credentials::tests::model_download_token_roundtrip_works ... ok`
+  - `commands::backend::tests::transcribe_command_accepts_expanded_payload ... ok`
+  - `cargo test` 总计 `8 passed; 0 failed`
+- 备注：A5/A6 已勾选；这里验证的是 Rust 命令级调用，不等于桌面端页面点击验收
+
+### [Backend-Rerun] service 拆分后的接口回归与 Parakeet 受限标记
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，`backend/server.py --mock --host 127.0.0.1 --port 8895`
+- 输入：
+  - `GET /engines`
+  - `GET /models`
+  - `POST /load` with `qwen3_asr + qwen3-asr-1.7b + 3d-speaker + campp`
+  - `POST /transcribe` with `parakeet + parakeet-ctc-1.1b + 3d-speaker + campp`
+  - `POST /load` incompatible combo `whisper + funasr_builtin`
+  - `POST /models/download` for `pyannote-3.1` without token
+- 结果：通过
+- 证据：
+  - `/engines` 与 `/models` 在 service 拆分后仍返回完整矩阵目录
+  - `qwen3_asr` 预加载返回 `status=loaded`
+  - `parakeet` mock 转录结果回显 `speaker_text_alignment_limited=true`
+  - 不兼容组合继续返回 `400`
+  - `pyannote-3.1` 无 token 下载继续返回 `400`
+- 备注：F14/F15 已勾选；M34 的真实模型人工验收仍待执行
+
+### [Model-Root] 下载主路径与 registry 根目录约束
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，直接导入 `backend/server.py`
+- 输入：
+  - 遍历 `_all_model_entries()` 中全部 `downloadable=true` 模型并校验 `_model_storage_path(...)`
+  - 调用 `_set_registry_entry(...)` 写入仓库外路径
+- 结果：通过
+- 证据：
+  - `model root guard ok: 24 downloadable entries checked`
+  - 仓库外路径写入被 `ValueError` 拒绝
+- 备注：T54、R11、R12 的自动化部分已覆盖
+
 ## 11. 当前阻塞与待人工验收
 
-- A5 `Tauri` 凭据命令已实现并通过编译，但还未做桌面端实际调用验收
-- A6 还未通过桌面端真实 `invoke` 链路验证扩展后的转录 payload
 - M1-M42 绝大多数 UI / 交互 / 真实模型能力项仍待人工验收
-- `3d-speaker` 与 `pyannote-3.1` 当前只进入目录和界面范围，运行时尚未正式接通
+- `3d-speaker` 与 `pyannote-3.1` 已接入后端目录、路径解析与运行时加载分支，但仍缺真实模型环境验收
 - token 弹窗与 Windows Credential Manager 已实现代码链，但 M20-M24、F5-F7 仍待桌面端手动验收
 - 失效组合标红逻辑已实现代码链，但 T38 仍待页面人工确认视觉表现
+- 本轮自动化验证未发现需要新增回写的阻塞 bug

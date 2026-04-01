@@ -54,6 +54,7 @@ pub struct TranscribeResult {
     pub asr_model: String,
     pub diarization_model: Option<String>,
     pub speaker_mapping_model: Option<String>,
+    pub speaker_text_alignment_limited: bool,
 }
 
 fn dev_backend_dir() -> PathBuf {
@@ -945,12 +946,16 @@ pub async fn transcribe(
 mod tests {
     use super::{
         backend_bundle_sync_required_for_version, enable_embedded_site_import,
-        extract_embedded_python_zip, runtime_embedded_python_dir,
+        extract_embedded_python_zip, runtime_embedded_python_dir, transcribe,
         should_use_dev_project_tree_for_paths,
     };
     use std::fs;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::PathBuf;
     use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_test_dir(name: &str) -> PathBuf {
@@ -959,6 +964,43 @@ mod tests {
             .expect("clock drift")
             .as_nanos();
         std::env::temp_dir().join(format!("voicescribe-{name}-{nanos}"))
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+
+        let mut buffer = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        let mut header_end = None;
+        let mut content_length = 0usize;
+
+        loop {
+            let read = stream.read(&mut chunk).expect("read request");
+            if read == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&chunk[..read]);
+
+            if header_end.is_none() {
+                if let Some(index) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&buffer[..index + 4]);
+                    for line in headers.lines() {
+                        if let Some(value) = line.strip_prefix("Content-Length:") {
+                            content_length = value.trim().parse::<usize>().expect("parse content-length");
+                        }
+                    }
+                    header_end = Some(index + 4);
+                }
+            }
+
+            if let Some(index) = header_end {
+                if buffer.len() >= index + content_length {
+                    break;
+                }
+            }
+        }
     }
 
     #[test]
@@ -1085,5 +1127,72 @@ mod tests {
         ));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn transcribe_command_accepts_expanded_payload() {
+        let listener = TcpListener::bind("127.0.0.1:8765").expect("bind test backend port");
+        let response_body = serde_json::json!({
+            "text": "mock transcript",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "mock transcript",
+                    "speaker": "Speaker A"
+                }
+            ],
+            "duration": 1.0,
+            "engine": "parakeet",
+            "model": "parakeet-ctc-1.1b",
+            "asr_engine": "parakeet",
+            "asr_model": "parakeet-ctc-1.1b",
+            "diarization_model": "3d-speaker",
+            "speaker_mapping_model": "campp",
+            "speaker_text_alignment_limited": true
+        })
+        .to_string();
+
+        let server_handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            read_http_request(&mut stream);
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+
+        let temp_dir = temp_test_dir("transcribe-command");
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let audio_path = temp_dir.join("sample.wav");
+        fs::write(&audio_path, b"RIFFmockWAVEfmt ").expect("write sample wav");
+
+        let result = transcribe(
+            audio_path.to_string_lossy().to_string(),
+            "parakeet".to_string(),
+            "parakeet-ctc-1.1b".to_string(),
+            Some("3d-speaker".to_string()),
+            Some("campp".to_string()),
+            "zh".to_string(),
+            true,
+            String::new(),
+            false,
+        )
+        .await
+        .expect("transcribe succeeds");
+
+        server_handle.join().expect("server thread joined");
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        assert_eq!(result.asr_engine, "parakeet");
+        assert_eq!(result.asr_model, "parakeet-ctc-1.1b");
+        assert_eq!(result.diarization_model.as_deref(), Some("3d-speaker"));
+        assert_eq!(result.speaker_mapping_model.as_deref(), Some("campp"));
+        assert!(result.speaker_text_alignment_limited);
     }
 }

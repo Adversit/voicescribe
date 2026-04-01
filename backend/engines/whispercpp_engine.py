@@ -36,6 +36,7 @@ class WhisperCppEngine:
         self.model_path = model_path
         self.language = language
         self.whisper_cli = find_whisper_cli()
+        self.supports_external_speaker_chain = True
         
         # 验证模型文件存在
         if not os.path.exists(self.model_path):
@@ -46,6 +47,13 @@ class WhisperCppEngine:
             raise FileNotFoundError(
                 "whisper-cli 未安装。请安装 whisper.cpp，或设置 VOICESCRIBE_WHISPERCPP_CLI"
             )
+
+    def capabilities(self) -> dict:
+        return {
+            "supports_builtin_diarization": False,
+            "supports_external_speaker_chain": True,
+            "speaker_text_alignment_limited": False,
+        }
     
     def transcribe(self, audio_path: str, language: str = None) -> dict:
         """

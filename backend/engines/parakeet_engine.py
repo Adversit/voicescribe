@@ -19,6 +19,14 @@ class ParakeetEngine:
     def __init__(self):
         self.model = None
         self.model_name = None
+        self.supports_external_speaker_chain = True
+
+    def capabilities(self) -> Dict[str, Any]:
+        return {
+            "supports_builtin_diarization": False,
+            "supports_external_speaker_chain": True,
+            "speaker_text_alignment_limited": True,
+        }
     
     def load(self, model_name: str = "parakeet-ctc-1.1b"):
         """
@@ -84,6 +92,7 @@ class ParakeetEngine:
             "segments": [],  # Parakeet 不返回时间戳
             "duration": 0,
             "language": language,
+            "speaker_text_alignment_limited": True,
         }
     
     def unload(self):

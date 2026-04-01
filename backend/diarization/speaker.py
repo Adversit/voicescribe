@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import soundfile as sf
-from config import SPEAKER_DATA_DIR, ensure_runtime_env, resolve_modelscope_model_dir
+from config import MODEL_CACHE_DIR, SPEAKER_DATA_DIR, ensure_runtime_env, resolve_modelscope_model_dir
 from runtime_probe import prepare_windows_runtime
 
 
@@ -20,6 +20,8 @@ class SpeakerDiarizer:
     DIARIZATION_MODEL_MAP = {
         "campplus-diarization": "iic/speech_campplus_speaker-diarization_common",
         "sond-diarization": "damo/speech_diarization_sond-zh-cn-alimeeting-16k-n16k4-pytorch",
+        "3d-speaker": "3D-Speaker/3D-Speaker",
+        "pyannote-3.1": "pyannote/speaker-diarization-3.1",
     }
 
     SPEAKER_VERIFICATION_MODEL_MAP = {
@@ -95,6 +97,41 @@ class SpeakerDiarizer:
             ) from err
         return pipeline
 
+    def _import_pyannote_pipeline(self):
+        ensure_runtime_env()
+        prepare_windows_runtime()
+        try:
+            from pyannote.audio import Pipeline
+        except ImportError as err:
+            raise ImportError(
+                "pyannote diarization requires pyannote.audio. "
+                "Install with: pip install pyannote.audio"
+            ) from err
+        return Pipeline
+
+    def _resolve_local_model_path(self, logical_model: str, model_id: str) -> str:
+        candidate = Path(model_id).expanduser()
+        if candidate.exists():
+            return str(candidate.resolve())
+
+        direct_dir = (MODEL_CACHE_DIR / "diarization" / logical_model).resolve()
+        if direct_dir.exists():
+            return str(direct_dir)
+
+        repo_like_dir = MODEL_CACHE_DIR.joinpath(*model_id.split("/")).resolve()
+        if repo_like_dir.exists():
+            return str(repo_like_dir)
+
+        hf_repo_dir = (MODEL_CACHE_DIR / "huggingface" / "hub" / f"models--{model_id.replace('/', '--')}").resolve()
+        if hf_repo_dir.exists():
+            snapshots = hf_repo_dir / "snapshots"
+            if snapshots.exists():
+                snapshot_dirs = [item for item in snapshots.iterdir() if item.is_dir()]
+                if snapshot_dirs:
+                    snapshot_dirs.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+                    return str(snapshot_dirs[0].resolve())
+        return model_id
+
     def _prepare_diarization_audio(self, audio_path: str) -> tuple[str, Optional[str]]:
         data, sr = sf.read(audio_path)
         if getattr(data, 'ndim', 1) > 1:
@@ -126,8 +163,6 @@ class SpeakerDiarizer:
                 "VOICESCRIBE_DIARIZATION_MODEL",
                 self.DIARIZATION_MODEL_MAP["campplus-diarization"],
             )
-        if logical_model in {"3d-speaker", "pyannote-3.1"}:
-            raise RuntimeError(f"Diarization model '{logical_model}' is not wired into runtime yet")
         return self.DIARIZATION_MODEL_MAP.get(logical_model, logical_model)
 
     def ensure_speaker_verification_loaded(self, logical_model: Optional[str] = None):
@@ -149,11 +184,22 @@ class SpeakerDiarizer:
         return self.sv_model
 
     def ensure_diarization_loaded(self, logical_model: Optional[str] = None):
+        logical_model = logical_model or "campplus-diarization"
         target_model_id = self._resolve_diarization_model_id(logical_model)
         if self.diarization_model is not None and self.diarization_model_id == target_model_id:
             print(
                 f"[Speaker] Diarization model already loaded: {self.diarization_model_id} ({self.diarization_backend})"
             )
+            return self.diarization_model
+
+        if logical_model == "pyannote-3.1":
+            pipeline_cls = self._import_pyannote_pipeline()
+            model_path = self._resolve_local_model_path(logical_model, target_model_id)
+            print(f"[Speaker] Loading pyannote diarization pipeline: {target_model_id} -> {model_path}...")
+            self.diarization_model = pipeline_cls.from_pretrained(model_path)
+            self.diarization_model_id = target_model_id
+            self.diarization_backend = "pyannote_audio"
+            print(f"[Speaker] Diarization pipeline loaded: {target_model_id} ({self.diarization_backend})")
             return self.diarization_model
 
         pipeline_factory = self._import_modelscope_pipeline()
@@ -162,7 +208,7 @@ class SpeakerDiarizer:
         last_error = None
         for model_id in diarization_candidates:
             try:
-                model_path = resolve_modelscope_model_dir(model_id)
+                model_path = self._resolve_local_model_path(logical_model, model_id)
                 print(f"[Speaker] Loading diarization pipeline: {model_id} -> {model_path}...")
                 self.diarization_model = pipeline_factory(
                     task="speaker-diarization",
@@ -301,6 +347,19 @@ class SpeakerDiarizer:
                                     "speaker": f"SPEAKER_{speaker_index:02d}",
                                 }
                             )
+                return results
+
+            if self.diarization_backend == "pyannote_audio":
+                annotation = self.diarization_model(processed_audio_path)
+                results = []
+                for segment, _, speaker in annotation.itertracks(yield_label=True):
+                    results.append(
+                        {
+                            "start": float(segment.start),
+                            "end": float(segment.end),
+                            "speaker": str(speaker),
+                        }
+                    )
                 return results
 
             result = self.diarization_model.generate(processed_audio_path)

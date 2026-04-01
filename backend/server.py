@@ -47,6 +47,17 @@ from config import (
     HISTORY_STORAGE_PATH,
 )
 from runtime_probe import prepare_windows_runtime, probe_funasr_runtime, probe_torch_runtime
+from services.history_service import HistoryService
+from services.model_catalog import (
+    all_model_entries,
+    build_engine_catalog,
+    build_engine_model_catalog,
+    engine_available,
+    find_model_definition,
+    validate_engine_selection,
+)
+from services.model_registry import ModelRegistryService
+from services.transcription_service import RuntimeTranscriptionService
 
 ensure_runtime_env()
 ensure_dirs()
@@ -216,109 +227,47 @@ SPEAKER_MAPPING_MODELS = {
     },
 }
 
-ENGINE_CATALOG = {
-    "funasr": {
-        "display_name": "FunASR",
-        "description": "阿里 FunASR，支持内置和外部分离路径。",
-        "asr_models": list(getattr(globals().get("FunASREngine"), "MODELS", {}).keys()),
-        "diarization_models": list(DIARIZATION_MODELS.keys()),
-        "speaker_mapping_models": list(SPEAKER_MAPPING_MODELS.keys()),
-        "default_selection": {
-            "asrModel": "seaco-paraformer",
-            "diarizationModel": "funasr_builtin",
-            "speakerMappingModel": "campp",
-        },
-        "available": FUNASR_AVAILABLE,
+ENGINE_CATALOG = build_engine_catalog(
+    funasr_models=list(getattr(globals().get("FunASREngine"), "MODELS", {}).keys()),
+    whisper_models=WHISPER_MODELS,
+    whispercpp_models=WHISPERCPP_MODELS,
+    parakeet_models=PARAKEET_MODELS,
+    qwen3_asr_models=QWEN3_ASR_MODELS,
+    diarization_models=DIARIZATION_MODELS,
+    speaker_mapping_models=SPEAKER_MAPPING_MODELS,
+    availability={
+        "funasr": FUNASR_AVAILABLE,
+        "qwen3_asr": QWEN3_ASR_AVAILABLE,
+        "whisper": WHISPER_AVAILABLE,
+        "whispercpp": WHISPERCPP_AVAILABLE,
+        "parakeet": PARAKEET_AVAILABLE,
     },
-    "qwen3_asr": {
-        "display_name": "Qwen3-ASR",
-        "description": "Qwen3-ASR 独立引擎。",
-        "asr_models": QWEN3_ASR_MODELS,
-        "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
-        "speaker_mapping_models": list(SPEAKER_MAPPING_MODELS.keys()),
-        "default_selection": {
-            "asrModel": "qwen3-asr-1.7b",
-            "diarizationModel": "3d-speaker",
-            "speakerMappingModel": "campp",
-        },
-        "available": QWEN3_ASR_AVAILABLE,
-    },
-    "whisper": {
-        "display_name": "Whisper",
-        "description": "OpenAI Whisper，多语言通用引擎。",
-        "asr_models": WHISPER_MODELS,
-        "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
-        "speaker_mapping_models": list(SPEAKER_MAPPING_MODELS.keys()),
-        "default_selection": {
-            "asrModel": "large-v3",
-            "diarizationModel": "3d-speaker",
-            "speakerMappingModel": "campp",
-        },
-        "available": WHISPER_AVAILABLE,
-    },
-    "whispercpp": {
-        "display_name": "WhisperCpp",
-        "description": "whisper.cpp CLI 引擎。",
-        "asr_models": WHISPERCPP_MODELS,
-        "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
-        "speaker_mapping_models": list(SPEAKER_MAPPING_MODELS.keys()),
-        "default_selection": {
-            "asrModel": "base",
-            "diarizationModel": "3d-speaker",
-            "speakerMappingModel": "campp",
-        },
-        "available": WHISPERCPP_AVAILABLE,
-    },
-    "parakeet": {
-        "display_name": "Parakeet",
-        "description": "NVIDIA Parakeet，本轮进入矩阵但说话人对齐能力受限。",
-        "asr_models": PARAKEET_MODELS,
-        "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
-        "speaker_mapping_models": list(SPEAKER_MAPPING_MODELS.keys()),
-        "default_selection": {
-            "asrModel": "parakeet-ctc-1.1b",
-            "diarizationModel": "3d-speaker",
-            "speakerMappingModel": "campp",
-        },
-        "available": PARAKEET_AVAILABLE,
-    },
-}
+)
 
-ENGINE_MODEL_CATALOG = {engine: spec["asr_models"] for engine, spec in ENGINE_CATALOG.items()}
+ENGINE_MODEL_CATALOG = build_engine_model_catalog(ENGINE_CATALOG)
 
 
 def _engine_available(engine: str) -> bool:
-    return bool(ENGINE_CATALOG.get(engine, {}).get("available"))
+    return engine_available(ENGINE_CATALOG, engine)
 
 
 def _category_bucket(category: str, engine: str) -> str:
-    if category == "asr":
-        return engine
-    return category
+    return ModelRegistryService.category_bucket(category, engine)
 
 
 def _all_model_entries():
-    for engine, spec in ENGINE_CATALOG.items():
-        for model_name in spec["asr_models"]:
-            yield "asr", engine, model_name, {
-                "display_name": model_name,
-                "engine_scope": [engine],
-                "downloadable": True,
-                "requires_token": False,
-            }
-
-    for model_name, spec in DIARIZATION_MODELS.items():
-        yield "diarization", "diarization", model_name, spec
-
-    for model_name, spec in SPEAKER_MAPPING_MODELS.items():
-        yield "speaker_mapping", "speaker_mapping", model_name, spec
+    return all_model_entries(ENGINE_CATALOG, DIARIZATION_MODELS, SPEAKER_MAPPING_MODELS)
 
 
 def _find_model_definition(category: str, engine: str, model: str) -> Optional[dict]:
-    for entry_category, entry_engine, entry_model, spec in _all_model_entries():
-        if entry_category == category and entry_engine == _category_bucket(category, engine) and entry_model == model:
-            return spec
-    return None
+    return find_model_definition(
+        ENGINE_CATALOG,
+        DIARIZATION_MODELS,
+        SPEAKER_MAPPING_MODELS,
+        category,
+        engine,
+        model,
+    )
 
 
 def _validate_engine_selection(
@@ -327,172 +276,57 @@ def _validate_engine_selection(
     diarization_model: Optional[str],
     speaker_mapping_model: Optional[str],
 ) -> None:
-    engine_spec = ENGINE_CATALOG.get(engine)
-    if not engine_spec:
-        raise HTTPException(400, f"Unknown engine: {engine}")
-
-    if asr_model not in engine_spec.get("asr_models", []):
-        raise HTTPException(400, f"Incompatible ASR model for engine {engine}: {asr_model}")
-
-    if diarization_model and diarization_model not in engine_spec.get("diarization_models", []):
-        raise HTTPException(400, f"Incompatible diarization model for engine {engine}: {diarization_model}")
-
-    if speaker_mapping_model and speaker_mapping_model not in engine_spec.get("speaker_mapping_models", []):
-        raise HTTPException(400, f"Incompatible speaker mapping model for engine {engine}: {speaker_mapping_model}")
+    validate_engine_selection(
+        ENGINE_CATALOG,
+        engine,
+        asr_model,
+        diarization_model,
+        speaker_mapping_model,
+    )
 
 def _load_registry() -> dict:
-    try:
-        if MODEL_REGISTRY_PATH.exists():
-            with MODEL_REGISTRY_PATH.open("r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        print(f"[ModelRegistry] Failed to read registry: {e}")
-    return {}
+    return model_registry_service.load_registry()
 
 def _save_registry(registry: dict) -> None:
-    try:
-        with MODEL_REGISTRY_PATH.open("w", encoding="utf-8") as f:
-            json.dump(registry, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[ModelRegistry] Failed to write registry: {e}")
+    model_registry_service.save_registry(registry)
 
 def _is_within_models_dir(path: Path) -> bool:
-    try:
-        path.resolve().relative_to(MODEL_CACHE_DIR)
-        return True
-    except ValueError:
-        return False
+    return model_registry_service.is_within_models_dir(path)
 
 
 def _rebase_models_path(candidate: Path) -> Optional[Path]:
-    parts = list(candidate.parts)
-    lowered = [part.lower() for part in parts]
-    if "models" not in lowered:
-        return None
-
-    models_index = lowered.index("models")
-    rebased = MODEL_CACHE_DIR.joinpath(*parts[models_index + 1 :]).resolve()
-    return rebased
+    return model_registry_service.rebase_models_path(candidate)
 
 
 def _normalize_registry_path(path: Optional[str]) -> Optional[str]:
-    if not path:
-        return path
-
-    candidate = Path(path).expanduser()
-    if candidate.exists() and _is_within_models_dir(candidate):
-        return str(candidate.resolve())
-
-    rebased = _rebase_models_path(candidate)
-    if rebased and rebased.exists():
-        return str(rebased)
-
-    # 模型状态只认当前项目根目录 models/，不接受仓库外或历史目录。
-    return None
+    return model_registry_service.normalize_registry_path(path)
 
 def _get_registry_entry(engine: str, model: str, category: str = "asr") -> Optional[dict]:
-    registry = _load_registry()
-    bucket = _category_bucket(category, engine)
-    entry = registry.get(bucket, {}).get(model)
-    if not entry:
-        return None
-
-    normalized_path = _normalize_registry_path(entry.get("path"))
-    if not normalized_path:
-        _delete_registry_entry(engine, model, category=category)
-        return None
-
-    if normalized_path != entry.get("path"):
-        _set_registry_entry(
-            engine,
-            model,
-            normalized_path,
-            int(entry.get("size_bytes", 0) or 0),
-            category=category,
-        )
-        entry = {
-            **entry,
-            "path": normalized_path,
-        }
-
-    return entry
+    return model_registry_service.get_registry_entry(engine, model, category=category)
 
 
 def _model_storage_path(engine: str, model: str, category: str = "asr") -> Optional[Path]:
-    if category == "asr" and engine == "whisper":
-        return (MODEL_CACHE_DIR / "whisper" / model).resolve()
-    if category == "asr" and engine == "whispercpp":
-        filename = WHISPERCPP_MODEL_FILES.get(model)
-        if filename:
-            return (WHISPER_CPP_MODEL_DIR / filename).resolve()
-    if category == "asr" and engine == "funasr":
-        model_id = _get_fun_asr_model_id(model)
-        if model_id:
-            return (MODEL_CACHE_DIR / Path(model_id)).resolve()
-    if category == "asr" and engine == "parakeet":
-        return (MODEL_CACHE_DIR / "parakeet" / model).resolve()
-    if category == "asr" and engine == "qwen3_asr":
-        return (MODEL_CACHE_DIR / "qwen3_asr" / model).resolve()
-    if category == "diarization":
-        if model == "funasr_builtin":
-            return None
-        spec = DIARIZATION_MODELS.get(model, {})
-        model_id = spec.get("model_id")
-        if model_id:
-            return (MODEL_CACHE_DIR / Path(model_id)).resolve()
-        return (MODEL_CACHE_DIR / "diarization" / model).resolve()
-    if category == "speaker_mapping":
-        spec = SPEAKER_MAPPING_MODELS.get(model, {})
-        model_id = spec.get("model_id")
-        if model_id:
-            return (MODEL_CACHE_DIR / Path(model_id)).resolve()
-        return (MODEL_CACHE_DIR / "speaker_mapping" / model).resolve()
-    return None
+    return model_registry_service.model_storage_path(engine, model, category=category)
 
 def _set_registry_entry(engine: str, model: str, path: str, size_bytes: int, category: str = "asr") -> None:
-    registry = _load_registry()
-    bucket = _category_bucket(category, engine)
-    if bucket not in registry:
-        registry[bucket] = {}
-    registry[bucket][model] = {
-        "path": path,
-        "size_bytes": size_bytes,
-        "updated_at": datetime.now().isoformat(),
-    }
-    _save_registry(registry)
+    model_registry_service.set_registry_entry(engine, model, path, size_bytes, category=category)
 
 def _delete_registry_entry(engine: str, model: str, category: str = "asr") -> None:
-    registry = _load_registry()
-    bucket = _category_bucket(category, engine)
-    if bucket in registry and model in registry[bucket]:
-        del registry[bucket][model]
-        _save_registry(registry)
+    model_registry_service.delete_registry_entry(engine, model, category=category)
 
 
 def _reset_download_state(engine: str, model: str, category: str = "asr") -> None:
-    key = f"{category}:{_category_bucket(category, engine)}:{model}"
-    model_downloads.pop(key, None)
+    model_registry_service.reset_download_state(model_downloads, engine, model, category=category)
 
 def _dir_size(path: str) -> int:
-    total = 0
-    for root, _, files in os.walk(path):
-        for name in files:
-            try:
-                total += os.path.getsize(os.path.join(root, name))
-            except FileNotFoundError:
-                continue
-    return total
+    return model_registry_service.dir_size(path)
 
 def _cache_total_size() -> int:
-    return _dir_size(str(MODEL_CACHE_DIR))
+    return model_registry_service.cache_total_size()
 
 
 def _path_size(path: Path) -> int:
-    if not path.exists():
-        return 0
-    if path.is_file():
-        return path.stat().st_size
-    return _dir_size(str(path))
+    return model_registry_service.path_size(path)
 
 def _get_fun_asr_model_id(model_name: str) -> Optional[str]:
     try:
@@ -505,85 +339,47 @@ def _get_parakeet_model_id(model_name: str) -> Optional[str]:
     return PARAKEET_MODEL_REPOS.get(model_name)
 
 
+model_registry_service = ModelRegistryService(
+    model_cache_dir=MODEL_CACHE_DIR,
+    registry_path=MODEL_REGISTRY_PATH,
+    whisper_cpp_model_dir=WHISPER_CPP_MODEL_DIR,
+    whispercpp_model_files=WHISPERCPP_MODEL_FILES,
+    diarization_models=DIARIZATION_MODELS,
+    speaker_mapping_models=SPEAKER_MAPPING_MODELS,
+    get_funasr_model_id=_get_fun_asr_model_id,
+)
+
+
 def _iter_engine_models():
     for category, engine, model_name, _ in _all_model_entries():
         yield category, engine, model_name
 
 
+history_service = HistoryService(HISTORY_STORAGE_PATH)
+
+
 def _load_history_records() -> List[dict]:
-    try:
-        if HISTORY_STORAGE_PATH.exists():
-            with HISTORY_STORAGE_PATH.open("r", encoding="utf-8") as f:
-                payload = json.load(f)
-            if isinstance(payload, dict):
-                records = payload.get("records", [])
-                if isinstance(records, list):
-                    return records
-            if isinstance(payload, list):
-                return payload
-    except Exception as e:
-        print(f"[History] Failed to read history: {e}")
-    return []
+    return history_service.load_records()
 
 
 def _sort_history_records(records: List[dict]) -> List[dict]:
-    return sorted(records, key=lambda item: item.get("created_at", ""), reverse=True)
+    return history_service.sort_records(records)
 
 
 def _save_history_records(records: List[dict]) -> None:
-    HISTORY_STORAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with HISTORY_STORAGE_PATH.open("w", encoding="utf-8") as f:
-        json.dump({"records": _sort_history_records(records)}, f, ensure_ascii=False, indent=2)
+    history_service.save_records(records)
 
 
 def _find_history_record(record_id: str) -> Optional[dict]:
-    for record in _load_history_records():
-        if record.get("id") == record_id:
-            return record
-    return None
+    return history_service.find_record(record_id)
 
 
 def _history_export_text(record: dict) -> str:
-    lines = [
-        f"时间: {record.get('created_at', '')}",
-        f"模式: {record.get('mode', '')}",
-        f"引擎: {record.get('asr_engine', record.get('engine', ''))}",
-        f"模型: {record.get('asr_model', record.get('model', ''))}",
-        f"分离模型: {record.get('diarization_model', '')}",
-        f"映射模型: {record.get('speaker_mapping_model', '')}",
-        f"时长: {record.get('duration', 0)}",
-        "",
-        "正文:",
-        record.get("text", ""),
-    ]
-
-    summary = record.get("summary")
-    if summary:
-        lines.extend(["", "AI 摘要:", summary])
-
-    speaker_entries = record.get("speaker_entries") or []
-    if speaker_entries:
-        lines.extend(["", "说话人片段:"])
-        for entry in speaker_entries:
-            speaker = entry.get("speaker") or "说话人"
-            timestamp = entry.get("timestamp") or ""
-            prefix = f"[{timestamp}] " if timestamp else ""
-            lines.append(f"{prefix}{speaker}: {entry.get('text') or ''}")
-
-    return "\n".join(lines).strip() + "\n"
+    return history_service.export_text(record)
 
 
 def _delete_history_audio_file(record: dict) -> None:
-    audio_path = record.get("audio_path")
-    if not record.get("retain_audio") or not audio_path:
-        return
-
-    path = Path(audio_path)
-    if path.exists() and path.is_file():
-        try:
-            path.unlink(missing_ok=True)
-        except Exception as e:
-            print(f"[History] Failed to delete audio file: {e}")
+    history_service.delete_audio_file(record)
 
 
 def _fallback_summary(text: str) -> str:
@@ -666,8 +462,6 @@ app.add_middleware(
 )
 
 # Global instances
-engines = {}
-diarizer: Optional[object] = None
 MOCK_MODE = False
 
 # 预加载配置：默认禁用，避免阻塞服务启动
@@ -678,49 +472,39 @@ PRELOAD_CONFIG = {
 ENABLE_PRELOAD = os.environ.get("VOICESCRIBE_PRELOAD_MODELS") == "1"
 
 
+transcription_service = RuntimeTranscriptionService(
+    registry_getter=_get_registry_entry,
+    speaker_factory=SpeakerDiarizer if DIARIZATION_AVAILABLE else None,
+    diarization_available=DIARIZATION_AVAILABLE,
+    funasr_runtime_error=FUNASR_RUNTIME.get("error"),
+    whisper_available=WHISPER_AVAILABLE,
+    whispercpp_available=WHISPERCPP_AVAILABLE,
+    funasr_available=FUNASR_AVAILABLE,
+    qwen3_asr_available=QWEN3_ASR_AVAILABLE,
+    parakeet_available=PARAKEET_AVAILABLE,
+    whisper_engine_cls=globals().get("WhisperEngine"),
+    whispercpp_engine_cls=globals().get("WhisperCppEngine"),
+    funasr_engine_cls=globals().get("FunASREngine"),
+    qwen3_asr_engine_cls=globals().get("Qwen3ASREngine"),
+    parakeet_engine_cls=globals().get("ParakeetEngine"),
+    whisper_cpp_model_dir=WHISPER_CPP_MODEL_DIR,
+)
+
+
 def _get_or_create_diarizer() -> "SpeakerDiarizer":
-    global diarizer
-    if diarizer is None:
-        diarizer = SpeakerDiarizer()
-    return diarizer
+    return transcription_service.get_or_create_diarizer()
 
 
 def _speaker_runtime_status() -> dict:
-    if not DIARIZATION_AVAILABLE:
-        return {
-            "speaker_verification_loaded": False,
-            "speaker_verification_model": None,
-            "diarization_loaded": False,
-            "diarization_model": None,
-            "registered_speakers": 0,
-        }
-
-    speaker_service = diarizer if diarizer is not None else SpeakerDiarizer()
-    return speaker_service.runtime_status()
+    return transcription_service.speaker_runtime_status()
 
 
 def ensure_speaker_verification_loaded() -> "SpeakerDiarizer":
-    if not DIARIZATION_AVAILABLE:
-        raise HTTPException(400, f"Speaker features not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
-
-    speaker_service = _get_or_create_diarizer()
-    speaker_service.ensure_speaker_verification_loaded()
-    print(
-        f"[Speaker] Speaker verification ready: model={speaker_service.sv_model_id}, registered={len(speaker_service.speakers)}"
-    )
-    return speaker_service
+    return transcription_service.ensure_speaker_verification_loaded()
 
 
 def ensure_diarization_loaded() -> "SpeakerDiarizer":
-    if not DIARIZATION_AVAILABLE:
-        raise HTTPException(400, f"Speaker diarization not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
-
-    speaker_service = _get_or_create_diarizer()
-    speaker_service.ensure_diarization_loaded()
-    print(
-        f"[Speaker] Diarization ready: model={speaker_service.diarization_model_id}, registered={len(speaker_service.speakers)}"
-    )
-    return speaker_service
+    return transcription_service.ensure_diarization_loaded()
 
 
 async def ensure_engine_loaded(
@@ -731,113 +515,15 @@ async def ensure_engine_loaded(
     speaker_mapping_model: Optional[str] = None,
     load_source: str = "auto_on_demand",
 ):
-    global engines
-
-    existing = engines.get(engine)
-    if (
-        existing
-        and existing.get("model") == model
-        and existing.get("diarization_model") == diarization_model
-        and existing.get("speaker_mapping_model") == speaker_mapping_model
-    ):
-        if engine != "funasr" or not enable_diarization or existing.get("diarization", False):
-            print(
-                f"[Load:{load_source}] Reusing engine={engine} model={model} diarization={existing.get('diarization', False)}"
-            )
-            return existing
-
-    if MOCK_MODE:
-        print(
-            f"[Load:{load_source}] Mock load engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model}"
-        )
-        engines[engine] = {
-            "engine": None,
-            "model": model,
-            "diarization": bool(enable_diarization),
-            "diarization_model": diarization_model,
-            "speaker_mapping_model": speaker_mapping_model,
-        }
-        return engines[engine]
-
-    print(
-        f"[Load:{load_source}] Loading engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model}"
+    transcription_service.set_mock_mode(MOCK_MODE)
+    return await transcription_service.ensure_engine_loaded(
+        engine,
+        model,
+        enable_diarization=enable_diarization,
+        diarization_model=diarization_model,
+        speaker_mapping_model=speaker_mapping_model,
+        load_source=load_source,
     )
-
-    if engine == "whisper":
-        if not WHISPER_AVAILABLE:
-            raise HTTPException(400, "Whisper engine not available. Install faster-whisper.")
-        eng = WhisperEngine()
-        whisper_entry = _get_registry_entry("whisper", model)
-        load_target = whisper_entry["path"] if whisper_entry and os.path.exists(whisper_entry.get("path", "")) else model
-        eng.load(load_target)
-        engines["whisper"] = {
-            "engine": eng,
-            "model": model,
-            "diarization_model": diarization_model,
-            "speaker_mapping_model": speaker_mapping_model,
-            "load_target": load_target,
-        }
-    elif engine == "whispercpp":
-        if not WHISPERCPP_AVAILABLE:
-            raise HTTPException(400, "Whisper.cpp engine not available. Install whisper-cpp via brew.")
-        whispercpp_entry = _get_registry_entry("whispercpp", model)
-        model_path = whispercpp_entry["path"] if whispercpp_entry and os.path.exists(whispercpp_entry.get("path", "")) else str(WHISPER_CPP_MODEL_DIR / f"ggml-{model}.bin")
-        eng = WhisperCppEngine(model_path=model_path)
-        engines["whispercpp"] = {
-            "engine": eng,
-            "model": model,
-            "diarization_model": diarization_model,
-            "speaker_mapping_model": speaker_mapping_model,
-            "load_target": model_path,
-        }
-    elif engine == "funasr":
-        if not FUNASR_AVAILABLE:
-            raise HTTPException(400, f"FunASR engine not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
-        eng = FunASREngine()
-        builtin_diarization = bool(enable_diarization and diarization_model == "funasr_builtin")
-        eng.load(model, enable_diarization=builtin_diarization)
-        engines["funasr"] = {
-            "engine": eng,
-            "model": model,
-            "diarization": builtin_diarization,
-            "diarization_model": diarization_model,
-            "speaker_mapping_model": speaker_mapping_model,
-            "load_target": model,
-        }
-    elif engine == "qwen3_asr":
-        if not QWEN3_ASR_AVAILABLE:
-            raise HTTPException(400, "Qwen3-ASR engine not available. Install transformers first.")
-        eng = Qwen3ASREngine()
-        qwen_entry = _get_registry_entry("qwen3_asr", model, category="asr")
-        load_target = qwen_entry["path"] if qwen_entry and os.path.exists(qwen_entry.get("path", "")) else model
-        eng.load(load_target)
-        engines["qwen3_asr"] = {
-            "engine": eng,
-            "model": model,
-            "diarization_model": diarization_model,
-            "speaker_mapping_model": speaker_mapping_model,
-            "load_target": load_target,
-        }
-    elif engine == "parakeet":
-        if not PARAKEET_AVAILABLE:
-            raise HTTPException(400, "Parakeet engine not available. Requires NVIDIA GPU and NeMo toolkit.")
-        eng = ParakeetEngine()
-        parakeet_entry = _get_registry_entry("parakeet", model)
-        load_target = parakeet_entry["path"] if parakeet_entry and os.path.exists(parakeet_entry.get("path", "")) else model
-        eng.load(load_target)
-        engines["parakeet"] = {
-            "engine": eng,
-            "model": model,
-            "diarization_model": diarization_model,
-            "speaker_mapping_model": speaker_mapping_model,
-            "load_target": load_target,
-        }
-    else:
-        raise HTTPException(400, f"Unknown engine: {engine}")
-
-    print(f"[Load] Loaded engine={engine} model={model} runtime={engines[engine]}")
-    print(f"[Load:{load_source}] Loaded engine={engine} model={model}")
-    return engines[engine]
 
 
 def _extract_builtin_speaker_labels(result: dict) -> List[dict]:
@@ -870,15 +556,11 @@ async def preload_models():
         try:
             if engine_name == "funasr" and FUNASR_AVAILABLE:
                 print(f"[Preload] Loading FunASR model: {model_name}...")
-                eng = FunASREngine()
-                eng.load(model_name)
-                engines["funasr"] = {"engine": eng, "model": model_name}
+                await ensure_engine_loaded("funasr", model_name, load_source="startup_preload")
                 print(f"[Preload] FunASR ready!")
             elif engine_name == "whisper" and WHISPER_AVAILABLE:
                 print(f"[Preload] Loading Whisper model: {model_name}...")
-                eng = WhisperEngine()
-                eng.load(model_name)
-                engines["whisper"] = {"engine": eng, "model": model_name}
+                await ensure_engine_loaded("whisper", model_name, load_source="startup_preload")
                 print(f"[Preload] Whisper ready!")
         except Exception as e:
             print(f"[Preload] Failed to load {engine_name}: {e}")
@@ -902,6 +584,7 @@ class TranscribeResult(BaseModel):
     asr_model: str
     diarization_model: Optional[str] = None
     speaker_mapping_model: Optional[str] = None
+    speaker_text_alignment_limited: bool = False
 
 
 class EngineInfo(BaseModel):
@@ -991,7 +674,7 @@ async def root():
 async def list_engines() -> List[EngineInfo]:
     payload = []
     for engine, spec in ENGINE_CATALOG.items():
-        loaded = engines.get(engine, {})
+        loaded = transcription_service.engines.get(engine, {})
         payload.append(
             EngineInfo(
                 name=engine,
@@ -1042,18 +725,23 @@ def _get_model_status(category: str, engine: str, model: str) -> ModelStatus:
         available = FUNASR_AVAILABLE
 
     if category == "asr":
-        loaded = engines.get(engine, {}).get("model") == model
+        loaded = transcription_service.engines.get(engine, {}).get("model") == model
     elif category == "diarization":
         if model == "funasr_builtin":
-            loaded = bool(engines.get("funasr", {}).get("diarization"))
+            loaded = bool(transcription_service.engines.get("funasr", {}).get("diarization"))
         else:
-            loaded = bool(diarizer and getattr(diarizer, "diarization_model_id", None))
+            loaded = bool(transcription_service.diarizer and getattr(transcription_service.diarizer, "diarization_model_id", None))
             if loaded:
-                loaded = bool(diarizer.diarization_model_id == DIARIZATION_MODELS.get(model, {}).get("model_id"))
+                expected_model_id = (
+                    DIARIZATION_MODELS.get(model, {}).get("model_id")
+                    or DIARIZATION_MODELS.get(model, {}).get("repo_id")
+                    or getattr(SpeakerDiarizer, "DIARIZATION_MODEL_MAP", {}).get(model)
+                )
+                loaded = bool(transcription_service.diarizer.diarization_model_id == expected_model_id)
     elif category == "speaker_mapping":
-        loaded = bool(diarizer and getattr(diarizer, "sv_model_id", None))
+        loaded = bool(transcription_service.diarizer and getattr(transcription_service.diarizer, "sv_model_id", None))
         if loaded:
-            loaded = bool(diarizer.sv_model_id == SPEAKER_MAPPING_MODELS.get(model, {}).get("model_id"))
+            loaded = bool(transcription_service.diarizer.sv_model_id == SPEAKER_MAPPING_MODELS.get(model, {}).get("model_id"))
 
     return ModelStatus(
         category=category,
@@ -1096,6 +784,8 @@ async def _download_hf_snapshot(
     state["downloaded_bytes"] = 0
 
     stop_event = asyncio.Event()
+    if not _is_within_models_dir(target_dir):
+        raise RuntimeError(f"Refusing to download outside models root: {target_dir}")
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     monitor_task = asyncio.create_task(_monitor_download_path(target_dir, state, stop_event))
 
@@ -1111,6 +801,8 @@ async def _download_hf_snapshot(
             local_dir=str(target_dir),
             token=token,
         )
+        if not _is_within_models_dir(Path(local_dir)):
+            raise RuntimeError(f"Downloaded path escaped models root: {local_dir}")
 
         size_bytes = _path_size(Path(local_dir))
         _set_registry_entry(engine, model_name, local_dir, size_bytes, category=category)
@@ -1143,6 +835,8 @@ async def _download_hf_file(
     state["downloaded_bytes"] = 0
 
     target_dir.mkdir(parents=True, exist_ok=True)
+    if not _is_within_models_dir(target_dir):
+        raise RuntimeError(f"Refusing to download outside models root: {target_dir}")
     target_file = (target_dir / filename).resolve()
     stop_event = asyncio.Event()
     monitor_task = asyncio.create_task(_monitor_download_path(target_file, state, stop_event))
@@ -1160,6 +854,8 @@ async def _download_hf_file(
             local_dir=str(target_dir),
             token=token,
         )
+        if not _is_within_models_dir(Path(local_file)):
+            raise RuntimeError(f"Downloaded file escaped models root: {local_file}")
 
         size_bytes = _path_size(Path(local_file))
         _set_registry_entry(engine, model_name, local_file, size_bytes, category=category)
@@ -1210,6 +906,8 @@ async def _download_funasr_model(model_name: str) -> None:
         local_dir = await asyncio.to_thread(
             snapshot_download, model_id, cache_dir=str(MODEL_CACHE_DIR)
         )
+        if not _is_within_models_dir(Path(local_dir)):
+            raise RuntimeError(f"Downloaded path escaped models root: {local_dir}")
 
         size_bytes = _dir_size(local_dir)
         _set_registry_entry("funasr", model_name, local_dir, size_bytes)
@@ -1258,6 +956,8 @@ async def _download_modelscope_snapshot(category: str, engine: str, model_name: 
             model_id,
             cache_dir=str(MODEL_CACHE_DIR),
         )
+        if not _is_within_models_dir(Path(downloaded_dir)):
+            raise RuntimeError(f"Downloaded path escaped models root: {downloaded_dir}")
         size_bytes = _path_size(Path(downloaded_dir))
         _set_registry_entry(engine, model_name, downloaded_dir, size_bytes, category=category)
         state["size_bytes"] = size_bytes
@@ -1569,8 +1269,6 @@ async def transcribe(
     enable_ai_refine: bool = Form(False),
 ) -> TranscribeResult:
     """转录音频文件"""
-    global diarizer
-
     suffix = Path(audio.filename).suffix or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await audio.read()
@@ -1609,6 +1307,9 @@ async def transcribe(
                 asr_model=model,
                 diarization_model=diarization_model if enable_diarization else None,
                 speaker_mapping_model=speaker_mapping_model if enable_diarization else None,
+                speaker_text_alignment_limited=bool(
+                    result.get("speaker_text_alignment_limited", False) or engine == "parakeet"
+                ),
             )
 
         entry = await ensure_engine_loaded(
@@ -1634,6 +1335,8 @@ async def transcribe(
         else:
             print(f"[Transcribe] Engine={engine}, hotwords={hotwords or '(none)'}")
             result = eng.transcribe(tmp_path, language=language)
+            if engine == "parakeet":
+                print("[Transcribe] Parakeet current round uses limited speaker-text alignment path")
 
         diarization_done = False
         if enable_diarization:
@@ -1710,6 +1413,7 @@ async def transcribe(
             asr_model=model,
             diarization_model=diarization_model if enable_diarization else None,
             speaker_mapping_model=speaker_mapping_model if enable_diarization else None,
+            speaker_text_alignment_limited=bool(result.get("speaker_text_alignment_limited", False)),
         )
 
     finally:
@@ -1751,12 +1455,12 @@ async def stream_transcribe(websocket: WebSocket):
     engine_name = "whisper"
     model = "base"
     
-    if engine_name not in engines:
+    if engine_name not in transcription_service.engines:
         eng = WhisperEngine()
         eng.load(model)
-        engines[engine_name] = {"engine": eng, "model": model}
-    
-    eng = engines[engine_name]["engine"]
+        transcription_service.engines[engine_name] = {"engine": eng, "model": model}
+
+    eng = transcription_service.engines[engine_name]["engine"]
     
     buffer = bytearray()
     chunk_duration = 8
@@ -1836,7 +1540,7 @@ async def list_speakers():
     if not DIARIZATION_AVAILABLE:
         return {"speakers": []}
 
-    speaker_service = diarizer if diarizer is not None else SpeakerDiarizer()
+    speaker_service = transcription_service.diarizer if transcription_service.diarizer is not None else SpeakerDiarizer()
     return {"speakers": speaker_service.list_speakers()}
 
 
@@ -1849,7 +1553,7 @@ async def delete_speaker(speaker_id: str):
     if not DIARIZATION_AVAILABLE:
         raise HTTPException(400, f"Speaker features not available: {FUNASR_RUNTIME.get('error') or 'runtime probe failed'}")
 
-    target_diarizer = diarizer if diarizer else SpeakerDiarizer()
+    target_diarizer = transcription_service.diarizer if transcription_service.diarizer else SpeakerDiarizer()
     success = target_diarizer.delete_speaker(speaker_id)
     if not success:
         raise HTTPException(404, f"Speaker {speaker_id} not found")
@@ -1876,7 +1580,7 @@ async def health_check():
                 "diarization": bool(entry.get("diarization", False)),
                 "load_target": entry.get("load_target"),
             }
-            for name, entry in engines.items()
+            for name, entry in transcription_service.engines.items()
         },
         "speaker_runtime": _speaker_runtime_status(),
         "runtime_checks": {
@@ -1902,6 +1606,7 @@ def main():
     args = parser.parse_args()
     
     MOCK_MODE = args.mock or (not WHISPER_AVAILABLE and not WHISPERCPP_AVAILABLE and not FUNASR_AVAILABLE and not PARAKEET_AVAILABLE)
+    transcription_service.set_mock_mode(MOCK_MODE)
 
     if MOCK_MODE:
         print("=" * 50)

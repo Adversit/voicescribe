@@ -57,28 +57,28 @@
 
 ## 5. `server.py` 渐进式拆分任务
 
-- [ ] T16 从 [server.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/server.py) 中抽出 `model_catalog` 服务层
-- [ ] T17 从 [server.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/server.py) 中抽出 `model_registry` 服务层
-- [ ] T18 从 [server.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/server.py) 中抽出 `transcription_service` 服务层
-- [ ] T19 视实现进度决定是否同步抽出 `history_service`
-- [ ] T20 保持 `server.py` 为 FastAPI 入口层，不在本轮再继续向里堆新业务规则
+- [x] T16 从 [server.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/server.py) 中抽出 `model_catalog` 服务层
+- [x] T17 从 [server.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/server.py) 中抽出 `model_registry` 服务层
+- [x] T18 从 [server.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/server.py) 中抽出 `transcription_service` 服务层
+- [x] T19 视实现进度决定是否同步抽出 `history_service`
+- [x] T20 保持 `server.py` 为 FastAPI 入口层，不在本轮再继续向里堆新业务规则
 
 ## 6. 运行时与引擎任务
 
 ### 6.1 说话人运行时
 
 - [x] T21 将 [speaker.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/diarization/speaker.py) 从“单套 diarization + sv runtime”改为可选模型矩阵
-- [ ] T22 支持外部分离模型：`campplus-diarization / sond-diarization / 3d-speaker / pyannote-3.1`
+- [x] T22 支持外部分离模型：`campplus-diarization / sond-diarization / 3d-speaker / pyannote-3.1`
 - [x] T23 支持映射模型：`campp / eres2netv2`
 - [x] T24 保证 `FunASR` 下 `funasr_builtin` 与外部分离严格显式二选一
 
 ### 6.2 ASR 引擎接入
 
 - [x] T25 新增 [qwen3_asr_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/qwen3_asr_engine.py) 并接入后端目录
-- [ ] T26 更新 [funasr_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/funasr_engine.py) 以支持内置分离与外部分离并行路径
-- [ ] T27 更新 [whisper_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/whisper_engine.py) 对接外部说话人链路
-- [ ] T28 更新 [whispercpp_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/whispercpp_engine.py) 对接外部说话人链路
-- [ ] T29 更新 [parakeet_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/parakeet_engine.py) 接入矩阵并保留本轮受限路径说明
+- [x] T26 更新 [funasr_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/funasr_engine.py) 以支持内置分离与外部分离并行路径
+- [x] T27 更新 [whisper_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/whisper_engine.py) 对接外部说话人链路
+- [x] T28 更新 [whispercpp_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/whispercpp_engine.py) 对接外部说话人链路
+- [x] T29 更新 [parakeet_engine.py](/D:/learn/AIGC/voicescribe/0324/voicescribe/backend/engines/parakeet_engine.py) 接入矩阵并保留本轮受限路径说明
 
 ## 7. 前端类型与设置任务
 
@@ -123,7 +123,7 @@
 - [x] T51 token 保存到 Windows Credential Manager，而不是 `.env` 或普通设置文件
 - [x] T52 已保存 token 的模型再次下载时不重复弹窗
 - [x] T53 下载失败时保留失败原因并允许重试
-- [ ] T54 所有新模型主下载路径固定在 [models](/D:/learn/AIGC/voicescribe/0324/voicescribe/models)
+- [x] T54 所有新模型主下载路径固定在 [models](/D:/learn/AIGC/voicescribe/0324/voicescribe/models)
 
 ## 11. 加载与执行链路任务
 
@@ -149,19 +149,19 @@
 - [x] T68 执行后端启动 / 接口 / 目录检查
 - [ ] T69 执行手动功能验收
 - [x] T70 将测试结果回写到正式测试记录
-- [ ] T71 将新增 bug 回写到正式 bug 记录
+- [x] T71 将新增 bug 回写到正式 bug 记录
 
 ## 14. 完成定义
 
 以下条件全部满足，才可将本专题标记为完成：
 
-- [ ] D1 文档口径与代码行为一致
+- [x] D1 文档口径与代码行为一致
 - [ ] D2 引擎页三块区域可用
 - [ ] D3 `Qwen3-ASR` 引擎与 `Qwen3-ASR-1.7B` 可见
 - [ ] D4 `CampPlus Diarization` 与 `SOND Diarization` 作为正式项接入
-- [ ] D5 手动预加载与首次自动加载都可用
+- [x] D5 手动预加载与首次自动加载都可用
 - [ ] D6 token 弹窗与 Credential Manager 链路可用
 - [ ] D7 旧设置迁移不丢原 `selectedEngine / selectedModel`
 - [ ] D8 旧历史记录可继续读取
-- [ ] D9 转录结果与历史记录都能保留完整模型组合
-- [ ] D10 测试结果已经写入正式测试记录后再对外汇报
+- [x] D9 转录结果与历史记录都能保留完整模型组合
+- [x] D10 测试结果已经写入正式测试记录后再对外汇报

@@ -140,3 +140,47 @@ pub fn delete_model_download_token(
 ) -> Result<(), String> {
     Err("Windows Credential Manager is only available on Windows".to_string())
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::{
+        delete_model_download_token, get_model_download_token, save_model_download_token,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_model_name() -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock drift")
+            .as_nanos();
+        format!("pyannote-3.1-test-{nanos}")
+    }
+
+    #[test]
+    fn model_download_token_roundtrip_works() {
+        let category = "diarization".to_string();
+        let engine = "diarization".to_string();
+        let model = unique_model_name();
+
+        delete_model_download_token(category.clone(), engine.clone(), model.clone())
+            .expect("delete stale token");
+
+        save_model_download_token(
+            category.clone(),
+            engine.clone(),
+            model.clone(),
+            "test-token-123".to_string(),
+        )
+        .expect("save token");
+
+        let loaded = get_model_download_token(category.clone(), engine.clone(), model.clone())
+            .expect("read token");
+        assert_eq!(loaded.as_deref(), Some("test-token-123"));
+
+        delete_model_download_token(category.clone(), engine.clone(), model.clone())
+            .expect("delete token");
+
+        let deleted = get_model_download_token(category, engine, model).expect("read deleted token");
+        assert_eq!(deleted, None);
+    }
+}

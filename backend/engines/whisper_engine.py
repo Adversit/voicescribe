@@ -28,6 +28,14 @@ class WhisperEngine:
         self.model = None
         self.model_name = None
         self.backend_name = "faster-whisper" if self.use_faster else "openai-whisper"
+        self.supports_external_speaker_chain = True
+
+    def capabilities(self) -> Dict[str, Any]:
+        return {
+            "supports_builtin_diarization": False,
+            "supports_external_speaker_chain": True,
+            "speaker_text_alignment_limited": False,
+        }
 
     @staticmethod
     def _should_force_openai_whisper() -> bool:

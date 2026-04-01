@@ -26,6 +26,15 @@ class FunASREngine:
     def __init__(self):
         self.model = None
         self.model_name = None
+        self.enable_diarization = False
+        self.supports_external_speaker_chain = True
+
+    def capabilities(self) -> Dict[str, Any]:
+        return {
+            "supports_builtin_diarization": True,
+            "supports_external_speaker_chain": True,
+            "speaker_text_alignment_limited": False,
+        }
     
     def load(self, model_name: str = "paraformer-zh", enable_diarization: bool = False):
         """加载模型"""
