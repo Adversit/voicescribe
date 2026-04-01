@@ -272,19 +272,54 @@ function getSelectionForEngine(settings: Pick<AppSettings, "selectedEngine" | "e
     ?? defaultEngineSelections.funasr;
 }
 
+function reconcileSelectionsWithCatalog(
+  currentSelections: EngineSelections,
+  engines: EngineInfo[],
+): EngineSelections {
+  const nextSelections = cloneEngineSelections(currentSelections);
+
+  for (const engine of engines) {
+    const fallback =
+      engine.default_selection
+      ?? defaultEngineSelections[engine.name]
+      ?? defaultEngineSelections.funasr;
+    const current = nextSelections[engine.name] ?? fallback;
+
+    nextSelections[engine.name] = {
+      asrModel: engine.asr_models.includes(current.asrModel) ? current.asrModel : fallback.asrModel,
+      diarizationModel: engine.diarization_models.includes(current.diarizationModel)
+        ? current.diarizationModel
+        : fallback.diarizationModel,
+      speakerMappingModel: engine.speaker_mapping_models.includes(current.speakerMappingModel)
+        ? current.speakerMappingModel
+        : fallback.speakerMappingModel,
+    };
+  }
+
+  return nextSelections;
+}
+
 function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
-  const partial = value ?? {};
-  const next = {
-    ...defaultSettings,
-    ...partial,
+  const partial = (value ?? {}) as Partial<AppSettings> & { selectedModel?: string };
+  const next: AppSettings = {
+    selectedEngine: partial.selectedEngine ?? defaultSettings.selectedEngine,
     engineSelections: mergeEngineSelections(partial.engineSelections),
+    language: partial.language ?? defaultSettings.language,
+    enableDiarization: partial.enableDiarization ?? defaultSettings.enableDiarization,
+    outputMode: partial.outputMode ?? defaultSettings.outputMode,
+    hotwords: partial.hotwords ?? defaultSettings.hotwords,
+    enableAIRefine: partial.enableAIRefine ?? defaultSettings.enableAIRefine,
+    enableStreaming: partial.enableStreaming ?? defaultSettings.enableStreaming,
+    enableAISummary: partial.enableAISummary ?? defaultSettings.enableAISummary,
+    retainAudio: partial.retainAudio ?? defaultSettings.retainAudio,
+    launchAtLogin: partial.launchAtLogin ?? defaultSettings.launchAtLogin,
+    hotkeyBinding: defaultHotkeyBinding,
   };
 
-  const legacySelectedModel = (partial as Partial<AppSettings> & { selectedModel?: string }).selectedModel;
+  const legacySelectedModel = partial.selectedModel;
   if (legacySelectedModel) {
-    const selectedEngine = partial.selectedEngine ?? defaultSettings.selectedEngine;
-    next.engineSelections[selectedEngine] = {
-      ...(next.engineSelections[selectedEngine] ?? defaultEngineSelections.funasr),
+    next.engineSelections[next.selectedEngine] = {
+      ...(next.engineSelections[next.selectedEngine] ?? defaultEngineSelections.funasr),
       asrModel: legacySelectedModel,
     };
   }
@@ -293,8 +328,7 @@ function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppS
     next.engineSelections[next.selectedEngine] =
       defaultEngineSelections[next.selectedEngine] ?? defaultEngineSelections.funasr;
   }
-
-  next.hotkeyBinding = normalizeHotkeyBinding(value?.hotkeyBinding);
+  next.hotkeyBinding = normalizeHotkeyBinding(partial.hotkeyBinding);
   return next;
 }
 
@@ -616,28 +650,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const nextSelectedEngine = engines.some((engine) => engine.name === currentSettings.selectedEngine)
       ? currentSettings.selectedEngine
       : (engines[0]?.name ?? currentSettings.selectedEngine);
-    const nextSelections = cloneEngineSelections(currentSettings.engineSelections);
-    for (const engine of engines) {
-      nextSelections[engine.name] = nextSelections[engine.name]
-        ?? engine.default_selection
-        ?? defaultEngineSelections[engine.name]
-        ?? defaultEngineSelections.funasr;
-    }
-    set({
-      backendConnected: true,
-      availableEngines: engines,
-      backendRuntime: runtime,
-      settings: {
-        ...currentSettings,
-        selectedEngine: nextSelectedEngine,
+    let persistedSettings = currentSettings;
+    set((state) => {
+      const latestSettings = state.settings;
+      const resolvedSelectedEngine = engines.some((engine) => engine.name === latestSettings.selectedEngine)
+        ? latestSettings.selectedEngine
+        : (engines[0]?.name ?? latestSettings.selectedEngine);
+      const nextSelections = reconcileSelectionsWithCatalog(latestSettings.engineSelections, engines);
+      persistedSettings = {
+        ...latestSettings,
+        selectedEngine: resolvedSelectedEngine,
         engineSelections: nextSelections,
-      },
+      };
+      return {
+        backendConnected: true,
+        availableEngines: engines,
+        backendRuntime: runtime,
+        settings: persistedSettings,
+      };
     });
-    const persistedSettings = {
-      ...currentSettings,
-      selectedEngine: nextSelectedEngine,
-      engineSelections: nextSelections,
-    };
     persistBrowserSettings(persistedSettings);
     void persistSettings(persistedSettings).catch(() => undefined);
   },

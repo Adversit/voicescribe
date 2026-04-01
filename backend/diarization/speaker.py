@@ -20,7 +20,7 @@ class SpeakerDiarizer:
     DIARIZATION_MODEL_MAP = {
         "campplus-diarization": "iic/speech_campplus_speaker-diarization_common",
         "sond-diarization": "damo/speech_diarization_sond-zh-cn-alimeeting-16k-n16k4-pytorch",
-        "3d-speaker": "3D-Speaker/3D-Speaker",
+        "3d-speaker": "3d-speaker",
         "pyannote-3.1": "pyannote/speaker-diarization-3.1",
     }
 

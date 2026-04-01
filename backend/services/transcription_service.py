@@ -169,7 +169,7 @@ class RuntimeTranscriptionService:
             }
         elif engine == "qwen3_asr":
             if not self.qwen3_asr_available:
-                raise HTTPException(400, "Qwen3-ASR engine not available. Install transformers first.")
+                raise HTTPException(400, "Qwen3-ASR engine not available. Install qwen-asr first.")
             eng = self.qwen3_asr_engine_cls()
             qwen_entry = self.registry_getter("qwen3_asr", model, "asr")
             load_target = qwen_entry["path"] if qwen_entry and os.path.exists(qwen_entry.get("path", "")) else model

@@ -1,24 +1,50 @@
 """
 Qwen3-ASR Engine
-独立的 Qwen3-ASR 转录引擎封装
+Vendor-supported Qwen3-ASR wrapper via qwen-asr.
 """
 
 from pathlib import Path
 from typing import Any, Dict
 
+import soundfile as sf
+
 from config import HF_HOME_DIR
 
 
 class Qwen3ASREngine:
-    """Qwen3-ASR 语音识别引擎。"""
+    """Qwen3-ASR speech recognition engine."""
 
     MODELS = {
         "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B",
     }
 
+    LANGUAGE_MAP = {
+        "zh": "Chinese",
+        "zh-cn": "Chinese",
+        "zh-tw": "Chinese",
+        "yue": "Cantonese",
+        "en": "English",
+        "ja": "Japanese",
+        "ko": "Korean",
+        "fr": "French",
+        "de": "German",
+        "es": "Spanish",
+        "ru": "Russian",
+    }
+
     def __init__(self):
         self.pipeline = None
         self.model_name = None
+
+    def _normalize_language(self, language: str | None) -> str | None:
+        if not language:
+            return None
+        lowered = language.strip().lower()
+        if not lowered:
+            return None
+        if lowered in self.LANGUAGE_MAP:
+            return self.LANGUAGE_MAP[lowered]
+        return lowered[:1].upper() + lowered[1:]
 
     def load(self, model_name: str = "qwen3-asr-1.7b"):
         model_source = Path(model_name).expanduser()
@@ -28,20 +54,18 @@ class Qwen3ASREngine:
             raise ValueError(f"Unknown model: {model_name}. Available: {list(self.MODELS.keys())}")
 
         try:
-            from transformers import pipeline
+            from qwen_asr import Qwen3ASRModel
         except ImportError as err:
             raise ImportError(
-                "Qwen3-ASR requires transformers. Install with: pip install transformers"
+                "Qwen3-ASR requires qwen-asr. Install with: pip install -U qwen-asr"
             ) from err
 
         model_id = str(model_source.resolve()) if is_local_path else self.MODELS[model_name]
-        self.pipeline = pipeline(
-            task="automatic-speech-recognition",
-            model=model_id,
+        self.pipeline = Qwen3ASRModel.from_pretrained(
+            model_id,
             trust_remote_code=True,
-            model_kwargs={
-                "cache_dir": str(HF_HOME_DIR),
-            },
+            cache_dir=str(HF_HOME_DIR),
+            device_map="auto",
         )
         self.model_name = model_name
         print(f"[Qwen3-ASR] Loaded model: {model_name}")
@@ -50,33 +74,32 @@ class Qwen3ASREngine:
         if self.pipeline is None:
             raise RuntimeError("Model not loaded. Call load() first.")
 
-        result = self.pipeline(
-            audio_path,
-            return_timestamps=True,
-            generate_kwargs={"language": language},
-        )
+        normalized_language = self._normalize_language(language)
+        results = self.pipeline.transcribe(audio_path, language=normalized_language)
+        result = results[0] if results else None
+        text = (getattr(result, "text", "") or "").strip() if result is not None else ""
 
-        chunks = result.get("chunks") or []
+        try:
+            audio_info = sf.info(audio_path)
+            duration = float(audio_info.duration or 0.0)
+        except Exception:
+            duration = 0.0
+
         segments = []
-        for chunk in chunks:
-            timestamp = chunk.get("timestamp") or (None, None)
-            start, end = timestamp if isinstance(timestamp, (list, tuple)) and len(timestamp) == 2 else (None, None)
-            if start is None or end is None:
-                continue
+        if text:
             segments.append(
                 {
-                    "start": float(start),
-                    "end": float(end),
-                    "text": (chunk.get("text") or "").strip(),
+                    "start": 0.0,
+                    "end": duration,
+                    "text": text,
                 }
             )
 
-        duration = segments[-1]["end"] if segments else 0.0
         return {
-            "text": (result.get("text") or "").strip(),
+            "text": text,
             "segments": segments,
             "duration": duration,
-            "language": language,
+            "language": normalized_language or language,
         }
 
     def unload(self):

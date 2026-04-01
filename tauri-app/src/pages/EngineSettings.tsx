@@ -31,12 +31,18 @@ function formatBytes(value: number | null) {
   if (!value) {
     return "—";
   }
-  return (
-    new Intl.NumberFormat("zh-CN", {
-      notation: "compact",
-      maximumFractionDigits: 1,
-    }).format(value) + "B"
-  );
+  const gb = 1024 * 1024 * 1024;
+  const mb = 1024 * 1024;
+  const formatter = new Intl.NumberFormat("zh-CN", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  });
+
+  if (value >= gb) {
+    return `${formatter.format(value / gb)} GB`;
+  }
+
+  return `${formatter.format(value / mb)} MB`;
 }
 
 function defaultSelectionForEngine(engine: string): EngineSelection {
@@ -109,6 +115,7 @@ type ModelSectionProps = {
   description: string;
   category: ModelCategory;
   selectedValue: string;
+  selectedLabel?: string;
   invalidReason?: string | null;
   options: string[];
   displayModels: ModelStatus[];
@@ -123,6 +130,7 @@ function ModelSection(props: ModelSectionProps) {
     description,
     category,
     selectedValue,
+    selectedLabel,
     invalidReason,
     options,
     displayModels,
@@ -130,6 +138,10 @@ function ModelSection(props: ModelSectionProps) {
     onDownload,
     onDelete,
   } = props;
+
+  const resolvedOptions = options.includes(selectedValue) || !selectedValue
+    ? options
+    : [selectedValue, ...options];
 
   return (
     <SettingsSection
@@ -143,9 +155,11 @@ function ModelSection(props: ModelSectionProps) {
           onChange={(event) => onSelect(event.target.value)}
           className={`${selectClassName} ${invalidReason ? "border-[#c53030] text-[#9b2c2c]" : ""}`}
         >
-          {options.map((model) => (
+          {resolvedOptions.map((model) => (
             <option key={model} value={model}>
-              {displayModels.find((item) => item.model === model)?.display_name ?? model}
+              {model === selectedValue && invalidReason && !options.includes(model)
+                ? `${selectedLabel ?? displayModels.find((item) => item.model === model)?.display_name ?? model}（当前失效）`
+                : (displayModels.find((item) => item.model === model)?.display_name ?? model)}
             </option>
           ))}
         </select>
@@ -231,7 +245,13 @@ function looksLikeCredentialError(message: string | null | undefined) {
   ].some((keyword) => lowered.includes(keyword));
 }
 
+function getEngineDisplayName(engineName: string) {
+  return engineDescriptions[engineName]?.split("，")[0] ?? engineName;
+}
+
 function getSelectionInvalidReason(
+  fieldLabel: string,
+  engineName: string,
   selectedValue: string,
   options: string[],
   displayModels: ModelStatus[],
@@ -241,28 +261,28 @@ function getSelectionInvalidReason(
   }
 
   if (!selectedValue) {
-    return "未选择模型";
+    return `${fieldLabel} 未选择模型`;
   }
 
   if (!options.includes(selectedValue)) {
-    return "当前引擎下不再兼容该模型";
+    return `${fieldLabel} 无效：${selectedValue} 不属于 ${getEngineDisplayName(engineName)} 的可用模型`;
   }
 
   const selectedModel = displayModels.find((item) => item.model === selectedValue);
   if (!selectedModel) {
-    return "模型目录中已不存在该项";
+    return `${fieldLabel} 无效：${selectedValue} 不在当前模型目录中`;
   }
 
   if (selectedModel.error && !selectedModel.downloading) {
-    return selectedModel.error;
+    return `${fieldLabel} 无效：${selectedModel.display_name}，${selectedModel.error}`;
   }
 
   if (!selectedModel.available && selectedModel.downloadable) {
-    return "模型未下载或已被删除";
+    return `${fieldLabel} 无效：${selectedModel.display_name} 未下载或已被删除`;
   }
 
   if (!selectedModel.available && !selectedModel.downloadable) {
-    return "当前运行环境不可用";
+    return `${fieldLabel} 无效：${selectedModel.display_name} 在当前运行环境不可用`;
   }
 
   return null;
@@ -330,25 +350,38 @@ export function EngineSettings() {
   };
 
   const asrInvalidReason = getSelectionInvalidReason(
+    "ASR",
+    settings.selectedEngine,
     currentSelection.asrModel,
     selectedEngineInfo?.asr_models ?? [],
     asrModels,
   );
   const diarizationInvalidReason = getSelectionInvalidReason(
+    "分离",
+    settings.selectedEngine,
     currentSelection.diarizationModel,
     selectedEngineInfo?.diarization_models ?? [],
     diarizationModels,
   );
   const mappingInvalidReason = getSelectionInvalidReason(
+    "映射",
+    settings.selectedEngine,
     currentSelection.speakerMappingModel,
     selectedEngineInfo?.speaker_mapping_models ?? [],
     mappingModels,
   );
-  const comboInvalidReasons = [
-    asrInvalidReason ? `ASR：${asrInvalidReason}` : null,
-    diarizationInvalidReason ? `分离：${diarizationInvalidReason}` : null,
-    mappingInvalidReason ? `映射：${mappingInvalidReason}` : null,
-  ].filter(Boolean) as string[];
+  const comboInvalidReasons = [asrInvalidReason, diarizationInvalidReason, mappingInvalidReason].filter(Boolean) as string[];
+
+  const restoreDefaultSelection = () => {
+    const defaultSelection = selectedEngineInfo?.default_selection ?? defaultSelectionForEngine(settings.selectedEngine);
+    updateSettings({
+      engineSelections: {
+        ...settings.engineSelections,
+        [settings.selectedEngine]: { ...defaultSelection },
+      },
+    });
+    setToast(`${getEngineDisplayName(settings.selectedEngine)} 已恢复默认组合`);
+  };
 
   const openTokenPrompt = (model: ModelStatus, token: string, error: string | null, hasStoredToken: boolean) => {
     setTokenPrompt({
@@ -483,6 +516,9 @@ export function EngineSettings() {
               <button type="button" onClick={() => void refreshModels()} className={secondaryButtonClassName}>
                 刷新
               </button>
+              <button type="button" onClick={restoreDefaultSelection} className={secondaryButtonClassName}>
+                恢复默认组合
+              </button>
               <button
                 type="button"
                 onClick={() =>
@@ -529,7 +565,7 @@ export function EngineSettings() {
               </select>
             </SettingsField>
 
-            <SettingsField label="当前默认组合">
+            <SettingsField label="当前保存组合">
               <div
                 className={`rounded-[12px] px-3 py-3 text-sm ${
                   comboInvalidReasons.length > 0
@@ -555,6 +591,7 @@ export function EngineSettings() {
           description="当前引擎下的可用 ASR 模型。"
           category="asr"
           selectedValue={currentSelection.asrModel}
+          selectedLabel={currentSelection.asrModel}
           invalidReason={asrInvalidReason}
           options={selectedEngineInfo?.asr_models ?? []}
           displayModels={asrModels}
@@ -568,6 +605,7 @@ export function EngineSettings() {
           description="只显示当前引擎兼容的分离模型。"
           category="diarization"
           selectedValue={currentSelection.diarizationModel}
+          selectedLabel={currentSelection.diarizationModel}
           invalidReason={diarizationInvalidReason}
           options={selectedEngineInfo?.diarization_models ?? []}
           displayModels={diarizationModels}
@@ -581,6 +619,7 @@ export function EngineSettings() {
           description="只显示当前引擎兼容的映射 / 识别模型。"
           category="speaker_mapping"
           selectedValue={currentSelection.speakerMappingModel}
+          selectedLabel={currentSelection.speakerMappingModel}
           invalidReason={mappingInvalidReason}
           options={selectedEngineInfo?.speaker_mapping_models ?? []}
           displayModels={mappingModels}

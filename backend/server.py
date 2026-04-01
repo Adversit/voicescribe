@@ -128,9 +128,9 @@ except ImportError as e:
 
 try:
     from engines.qwen3_asr_engine import Qwen3ASREngine
-    QWEN3_ASR_AVAILABLE = _module_available("transformers")
+    QWEN3_ASR_AVAILABLE = _module_available("qwen_asr")
     if not QWEN3_ASR_AVAILABLE:
-        print("[Warning] Qwen3-ASR engine not available: missing transformers")
+        print("[Warning] Qwen3-ASR engine not available: missing qwen-asr")
 except ImportError as e:
     print(f"[Warning] Qwen3-ASR engine not available: {e}")
 
@@ -173,6 +173,19 @@ QWEN3_ASR_MODEL_REPOS = {
     "qwen3-asr-1.7b": "Qwen/Qwen3-ASR-1.7B",
 }
 
+THREE_D_SPEAKER_COMPONENTS = [
+    {
+        "name": "speaker_embedding",
+        "model_id": "iic/speech_campplus_sv_zh_en_16k-common_advanced",
+        "revision": "v1.0.0",
+    },
+    {
+        "name": "vad",
+        "model_id": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "revision": "v2.0.4",
+    },
+]
+
 DIARIZATION_MODELS = {
     "funasr_builtin": {
         "display_name": "FunASR 内置分离",
@@ -196,7 +209,6 @@ DIARIZATION_MODELS = {
     },
     "3d-speaker": {
         "display_name": "3D-Speaker",
-        "repo_id": "3D-Speaker/3D-Speaker",
         "downloadable": True,
         "requires_token": False,
         "engine_scope": ["funasr", "qwen3_asr", "whisper", "whispercpp", "parakeet"],
@@ -743,6 +755,10 @@ def _get_model_status(category: str, engine: str, model: str) -> ModelStatus:
         if loaded:
             loaded = bool(transcription_service.diarizer.sv_model_id == SPEAKER_MAPPING_MODELS.get(model, {}).get("model_id"))
 
+    error_message = download_state.get("error")
+    if not error_message and not available and not bool(spec.get("downloadable", True)):
+        error_message = spec.get("unavailable_reason")
+
     return ModelStatus(
         category=category,
         engine=engine,
@@ -756,7 +772,7 @@ def _get_model_status(category: str, engine: str, model: str) -> ModelStatus:
         loaded=loaded,
         size_bytes=size_bytes,
         downloaded_bytes=download_state.get("downloaded_bytes"),
-        error=download_state.get("error"),
+        error=error_message,
     )
 
 
@@ -973,6 +989,82 @@ async def _download_modelscope_snapshot(category: str, engine: str, model_name: 
         state["downloading"] = False
 
 
+async def _download_3d_speaker_bundle() -> None:
+    key = "diarization:diarization:3d-speaker"
+    state = model_downloads.setdefault(key, {})
+    state["downloading"] = True
+    state["error"] = None
+    state["downloaded_bytes"] = 0
+
+    bundle_root = _model_storage_path("diarization", "3d-speaker", category="diarization")
+    if bundle_root is None:
+        raise RuntimeError("3D-Speaker bundle root is not configured")
+    if not _is_within_models_dir(bundle_root):
+        raise RuntimeError(f"Refusing to download outside models root: {bundle_root}")
+
+    baseline = _cache_total_size()
+    stop_event = asyncio.Event()
+
+    async def monitor_cache():
+        while not stop_event.is_set():
+            try:
+                current = _cache_total_size()
+                state["downloaded_bytes"] = max(0, current - baseline)
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
+    monitor_task = asyncio.create_task(monitor_cache())
+
+    try:
+        if not _module_available("modelscope"):
+            raise RuntimeError("modelscope not available")
+
+        from modelscope.hub.snapshot_download import snapshot_download
+
+        bundle_root.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "model": "3d-speaker",
+            "source": "modelscope/3D-Speaker official diarization recipe",
+            "components": [],
+        }
+
+        for component in THREE_D_SPEAKER_COMPONENTS:
+            downloaded_dir = await asyncio.to_thread(
+                snapshot_download,
+                component["model_id"],
+                revision=component.get("revision"),
+                cache_dir=str(bundle_root),
+            )
+            downloaded_path = Path(downloaded_dir).resolve()
+            if not _is_within_models_dir(downloaded_path):
+                raise RuntimeError(f"Downloaded path escaped models root: {downloaded_path}")
+            manifest["components"].append(
+                {
+                    "name": component["name"],
+                    "model_id": component["model_id"],
+                    "revision": component.get("revision"),
+                    "path": str(downloaded_path),
+                }
+            )
+
+        manifest_path = (bundle_root / "3d-speaker.bundle.json").resolve()
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        size_bytes = _path_size(bundle_root)
+        _set_registry_entry("diarization", "3d-speaker", str(bundle_root), size_bytes, category="diarization")
+        state["size_bytes"] = size_bytes
+        state["downloaded_bytes"] = size_bytes
+    except Exception as e:
+        state["error"] = str(e)
+    finally:
+        stop_event.set()
+        try:
+            await monitor_task
+        except Exception:
+            pass
+        state["downloading"] = False
+
+
 async def _download_whisper_model(model_name: str) -> None:
     repo_id = WHISPER_MODEL_REPOS.get(model_name)
     if not repo_id:
@@ -1034,7 +1126,7 @@ async def download_model(
         return {"status": "already", "category": category, "engine": engine, "model": model}
 
     if not status.downloadable:
-        raise HTTPException(400, f"Download not supported for model: {category}/{model}")
+        raise HTTPException(400, spec.get("unavailable_reason") or f"Download not supported for model: {category}/{model}")
 
     if category == "asr" and engine == "funasr":
         if not FUNASR_AVAILABLE:
@@ -1051,7 +1143,9 @@ async def download_model(
     elif category == "diarization":
         if model in {"campplus-diarization", "sond-diarization"}:
             asyncio.create_task(_download_modelscope_snapshot(category, engine, model, spec["model_id"]))
-        elif model in {"3d-speaker", "pyannote-3.1"}:
+        elif model == "3d-speaker":
+            asyncio.create_task(_download_3d_speaker_bundle())
+        elif model == "pyannote-3.1":
             if spec.get("requires_token") and not token:
                 raise HTTPException(400, "Token required for this model")
             asyncio.create_task(
@@ -1212,12 +1306,13 @@ async def load_engine(
             load_source = load_source or request.query_params.get("load_source")
     if engine is None or model is None:
         raise HTTPException(422, "Missing engine/model")
+    resolved_enable_diarization = bool(enable_diarization) if enable_diarization is not None else bool(diarization_model)
     _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
 
     await ensure_engine_loaded(
         engine,
         model,
-        bool(enable_diarization),
+        resolved_enable_diarization,
         diarization_model=diarization_model,
         speaker_mapping_model=speaker_mapping_model,
         load_source=load_source or "manual_preload",

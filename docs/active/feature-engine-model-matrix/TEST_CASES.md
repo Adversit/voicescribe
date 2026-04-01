@@ -383,6 +383,86 @@
   - 仓库外路径写入被 `ValueError` 拒绝
 - 备注：T54、R11、R12 的自动化部分已覆盖
 
+### [3D-Speaker-Source] 3D-Speaker 错误下载源修复
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，直接导入 `backend/server.py`
+- 输入：
+  - monkeypatch `modelscope.hub.snapshot_download.snapshot_download`
+  - 调用 `download_model(category="diarization", engine="diarization", model="3d-speaker")`
+  - 调用 `_download_3d_speaker_bundle()`
+- 结果：通过
+- 证据：
+  - `download_model(...)` 返回 `status=started`
+  - `_download_3d_speaker_bundle()` 会创建 `models/diarization/3d-speaker/3d-speaker.bundle.json`
+  - bundle 中包含官方 recipe 所需的两个 ModelScope 组件：
+    - `iic/speech_campplus_sv_zh_en_16k-common_advanced`
+    - `iic/speech_fsmn_vad_zh-cn-16k-common-pytorch`
+  - `_get_model_status(...)` 中 `3d-speaker` 返回 `downloadable=true` 且 bundle 落地后 `available=true`
+- 备注：
+  - 本次修复的是“错误下载源导致的 401”
+  - 当前版本下 `3D-Speaker` 的自动下载改为 ModelScope 组件 bundle
+  - 这不等于真实 `3D-Speaker` 推理链已完成生产验收
+
+### [Bug-004-Guard] `normalizeSettings` 不再保留旧 `selectedModel`
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，`tauri-app`
+- 输入：
+  - 修改 `tauri-app/src/stores/appStore.ts`，将 `normalizeSettings(...)` 改为仅显式保留受支持的 `AppSettings` 字段
+  - `cmd /c "cd /d tauri-app && npm run build"`
+- 结果：部分通过
+- 证据：
+  - `npm run build` 实际执行 `tsc --noEmit && vite build`
+  - 前端生产构建通过，无新增类型或打包错误
+- 备注：
+  - 本条验证的是 store 修复后的静态构建可用
+  - 针对 “切换 FunASR 模型时短暂闪回 tiny” 的桌面人工复现仍待执行
+  - 对应 bug：`BUG-004`
+
+### [Bug-005-Guard] 预加载当前组合显式发送 `enable_diarization`
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，仓库根目录
+- 输入：
+  - 修改 `tauri-app/src/api/backend.ts`
+  - 修改 `backend/server.py`
+  - `cmd /c "cd /d tauri-app && npm run build"`
+  - `python -m py_compile backend/server.py`
+- 结果：部分通过
+- 证据：
+  - 前端构建通过
+  - `backend/server.py` 编译通过
+- 备注：
+  - 本条验证的是 `/load` 契约修复后的静态可用性
+  - 仍需桌面端再次点击“预加载当前组合”，确认日志中的 `diarization=` 变为 `True`
+  - 对应 bug：`BUG-005`
+
+### [Bug-006-Guard] `Qwen3-ASR` 改为 `qwen-asr` 官方运行时
+
+- 日期：2026-04-01
+- 执行人：Codex
+- 环境：Windows PowerShell，仓库根目录 / `backend\\venv`
+- 输入：
+  - `backend\\venv\\Scripts\\python.exe -m pip install -U qwen-asr`
+  - 修改 `backend/engines/qwen3_asr_engine.py`
+  - 修改 `backend/server.py`
+  - 修改 `backend/services/transcription_service.py`
+  - `python -m py_compile backend\\server.py backend\\services\\transcription_service.py backend\\engines\\qwen3_asr_engine.py`
+  - `backend\\venv\\Scripts\\python.exe -c "import qwen_asr; from qwen_asr import Qwen3ASRModel; print('qwen_asr_ok')"`
+- 结果：部分通过
+- 证据：
+  - `qwen-asr` 安装成功
+  - Python 编译通过
+  - `qwen_asr` 与 `Qwen3ASRModel` 导入通过，输出 `qwen_asr_ok`
+- 备注：
+  - 本条验证的是依赖与运行时接入链已就绪
+  - 仍需重启后端后在桌面端重新执行 `Qwen3-ASR` 预加载 / 转录人工验收
+  - 对应 bug：`BUG-006`
+
 ## 11. 当前阻塞与待人工验收
 
 - M1-M42 绝大多数 UI / 交互 / 真实模型能力项仍待人工验收

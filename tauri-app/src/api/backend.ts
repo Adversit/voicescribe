@@ -81,6 +81,7 @@ export async function loadEngineSelection(
   diarizationModel: string,
   speakerMappingModel: string,
 ): Promise<void> {
+  const enableDiarization = Boolean(diarizationModel);
   const response = await request(`${BASE_URL}/load`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -90,6 +91,7 @@ export async function loadEngineSelection(
       diarization_model: diarizationModel,
       speaker_mapping_model: speakerMappingModel,
       load_source: "manual_preload",
+      enable_diarization: enableDiarization ? "true" : "false",
     }).toString(),
   });
   await ensureOk(response);
