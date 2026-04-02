@@ -4,24 +4,24 @@ Repository: `voicescribe`
 Default branch: `0325main`
 
 Read these first:
-1. `docs/active/协作约定.md`
-2. `docs/active/2026-03-31-phase-status.md`
-3. If touching archived Phase 1 logic, also read:
-   - `docs/archive/phase1/0325第一阶段改造计划.md`
-   - `docs/archive/phase1/2026-03-25-voicescribe-windows-spec.md`
-   - `docs/archive/phase1/2026-03-26-implementation-gap-checklist.md`
-   - `docs/archive/phase1/第一阶段测试.md`
-   - `docs/archive/phase1/2026-03-25-session-bug-log.md`
+1. `docs/PRD.md`
+2. `docs/SPEC.md`
+3. `docs/TEST.md`
+4. `docs/BUGS.md`
 
-Priority: `active status > relevant archive spec/checklist > code`
+Priority: `PRD/SPEC/TEST/BUGS > code`
 
 Workflow:
 - Update docs before code.
 - Test before reporting.
-- If the work is still Phase 1 tail-closeout, write test results into `docs/archive/phase1/第一阶段测试.md` before claiming something is tested.
-- If the work is still Phase 1 tail-closeout, write new bugs into `docs/archive/phase1/2026-03-25-session-bug-log.md`.
-- If a new phase starts, create new active docs instead of continuing to expand archived planning docs.
+- Write new test results into `docs/TEST.md` before claiming something is tested.
+- Write new bugs and unresolved items into `docs/BUGS.md`.
 - Packaging is a final-stage task unless it blocks earlier debugging.
+
+Historical docs rule:
+- Historical phase docs are no longer kept in the working tree.
+- If a task explicitly requires old phase context, inspect Git history instead of expecting archived docs on disk.
+- Do not recreate large date-based doc trees in `docs/`.
 
 Model path rule:
 - Active model/cache root must stay under `<repo>/models/`.
