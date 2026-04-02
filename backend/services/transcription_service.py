@@ -70,7 +70,10 @@ class RuntimeTranscriptionService:
             raise HTTPException(400, f"Speaker features not available: {self.funasr_runtime_error or 'runtime probe failed'}")
 
         speaker_service = self.get_or_create_diarizer()
-        speaker_service.ensure_speaker_verification_loaded(logical_model)
+        try:
+            speaker_service.ensure_speaker_verification_loaded(logical_model)
+        except (ImportError, RuntimeError, ValueError) as err:
+            raise HTTPException(400, str(err)) from err
         print(
             f"[Speaker] Speaker verification ready: model={speaker_service.sv_model_id}, registered={len(speaker_service.speakers)}"
         )
@@ -81,7 +84,10 @@ class RuntimeTranscriptionService:
             raise HTTPException(400, f"Speaker diarization not available: {self.funasr_runtime_error or 'runtime probe failed'}")
 
         speaker_service = self.get_or_create_diarizer()
-        speaker_service.ensure_diarization_loaded(logical_model)
+        try:
+            speaker_service.ensure_diarization_loaded(logical_model)
+        except (ImportError, RuntimeError, ValueError) as err:
+            raise HTTPException(400, str(err)) from err
         print(
             f"[Speaker] Diarization ready: model={speaker_service.diarization_model_id}, registered={len(speaker_service.speakers)}"
         )

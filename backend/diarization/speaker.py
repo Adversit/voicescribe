@@ -6,6 +6,10 @@ Speaker Diarization & Recognition
 import os
 import json
 import tempfile
+import contextlib
+import importlib
+import importlib.util
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
@@ -48,6 +52,87 @@ class SpeakerDiarizer:
         self.speakers: Dict[str, Dict] = {}  # speaker_id -> {name, embedding}
 
         self._load_speakers()
+
+    @staticmethod
+    def pyannote_audio_available() -> bool:
+        try:
+            return importlib.util.find_spec("pyannote.audio") is not None
+        except (ModuleNotFoundError, ValueError):
+            return False
+
+    @classmethod
+    def pyannote_audio_requirement_message(cls) -> str:
+        return (
+            "pyannote-3.1 requires backend dependency pyannote.audio. "
+            "Install it in backend/venv before using this diarization model."
+        )
+
+    @staticmethod
+    def onnxruntime_runtime_available() -> bool:
+        try:
+            importlib.import_module("onnxruntime")
+        except Exception:
+            return False
+        return True
+
+    @classmethod
+    def pyannote_audio_runtime_message(cls, detail: str) -> str:
+        return (
+            "pyannote-3.1 runtime import failed after pyannote.audio was found. "
+            f"Detail: {detail}"
+        )
+
+    @classmethod
+    def pyannote_pipeline_unavailable_message(cls, model_id: str) -> str:
+        return (
+            f"pyannote-3.1 pipeline could not be loaded from '{model_id}'. "
+            "The repo may be gated or the local model files are incomplete. "
+            "Provide a valid Hugging Face token and ensure the pyannote model is downloaded before using this diarization model."
+        )
+
+    @staticmethod
+    def pyannote_local_dir_complete(path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        if not (path / "config.yaml").exists():
+            return False
+
+        for pattern in ("*.bin", "*.safetensors", "*.ckpt"):
+            if next(path.rglob(pattern), None) is not None:
+                return True
+        return False
+
+    @classmethod
+    def pyannote_local_dir_incomplete_message(cls, path: str) -> str:
+        return (
+            f"pyannote-3.1 local model directory is incomplete: '{path}'. "
+            "Retry the model download with a valid Hugging Face token until the full gated snapshot is present."
+        )
+
+    @contextlib.contextmanager
+    def _mask_broken_onnxruntime_for_pyannote_import(self):
+        if self.onnxruntime_runtime_available():
+            yield
+            return
+
+        try:
+            import lightning_utilities.core.imports as lightning_imports
+        except ImportError:
+            yield
+            return
+
+        original_version = lightning_imports._version
+
+        def _patched_version(package_name: str):
+            if package_name == "onnxruntime":
+                raise PackageNotFoundError("onnxruntime")
+            return original_version(package_name)
+
+        lightning_imports._version = _patched_version
+        try:
+            yield
+        finally:
+            lightning_imports._version = original_version
 
     def _load_speakers(self):
         """加载已注册的说话人"""
@@ -101,25 +186,32 @@ class SpeakerDiarizer:
         ensure_runtime_env()
         prepare_windows_runtime()
         try:
-            from pyannote.audio import Pipeline
+            with self._mask_broken_onnxruntime_for_pyannote_import():
+                from pyannote.audio import Pipeline
         except ImportError as err:
-            raise ImportError(
-                "pyannote diarization requires pyannote.audio. "
-                "Install with: pip install pyannote.audio"
-            ) from err
+            if not self.pyannote_audio_available():
+                raise ImportError(self.pyannote_audio_requirement_message()) from err
+            raise ImportError(self.pyannote_audio_runtime_message(str(err))) from err
         return Pipeline
 
     def _resolve_local_model_path(self, logical_model: str, model_id: str) -> str:
         candidate = Path(model_id).expanduser()
         if candidate.exists():
-            return str(candidate.resolve())
+            if logical_model != "pyannote-3.1" or self.pyannote_local_dir_complete(candidate):
+                return str(candidate.resolve())
 
         direct_dir = (MODEL_CACHE_DIR / "diarization" / logical_model).resolve()
-        if direct_dir.exists():
+        if logical_model == "pyannote-3.1":
+            if self.pyannote_local_dir_complete(direct_dir):
+                return str(direct_dir)
+        elif direct_dir.exists():
             return str(direct_dir)
 
         repo_like_dir = MODEL_CACHE_DIR.joinpath(*model_id.split("/")).resolve()
-        if repo_like_dir.exists():
+        if logical_model == "pyannote-3.1":
+            if self.pyannote_local_dir_complete(repo_like_dir):
+                return str(repo_like_dir)
+        elif repo_like_dir.exists():
             return str(repo_like_dir)
 
         hf_repo_dir = (MODEL_CACHE_DIR / "huggingface" / "hub" / f"models--{model_id.replace('/', '--')}").resolve()
@@ -129,7 +221,9 @@ class SpeakerDiarizer:
                 snapshot_dirs = [item for item in snapshots.iterdir() if item.is_dir()]
                 if snapshot_dirs:
                     snapshot_dirs.sort(key=lambda item: item.stat().st_mtime, reverse=True)
-                    return str(snapshot_dirs[0].resolve())
+                    latest_snapshot = snapshot_dirs[0].resolve()
+                    if logical_model != "pyannote-3.1" or self.pyannote_local_dir_complete(latest_snapshot):
+                        return str(latest_snapshot)
         return model_id
 
     def _prepare_diarization_audio(self, audio_path: str) -> tuple[str, Optional[str]]:
@@ -196,7 +290,10 @@ class SpeakerDiarizer:
             pipeline_cls = self._import_pyannote_pipeline()
             model_path = self._resolve_local_model_path(logical_model, target_model_id)
             print(f"[Speaker] Loading pyannote diarization pipeline: {target_model_id} -> {model_path}...")
-            self.diarization_model = pipeline_cls.from_pretrained(model_path)
+            pipeline = pipeline_cls.from_pretrained(model_path)
+            if pipeline is None:
+                raise RuntimeError(self.pyannote_pipeline_unavailable_message(model_path))
+            self.diarization_model = pipeline
             self.diarization_model_id = target_model_id
             self.diarization_backend = "pyannote_audio"
             print(f"[Speaker] Diarization pipeline loaded: {target_model_id} ({self.diarization_backend})")

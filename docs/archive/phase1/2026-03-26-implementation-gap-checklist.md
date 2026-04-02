@@ -153,6 +153,12 @@
   - Keep the tracing window bounded so old `trace_id` does not leak into unrelated long-running input
   - This round remains diagnostic only; it does not change the official hotkey matcher
 
+- `HK-13` Cold-start hotkey trace diagnostics: `code complete, manual verification pending`
+  - Reuse the same diagnostic model for startup and Apply; `trace_id` is no longer Apply-only
+  - Cold start must connect `bind hotkey listeners -> useHotkey register -> register_hotkey_binding -> ensure_hook_thread -> first post-startup hook_raw/hotkey_state`
+  - The shared hotkey log must use millisecond-resolution timestamps so the reported 7-8 second recovery can be located precisely
+  - This round is still diagnostic-only; do not add fallback matcher changes, delayed retries, or alternate runtime hotkey paths
+
 ## Phase 5
 - `P5-01` embedded Python 资源与安装态闭环：`部分完成`
   - 已验证“无内置 embedded payload 时，安装态模拟可退回系统 Python 完成初始化并启动最小后端”。

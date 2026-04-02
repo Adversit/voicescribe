@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { debugHotkeyLog, registerHotkeyBinding } from "../api/tauri";
 import { useAppStore } from "../stores/appStore";
@@ -24,11 +24,18 @@ function formatTraceForLog(traceId: string | null): string {
   return traceId ? ` trace_id=${traceId}` : "";
 }
 
+function createTraceId(prefix: "startup" | "apply") {
+  const random = Math.random().toString(16).slice(2, 8);
+  return `hotkey-${prefix}-${Date.now()}-${random}`;
+}
+
 export function useHotkey() {
   const setAudioLevel = useAppStore((state) => state.setAudioLevel);
   const setToast = useAppStore((state) => state.setToast);
   const settingsHydrated = useAppStore((state) => state.settingsHydrated);
   const hotkeyBinding = useAppStore((state) => state.settings.hotkeyBinding);
+  const startupTraceIdRef = useRef<string>(createTraceId("startup"));
+  const startupRegisterConsumedRef = useRef(false);
 
   useEffect(() => {
     let unlistenStart: (() => void) | undefined;
@@ -38,10 +45,11 @@ export function useHotkey() {
     let unlistenOverlayStop: (() => void) | undefined;
     let unlistenAudio: (() => void) | undefined;
     let unlistenChunk: (() => void) | undefined;
+    const startupTraceId = startupTraceIdRef.current;
 
     const bind = async () => {
       const currentWebviewWindow = getCurrentWebviewWindow();
-      void debugHotkeyLog("bind hotkey listeners start").catch(() => undefined);
+      void debugHotkeyLog(`bind hotkey listeners start trace_id=${startupTraceId} source=startup`).catch(() => undefined);
 
       unlistenStart = await currentWebviewWindow.listen("hotkey-start-recording", async () => {
         void debugHotkeyLog("received hotkey-start-recording").catch(() => undefined);
@@ -98,15 +106,18 @@ export function useHotkey() {
         }
       });
 
-      void debugHotkeyLog("bind hotkey listeners success").catch(() => undefined);
+      void debugHotkeyLog(`bind hotkey listeners success trace_id=${startupTraceId} source=startup`).catch(() => undefined);
     };
 
     void bind().catch((error) => {
-      void debugHotkeyLog(`bind hotkey listeners failed: ${String(error)}`).catch(() => undefined);
+      void debugHotkeyLog(`bind hotkey listeners failed trace_id=${startupTraceId} source=startup error=${String(error)}`).catch(
+        () => undefined,
+      );
       setToast(error instanceof Error ? error.message : HOTKEY_LISTENER_ERROR);
     });
 
     return () => {
+      void debugHotkeyLog(`bind hotkey listeners cleanup trace_id=${startupTraceId} source=startup`).catch(() => undefined);
       unlistenStart?.();
       unlistenStop?.();
       unlistenCancel?.();
@@ -123,26 +134,32 @@ export function useHotkey() {
     }
 
     let cancelled = false;
-    const traceId = useAppStore.getState().hotkeyApplyTraceId;
+    const applyTraceId = useAppStore.getState().hotkeyApplyTraceId;
+    const isStartupRegister = !applyTraceId && !startupRegisterConsumedRef.current;
+    const traceId = applyTraceId ?? (isStartupRegister ? startupTraceIdRef.current : null);
+    const traceSource = applyTraceId ? "apply" : isStartupRegister ? "startup" : "none";
     void debugHotkeyLog(
-      `use-hotkey register requested${formatTraceForLog(traceId)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
+      `use-hotkey register requested${formatTraceForLog(traceId)} source=${traceSource} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
     ).catch(() => undefined);
 
     void registerHotkeyBinding(hotkeyBinding, traceId ?? undefined)
       .then(() => {
         void debugHotkeyLog(
-          `use-hotkey register succeeded${formatTraceForLog(traceId)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
+          `use-hotkey register succeeded${formatTraceForLog(traceId)} source=${traceSource} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
         ).catch(() => undefined);
       })
       .catch((error) => {
         void debugHotkeyLog(
-          `use-hotkey register failed${formatTraceForLog(traceId)} error=${String(error)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
+          `use-hotkey register failed${formatTraceForLog(traceId)} source=${traceSource} error=${String(error)} ${formatBindingForLog(hotkeyBinding.keys, hotkeyBinding.display)}`,
         ).catch(() => undefined);
         if (!cancelled) {
           setToast(error instanceof Error ? error.message : REGISTER_HOTKEY_ERROR);
         }
       })
       .finally(() => {
+        if (isStartupRegister) {
+          startupRegisterConsumedRef.current = true;
+        }
         if (traceId && useAppStore.getState().hotkeyApplyTraceId === traceId) {
           useAppStore.getState().setHotkeyApplyTraceId(null);
         }

@@ -307,6 +307,7 @@ export function HotkeySettings() {
       window.removeEventListener("keyup", handleKeyUp, true);
       const traceId = captureTraceRef.current ?? undefined;
       logHotkeyUi(`unbind browser capture trace_id=${traceId ?? "none"}`);
+      logHotkeyUi(`runtime hotkey resume requested trace_id=${traceId ?? "none"}`);
       void resumeHotkeyRuntime(traceId, "capture-cleanup")
         .then(() => {
           logHotkeyUi(`runtime hotkey resumed after capture trace_id=${traceId ?? "none"}`);
@@ -344,6 +345,7 @@ export function HotkeySettings() {
     logHotkeyUi(
       `capture button action=start trace_id=${traceId} display=${display} draft=${formatBindingSummary(draftBinding)} settings=${formatBindingSummary(settings.hotkeyBinding)}`,
     );
+    logHotkeyUi(`runtime hotkey suspend requested trace_id=${traceId}`);
     void suspendHotkeyRuntime()
       .then(() => {
         logHotkeyUi(`runtime hotkey suspended for capture trace_id=${traceId}`);

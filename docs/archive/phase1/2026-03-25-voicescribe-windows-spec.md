@@ -362,6 +362,89 @@ This supplement covers one shared log timeline for `start capture -> browser key
 3. The timeline must preserve real execution order, even if `resume_hotkey_runtime` happens before Apply due to capture cleanup.
 4. This trace is diagnostic only. It must not change runtime hotkey semantics or persistence format.
 
+## 2026-04-02 Startup / Apply Hotkey Diagnostic Supplement
+
+This supplement only expands observability for two still-open issues:
+
+1. cold start after app launch, pressing registered `Right Alt` does not always start recording
+2. after clicking Apply in hotkey settings, reported recovery can appear much later than expected
+
+This round is diagnostic-only. It must not intentionally change runtime hotkey matching, the hotkey state machine, or recording behavior.
+
+### A. Single Source of Truth
+
+1. Rust runtime in [hotkey.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\hotkey.rs) remains the only source of truth for:
+   - current registered binding
+   - suspended / active runtime state
+   - pending trace window that attaches to post-register / post-resume hook events
+2. Frontend only:
+   - generates trace context
+   - annotates whether the trace comes from startup or Apply
+   - forwards that context into Rust registration / resume commands
+3. Frontend must not add fallback hotkey behavior, delayed re-register retries, or any alternate matching path in this diagnostic round.
+
+### B. Input / Output Contract
+
+1. Startup registration trace
+   - Input: first `useHotkey.ts` runtime listener bind + first store-driven hotkey registration after `settingsHydrated`
+   - Output: one shared startup `trace_id`
+   - Constraint: the same startup `trace_id` must appear on frontend listener-bind logs and the first Rust `register_hotkey_binding(...)`
+
+2. Apply registration trace
+   - Input: existing settings capture/apply flow
+   - Output: same shared Apply `trace_id`
+   - Constraint: Apply trace continues to cover `capture/apply -> register -> resume -> first post-Apply hook events`
+
+3. Hotkey log timestamp contract
+   - Input: every frontend / Rust hotkey diagnostic log line
+   - Output: millisecond-resolution wall-clock timestamp in the shared hotkey log
+   - Constraint: timestamp precision increase is diagnostic-only and must not alter hotkey semantics
+
+### C. Affected File List
+
+1. [docs/archive/phase1/2026-03-25-voicescribe-windows-spec.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-voicescribe-windows-spec.md)
+2. [docs/archive/phase1/2026-03-26-implementation-gap-checklist.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-26-implementation-gap-checklist.md)
+3. [docs/archive/phase1/第一阶段测试.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\第一阶段测试.md)
+4. [docs/archive/phase1/2026-03-25-session-bug-log.md](D:\learn\AIGC\voicescribe\0324\voicescribe\docs\archive\phase1\2026-03-25-session-bug-log.md)
+5. [tauri-app/src/hooks/useHotkey.ts](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\hooks\useHotkey.ts)
+6. [tauri-app/src/pages/HotkeySettings.tsx](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src\pages\HotkeySettings.tsx)
+7. [tauri-app/src-tauri/src/commands/hotkey.rs](D:\learn\AIGC\voicescribe\0324\voicescribe\tauri-app\src-tauri\src\commands\hotkey.rs)
+
+### D. Old-Logic Removal List
+
+1. Remove the implicit assumption that `trace_id` exists only for Apply diagnostics.
+2. Remove second-level hotkey log timestamps for new diagnostic lines; hotkey diagnostics now require millisecond resolution.
+3. Do not remove any runtime hotkey behavior in this round. No matcher, state-machine, or retry-path deletion is allowed under the name of diagnostics.
+
+### E. Acceptance Criteria
+
+1. Cold start must produce one readable startup trace timeline in the shared hotkey log:
+   - frontend listener bind start / success
+   - frontend store-driven register request
+   - Rust `register_hotkey_binding`
+   - Rust hook startup / already-running state
+   - first bounded post-startup `hook_raw` / `hotkey_state`, if the user presses the hotkey within the diagnostic window
+2. Apply must still produce one readable Apply trace timeline with the same shared format.
+3. Log timestamps must be precise enough to distinguish:
+   - delay before `register`
+   - delay between frontend `register requested` and Rust `register_hotkey_binding`
+   - delay before / after `resume_hotkey_runtime`
+   - delay between register / resume completion and the first runtime `hook_raw` / `hotkey_state`
+4. This round must not intentionally change:
+   - which key combinations match
+   - whether matched keys start / stop recording
+   - long-press / single-tap / `Esc` behavior
+
+### F. Failure Branches That Must Be Diagnosable
+
+1. listener bind failed before runtime registration
+2. listener bind succeeded, but registration never executed
+3. registration executed, but hook thread failed or never became ready
+4. hook thread is ready, but no raw `Right Alt` event enters the bounded diagnostic window
+5. raw event enters, but normalization or set matching does not activate the binding
+6. binding activates and event emits, but frontend does not receive the start / stop event
+7. Apply cleanup resumes runtime before Apply-triggered register, causing ordering confusion in logs
+
 ### 5.3 RT / History / Hotkey Bundle
 ### 5.3 ????
 1. 当前主窗口侧边栏允许扩展为 7 个页面：通用、引擎、实时转录、历史记录、热词、说话人、快捷键。

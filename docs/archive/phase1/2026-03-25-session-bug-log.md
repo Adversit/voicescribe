@@ -382,3 +382,68 @@ equirements.txt 安装后仍无法完成 pipeline 初始化。
   - add one shared `trace_id` across `capture/apply -> register -> resume -> first post-apply hotkey_state`
   - then determine whether the delay occurs before register, between register and resume, or after resume while runtime matching is still effectively blocked
   - preserve the actual order seen in logs, rather than assuming Apply happens before resume
+
+## 85. Cold-start `Right Alt` no-trigger and Apply recovery still lack one unified startup-level trace timeline
+- Time: 2026-04-02
+- Symptom:
+  - after app launch, pressing the already-registered `Right Alt` can still appear to do nothing
+  - after clicking Apply, runtime recovery is reported as delayed, but the exact delay point is still not pinned down
+- Confirmed facts from current code and latest hotkey log:
+  - cold start can already produce `bind hotkey listeners success -> use-hotkey register requested -> register_hotkey_binding -> ensure_hook_thread: startup confirmed`
+  - existing shared `trace_id` is centered on settings capture / Apply, not on cold start
+  - hotkey log timestamps are still too coarse for precise startup-vs-resume latency judgment
+- Current conclusion:
+  - "startup never registers at all" is not currently the strongest hypothesis
+  - the remaining gap is observability: cold start and Apply are not yet measured under one shared diagnostic model
+- Required next step:
+  - add one startup `trace_id` that covers listener bind and first store-driven registration after hydration
+  - upgrade shared hotkey log timestamps to millisecond resolution
+  - keep the round diagnostic-only; do not preemptively change hotkey behavior before the delay point is proven
+
+## 86. `pyannote-3.1` diarization missing runtime dependency currently escapes as backend 500
+- Time: 2026-04-02
+- Symptom:
+  - using diarization model `pyannote-3.1` during `/transcribe` raises backend traceback from `speaker.py`
+  - current backend returns `500 Internal Server Error`, and desktop-side transcribe retry logic treats it as retriable failure
+- Confirmed facts:
+  - current `backend/venv` does not have `pyannote` / `pyannote.audio`
+  - `SpeakerDiarizer._import_pyannote_pipeline()` raises `ImportError("pyannote diarization requires pyannote.audio ...")`
+  - current transcribe path calls `speaker_service.ensure_diarization_loaded(...)` directly, so that import error is not normalized into `HTTPException(400, ...)`
+- Impact:
+  - user sees a long failing transcribe chain instead of one explicit configuration/runtime error
+  - backend model status currently does not clearly expose that `pyannote-3.1` still lacks its Python runtime dependency
+- Fix direction:
+  - normalize missing `pyannote.audio` to an explicit 400-level backend error
+  - expose a clearer backend status/error message for `pyannote-3.1`
+  - pin `pyannote.audio` to the `speaker-diarization-3.1` compatible line in `backend/requirements.txt`, instead of floating to the latest major version
+  - install the pinned package into the current `backend/venv`
+  - keep this round focused on error classification and observability; do not change diarization behavior when the dependency is actually present
+- Current status after install attempt:
+  - `backend/requirements.txt` has been updated to `pyannote.audio==3.1.1`
+  - the package is installed into the current `backend/venv`
+  - backend-side error classification is already fixed: missing/failed diarization dependency no longer needs to leak as a raw 500
+  - however, real runtime is still not accepted on this Windows machine because `from pyannote.audio import Pipeline` reaches `torchmetrics -> onnxruntime`, and `import onnxruntime` currently fails with `DLL load failed while importing onnxruntime_pybind11_state`
+- Revised next step:
+  - keep the pin to `pyannote.audio==3.1.1`
+  - treat the remaining blocker as a Windows runtime dependency problem around `onnxruntime`, not as a missing `pyannote.audio` package anymore
+  - current root cause is narrower than "pyannote cannot run": `torchmetrics` treats installed `onnxruntime` as available based on package metadata, then imports DNSMOS audio helpers and crashes on the broken `onnxruntime` runtime import
+  - fix direction should prefer isolating this broken optional dependency from the `pyannote.audio` import path on Windows, instead of waiting for the whole local Conda-based `onnxruntime` runtime to become healthy
+  - after that isolation is in place, re-run real `pyannote-3.1` load and diarization acceptance, and separately keep `onnxruntime` runtime health as an independent Windows environment issue
+  - latest verification shows that this isolation is necessary but not sufficient: once the broken optional `onnxruntime` path is masked, `pyannote.audio` continues importing and then fails on `AttributeError: np.NaN was removed in the NumPy 2.0 release`
+  - this exposes a second concrete blocker in the current backend environment: `pyannote.audio 3.1.1` is not compatible with `numpy 2.x`
+  - next fix should pin backend `numpy` to a `1.x` compatible line, install it into the current `backend/venv`, and then re-run `pyannote-3.1` import/load acceptance
+  - after fixing the `numpy` incompatibility, another runtime-state bug becomes visible: `Pipeline.from_pretrained(...)` can print a gated-download failure and still leave the current code path marking `pyannote-3.1` as loaded even though the pipeline object is effectively unusable
+  - next correction should reject `None` / unusable pyannote pipeline objects explicitly and normalize this case into a user-facing runtime/configuration error instead of a false loaded state
+- Current status after latest runtime-chain fix:
+  - backend now pins `numpy<2.0.0`, and the current `backend/venv` has been downgraded to `numpy 1.26.4`
+  - `SpeakerDiarizer._import_pyannote_pipeline()` now succeeds on this Windows machine even though `onnxruntime` itself still fails to import; the broken `onnxruntime` optional path is no longer the active blocker for pyannote import
+  - pyannote local-path resolution no longer treats an incomplete placeholder directory as a valid local checkpoint for `pyannote-3.1`
+  - pyannote load no longer reports a false loaded state when `Pipeline.from_pretrained(...)` cannot produce a usable pipeline; the service layer now normalizes this case to `HTTPException 400`
+- Remaining gap:
+  - this bug is no longer blocked on `onnxruntime` or `numpy 2.x`
+  - real pyannote acceptance is now blocked only by gated-model prerequisites: valid Hugging Face token, accepted pyannote repo terms, and complete local/remote model assets
+  - current model-management path still has one false-positive gap: if `models/diarization/pyannote-3.1/` contains only a partial gated download, `/models` can still mark it as `available=true` because the backend currently trusts "directory exists" without checking pyannote-specific completeness
+  - stale registry entries can also preserve an incorrect tiny `size_bytes` value for that incomplete directory, which makes the engine page look like the model downloaded successfully even though runtime cannot use it
+  - next fix should add a pyannote-specific complete-directory check, prevent incomplete directories from becoming `available=true`, and clear/rebuild the registry entry when it points to a partial local directory
+  - this false-positive path is now fixed: backend model status only treats `pyannote-3.1` as locally available when the directory contains `config.yaml` plus checkpoint files, and stale registry entries are removed when they point to an incomplete local directory
+  - the remaining pyannote gap is now narrowed to the actual download/runtime prerequisites themselves, not the engine-page status semantics

@@ -22,8 +22,8 @@ static HOOK_THREAD: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
 static HOOK_THREAD_ID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
 
 const NOT_SET_LABEL: &str = "\u{672a}\u{8bbe}\u{7f6e}";
-const APPLY_TRACE_EVENT_BUDGET: u8 = 24;
-const APPLY_TRACE_WINDOW_SECONDS: u64 = 12;
+const TRACE_EVENT_BUDGET: u8 = 24;
+const TRACE_WINDOW_SECONDS: u64 = 20;
 
 struct HotkeyRuntime {
     binding: HotkeyBinding,
@@ -107,8 +107,8 @@ fn hotkey_log_path() -> std::path::PathBuf {
 pub(crate) fn log_hotkey(message: impl AsRef<str>) {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_secs())
-        .unwrap_or(0);
+        .map(|value| format!("{}.{:03}", value.as_secs(), value.subsec_millis()))
+        .unwrap_or_else(|_| "0.000".to_string());
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
@@ -276,7 +276,7 @@ fn should_emit_hotkey_event(event_name: &'static str) -> bool {
 fn arm_pending_trace(guard: &mut HotkeyRuntime, trace_id: String) {
     guard.pending_trace_id = Some(trace_id);
     guard.pending_trace_started_at = Some(Instant::now());
-    guard.pending_trace_event_budget = APPLY_TRACE_EVENT_BUDGET;
+    guard.pending_trace_event_budget = TRACE_EVENT_BUDGET;
 }
 
 fn begin_pending_trace_event() -> Option<TraceDiagnosticEvent> {
@@ -285,7 +285,7 @@ fn begin_pending_trace_event() -> Option<TraceDiagnosticEvent> {
     let started_at = guard.pending_trace_started_at?;
     let age = Instant::now().duration_since(started_at);
 
-    if age > Duration::from_secs(APPLY_TRACE_WINDOW_SECONDS) {
+    if age > Duration::from_secs(TRACE_WINDOW_SECONDS) {
         log_hotkey(format!(
             "apply_trace expired trace_id={} age_ms={} budget_remaining={}",
             trace_id,
