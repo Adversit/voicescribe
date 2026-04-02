@@ -470,3 +470,21 @@
 - token 弹窗与 Windows Credential Manager 已实现代码链，但 M20-M24、F5-F7 仍待桌面端手动验收
 - 失效组合标红逻辑已实现代码链，但 T38 仍待页面人工确认视觉表现
 - 本轮自动化验证未发现需要新增回写的阻塞 bug
+
+### [Preload-Button-UX] 预加载按钮状态文案静态验证
+
+- 日期：2026-04-01 23:23
+- 执行人：Codex
+- 环境：Windows PowerShell，`tauri-app`
+- 输入：
+  - 修改 `tauri-app/src/pages/EngineSettings.tsx`
+  - 统一“预加载当前组合”按钮文案为真实中文文本
+  - 将按钮状态切换为 `预加载当前组合 / 加载中... / 已加载`
+  - `cmd /c "cd /d tauri-app && npm run build"`
+- 结果：部分通过
+- 证据：
+  - `npm run build` 实际执行 `tsc --noEmit && vite build`
+  - 前端生产构建通过，无新增类型或打包错误
+- 备注：
+  - 本条验证的是按钮中文文案与状态切换代码的静态可构建性
+  - 实际桌面端点击后的 loading / success 视觉反馈仍待人工验收

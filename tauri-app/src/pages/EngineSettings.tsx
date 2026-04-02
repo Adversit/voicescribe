@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadEngineSelection } from "../api/backend";
 import {
   deleteModelDownloadToken,
@@ -299,6 +299,8 @@ export function EngineSettings() {
   const startDownload = useModelStore((state) => state.startDownload);
   const deleteModel = useModelStore((state) => state.deleteModel);
   const [tokenPrompt, setTokenPrompt] = useState<TokenPromptState | null>(null);
+  const [preloadState, setPreloadState] = useState<"idle" | "loading" | "success">("idle");
+  const preloadResetTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!backendConnected) {
@@ -309,6 +311,27 @@ export function EngineSettings() {
       setToast(error instanceof Error ? error.message : "加载模型列表失败");
     });
   }, [backendConnected, refreshModels, setToast]);
+
+  useEffect(() => {
+    setPreloadState("idle");
+    if (preloadResetTimerRef.current !== null) {
+      window.clearTimeout(preloadResetTimerRef.current);
+      preloadResetTimerRef.current = null;
+    }
+  }, [
+    settings.selectedEngine,
+    settings.engineSelections[settings.selectedEngine]?.asrModel,
+    settings.engineSelections[settings.selectedEngine]?.diarizationModel,
+    settings.engineSelections[settings.selectedEngine]?.speakerMappingModel,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (preloadResetTimerRef.current !== null) {
+        window.clearTimeout(preloadResetTimerRef.current);
+      }
+    };
+  }, []);
 
   const selectedEngineInfo = availableEngines.find((engine) => engine.name === settings.selectedEngine);
   const currentSelection = settings.engineSelections[settings.selectedEngine] ?? defaultSelectionForEngine(settings.selectedEngine);
@@ -502,6 +525,37 @@ export function EngineSettings() {
     }
   };
 
+  const handlePreloadCurrentSelection = async () => {
+    setPreloadState("loading");
+    try {
+      await loadEngineSelection(
+        settings.selectedEngine,
+        currentSelection.asrModel,
+        currentSelection.diarizationModel,
+        currentSelection.speakerMappingModel,
+      );
+      setPreloadState("success");
+      setToast("当前组合加载成功");
+
+      if (preloadResetTimerRef.current !== null) {
+        window.clearTimeout(preloadResetTimerRef.current);
+      }
+      preloadResetTimerRef.current = window.setTimeout(() => {
+        setPreloadState("idle");
+        preloadResetTimerRef.current = null;
+      }, 1600);
+    } catch (error) {
+      setPreloadState("idle");
+      setToast(error instanceof Error ? error.message : "组合加载失败");
+    }
+  };
+
+  const preloadButtonText = preloadState === "loading"
+    ? "加载中..."
+    : preloadState === "success"
+      ? "已加载"
+      : "预加载当前组合";
+
   return (
     <>
       <SettingsPage
@@ -521,19 +575,11 @@ export function EngineSettings() {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  void loadEngineSelection(
-                    settings.selectedEngine,
-                    currentSelection.asrModel,
-                    currentSelection.diarizationModel,
-                    currentSelection.speakerMappingModel,
-                  )
-                    .then(() => setToast("当前组合加载成功"))
-                    .catch((error) => setToast(error instanceof Error ? error.message : "组合加载失败"))
-                }
+                onClick={() => void handlePreloadCurrentSelection()}
                 className={primaryButtonClassName}
+                disabled={preloadState === "loading"}
               >
-                预加载当前组合
+                {preloadButtonText}
               </button>
             </>
           }
