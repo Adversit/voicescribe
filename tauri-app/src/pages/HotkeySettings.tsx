@@ -209,6 +209,7 @@ export function HotkeySettings() {
   const settings = useAppStore((state) => state.settings);
   const updateSettings = useAppStore((state) => state.updateSettings);
   const setHotkeyApplyTraceId = useAppStore((state) => state.setHotkeyApplyTraceId);
+  const setHotkeyCaptureActive = useAppStore((state) => state.setHotkeyCaptureActive);
   const setToast = useAppStore((state) => state.setToast);
   const [display, setDisplay] = useState(settings.hotkeyBinding.display || TEXT.notSet);
   const [capturing, setCapturing] = useState(false);
@@ -218,6 +219,12 @@ export function HotkeySettings() {
   const [captureKeysPreview, setCaptureKeysPreview] = useState<number[]>([]);
   const canApplyDraft = !capturing && draftBinding !== null;
 
+  useEffect(() => {
+    setHotkeyCaptureActive(capturing);
+    return () => {
+      setHotkeyCaptureActive(false);
+    };
+  }, [capturing, setHotkeyCaptureActive]);
 
   useEffect(() => {
     if (!capturing) {

@@ -99,7 +99,7 @@
 | 保存并应用热键 | Apply 后配置真正生效 | 待人工验收 | - |
 | 重启后自动恢复 | 冷启动后无需重新 Apply | 待人工验收 | - |
 | 外部应用中按热键 | 可开始/停止录音 | 待人工验收 | - |
-| `Right Alt` 单键路径 | 冷启动后可真实命中 | 待人工验收 | - |
+| `Right Alt` 单键路径 | 冷启动后可真实命中 | 已通过 | 2026-04-03：用户真机确认，`VoiceScribe` 主窗口前台下按 `Right Alt` 已可正常触发录音流程 |
 | 双键与左右 Alt/AltGr | 录制与命中符合预期 | 待人工验收 | - |
 
 ### 3.3 `PRD 10.1.3` 模型管理
@@ -270,6 +270,7 @@
 | runtime suspend/resume trace 存在 | 日志与代码校验 | 已通过 | 2026-04-02：确认 `HotkeySettings.tsx -> tauri.ts -> hotkey.rs` 存在 `suspend_hotkey_runtime` / `resume_hotkey_runtime(trace_id, reason)` 诊断链 |
 | shared hotkey log 记录毫秒级时间线 | 日志格式校验 | 已通过 | 2026-04-02：`voicescribe-hotkey.log` 使用 `[epoch_seconds.millis]` 格式，实测存在 `1775124916.082` 这类毫秒级时间戳 |
 | `VoiceScribe` 主窗口聚焦时 `Right Alt` 原始上报诊断存在 | `hotkey.rs` 代码链核对 + `cargo check` | 已通过 | 2026-04-03：新增 `foreground_alt_raw` 日志，只在前台窗口属于 `VoiceScribe` 主窗口且事件涉及 `Alt/Right Alt` 时记录 `message/vk/scan/flags/normalized_vk/title`，用于对比 VSCode 与应用窗口的原始上报差异 |
+| `VoiceScribe` 主窗口前台存在 `Right Alt` 前端兜底链 | `useHotkey.ts` / `HotkeySettings.tsx` / `appStore.ts` 代码链核对 + `npm run build` | 已通过 | 2026-04-03：新增主窗口前台 `AltRight keydown/keyup` 兜底路径，仅在单键 `Right Alt` 绑定下生效；包含 350ms 长按阈值、250ms native event 去重，以及 `hotkeyCaptureActive` 隔离，避免与设置页录制热键冲突 |
 
 #### 你手动测试
 
@@ -278,6 +279,7 @@
 | stale key recovery | 不再误触发旧热键 | 待人工验收 | - |
 | settings capture suspend | 录制期间不误触发运行时匹配 | 待人工验收 | - |
 | startup/apply trace diagnostics | 日志可辅助真实定位 | 待人工验收 | - |
+| `VoiceScribe` 主窗口前台 `Right Alt` 兜底行为 | 点击主窗口后按 `Right Alt` 仍可开始/停止录音，且不依赖切到 VSCode | 已通过 | 2026-04-03：用户真机确认主窗口前台 `Right Alt` 可开始/停止录音，原问题已消失 |
 
 ### 4.3 模型路径、目录完整性与 registry
 

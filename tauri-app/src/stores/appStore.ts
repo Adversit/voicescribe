@@ -433,6 +433,7 @@ interface AppStore {
   settings: AppSettings;
   settingsHydrated: boolean;
   hotkeyApplyTraceId: string | null;
+  hotkeyCaptureActive: boolean;
   backendConnected: boolean;
   availableEngines: EngineInfo[];
   backendRuntime: BackendRuntimeStatus | null;
@@ -451,6 +452,7 @@ interface AppStore {
   realtime: RealtimeSessionState;
   setPage: (page: PageKey) => void;
   setHotkeyApplyTraceId: (traceId: string | null) => void;
+  setHotkeyCaptureActive: (value: boolean) => void;
   hydrateSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
   syncAutostart: () => Promise<void>;
@@ -485,6 +487,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   settings: defaultSettings,
   settingsHydrated: false,
   hotkeyApplyTraceId: null,
+  hotkeyCaptureActive: false,
   backendConnected: false,
   availableEngines: [],
   backendRuntime: null,
@@ -503,6 +506,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   realtime: defaultRealtimeState,
   setPage: (page) => set({ currentPage: page }),
   setHotkeyApplyTraceId: (traceId) => set({ hotkeyApplyTraceId: traceId }),
+  setHotkeyCaptureActive: (value) => set({ hotkeyCaptureActive: value }),
   hydrateSettings: async () => {
     if (get().settingsHydrated) {
       return;

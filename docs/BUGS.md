@@ -7,7 +7,7 @@
 ### 1.1 冷启动后 `Right Alt` 不触发
 
 状态：
-- 部分收口
+- 已收口，待持续观察
 
 当前事实：
 - 2026-04-03 已用快速启动脚本回归冷启动日志，确认启动注册链真实存在：`use-hotkey register requested -> register_hotkey_binding -> ensure_hook_thread: startup confirmed`
@@ -16,10 +16,11 @@
 - 2026-04-03 已在 Rust runtime 中为单键 `Right Alt` 增加 AltGr 容错匹配，并补了单元测试
 - 2026-04-03 新观察到：在 `VoiceScribe` 窗口聚焦时按 `Right Alt` 与切到 VSCode 后按 `Right Alt` 的体感不同；当前更像是前台窗口输入上下文差异，而不是 hook 线程整体失效
 - 2026-04-03 已新增 `foreground_alt_raw` 定向日志，只在前台属于 `VoiceScribe` 主窗口且事件涉及 `Alt/Right Alt` 时记录原始 `vk/scan/flags/message/normalized_vk`
-- 但还没完成真机冷启动 `Right Alt` 人工回归
+- 2026-04-03 新确认：当焦点在 `VoiceScribe` 主窗口内时，`Right Alt` 不会进入现有 Rust `foreground_alt_raw` / `hotkey_state` 诊断链；而切到外部应用后同键仍可进入全局热键链
+- 2026-04-03 已新增前端主窗口兜底路径：`useHotkey.ts` 在单键 `Right Alt` 绑定下直接监听主窗口 `AltRight keydown/keyup`，复用 `recordingFlow.ts` 开始/停止录音，并通过 `hotkeyCaptureActive` 与 250ms 去重避免和设置页录制态、native 事件冲突
+- 2026-04-03 用户真机确认：`VoiceScribe` 主窗口前台 `Right Alt` 已可开始/停止录音，问题已解决
 
 下一步：
-- 在 `VoiceScribe` 主窗口聚焦时按 `Right Alt`，读取 `foreground_alt_raw`，与 VSCode 聚焦时的同键原始上报做对比
 - 确认修复后是否仍存在只在特定输入法/键盘布局下失效的分支
 
 ### 1.2 热键 Apply 后恢复慢
