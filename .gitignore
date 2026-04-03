@@ -50,3 +50,4 @@ config/
 *.temp
 .packaged-runtime/
 .superpowers/
+tools/ffmpeg/
