@@ -14,10 +14,12 @@
 - 冷启动时 runtime 绑定确实是 `0xA5`
 - 现有强根因候选是 Windows 某些布局会把 `Right Alt` 当成 AltGr，上报成 `Ctrl + Right Alt`，旧的精确集合匹配会把单键 `0xA5` 漏掉
 - 2026-04-03 已在 Rust runtime 中为单键 `Right Alt` 增加 AltGr 容错匹配，并补了单元测试
+- 2026-04-03 新观察到：在 `VoiceScribe` 窗口聚焦时按 `Right Alt` 与切到 VSCode 后按 `Right Alt` 的体感不同；当前更像是前台窗口输入上下文差异，而不是 hook 线程整体失效
+- 2026-04-03 已新增 `foreground_alt_raw` 定向日志，只在前台属于 `VoiceScribe` 主窗口且事件涉及 `Alt/Right Alt` 时记录原始 `vk/scan/flags/message/normalized_vk`
 - 但还没完成真机冷启动 `Right Alt` 人工回归
 
 下一步：
-- 用现有 startup trace 做一次真机冷启动 `Right Alt` 回归
+- 在 `VoiceScribe` 主窗口聚焦时按 `Right Alt`，读取 `foreground_alt_raw`，与 VSCode 聚焦时的同键原始上报做对比
 - 确认修复后是否仍存在只在特定输入法/键盘布局下失效的分支
 
 ### 1.2 热键 Apply 后恢复慢

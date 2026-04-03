@@ -7,12 +7,13 @@ use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
+    CallNextHookEx, GetForegroundWindow, GetMessageW, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
     HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
     WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
@@ -64,6 +65,11 @@ struct TraceDiagnosticEvent {
     trace_id: String,
     age_ms: u128,
     remaining_events: u8,
+}
+
+struct ForegroundWindowSnapshot {
+    same_process: bool,
+    title: String,
 }
 
 fn runtime() -> &'static Mutex<HotkeyRuntime> {
@@ -336,6 +342,49 @@ fn is_vk_currently_down(vk: u32) -> bool {
     unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) != 0 }
 }
 
+fn foreground_window_snapshot() -> Option<ForegroundWindowSnapshot> {
+    unsafe {
+        let hwnd: HWND = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return None;
+        }
+
+        let mut pid = 0;
+        let _ = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let same_process = pid == GetCurrentProcessId();
+
+        let title_length = GetWindowTextLengthW(hwnd);
+        let title = if title_length > 0 {
+            let mut buffer = vec![0u16; title_length as usize + 1];
+            let copied = GetWindowTextW(hwnd, &mut buffer);
+            String::from_utf16_lossy(&buffer[..copied as usize])
+        } else {
+            String::new()
+        };
+
+        Some(ForegroundWindowSnapshot { same_process, title })
+    }
+}
+
+fn is_voice_scribe_main_foreground(snapshot: &ForegroundWindowSnapshot) -> bool {
+    snapshot.same_process
+        && snapshot.title.contains("VoiceScribe")
+        && !snapshot.title.contains("Overlay")
+}
+
+fn should_log_foreground_alt_raw(
+    kb: &KBDLLHOOKSTRUCT,
+    normalized_key: Option<u32>,
+    message: u32,
+) -> bool {
+    matches!(
+        message,
+        WM_SYSKEYDOWN | WM_SYSKEYUP | WM_KEYDOWN | WM_KEYUP
+    ) && (matches!(kb.vkCode, 0xA4 | 0xA5)
+        || kb.scanCode == 56
+        || matches!(normalized_key, Some(0xA4 | 0xA5)))
+}
+
 fn prune_stale_pressed_keys(pressed_keys: &mut BTreeSet<u32>) -> Vec<u32> {
     let stale_keys = pressed_keys
         .iter()
@@ -561,6 +610,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         let message = wparam.0 as u32;
         let trace = begin_pending_trace_event();
         let normalized_key = normalized_vk_from_kb(&kb);
+        let foreground_snapshot = if should_log_foreground_alt_raw(&kb, normalized_key, message) {
+            foreground_window_snapshot()
+        } else {
+            None
+        };
 
         if let Some(trace) = trace.as_ref() {
             let normalized_summary = normalized_key
@@ -577,6 +631,24 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 kb.flags.0,
                 normalized_summary,
             ));
+        }
+
+        if let Some(snapshot) = foreground_snapshot.as_ref() {
+            if is_voice_scribe_main_foreground(snapshot) {
+                let normalized_summary = normalized_key
+                    .map(|value| format!("0x{:X}", value))
+                    .unwrap_or_else(|| "none".to_string());
+                log_hotkey(format!(
+                    "foreground_alt_raw window=voicescribe-main title={} same_process={} message={} vk=0x{:X} scan=0x{:X} flags=0x{:X} normalized_vk={}",
+                    snapshot.title,
+                    snapshot.same_process,
+                    message,
+                    kb.vkCode,
+                    kb.scanCode,
+                    kb.flags.0,
+                    normalized_summary,
+                ));
+            }
         }
 
         let Some(key) = normalized_key else {

@@ -269,6 +269,7 @@
 | Rust hook/runtime 状态机存在 | `hotkey.rs` 代码链核对 | 已通过 | 2026-04-03：runtime 内含 `pressed_keys`、`is_hotkey_active`、`suspended`、`long_press_generation` 和低层 hook 更新路径 |
 | runtime suspend/resume trace 存在 | 日志与代码校验 | 已通过 | 2026-04-02：确认 `HotkeySettings.tsx -> tauri.ts -> hotkey.rs` 存在 `suspend_hotkey_runtime` / `resume_hotkey_runtime(trace_id, reason)` 诊断链 |
 | shared hotkey log 记录毫秒级时间线 | 日志格式校验 | 已通过 | 2026-04-02：`voicescribe-hotkey.log` 使用 `[epoch_seconds.millis]` 格式，实测存在 `1775124916.082` 这类毫秒级时间戳 |
+| `VoiceScribe` 主窗口聚焦时 `Right Alt` 原始上报诊断存在 | `hotkey.rs` 代码链核对 + `cargo check` | 已通过 | 2026-04-03：新增 `foreground_alt_raw` 日志，只在前台窗口属于 `VoiceScribe` 主窗口且事件涉及 `Alt/Right Alt` 时记录 `message/vk/scan/flags/normalized_vk/title`，用于对比 VSCode 与应用窗口的原始上报差异 |
 
 #### 你手动测试
 
