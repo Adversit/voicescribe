@@ -33,24 +33,6 @@
 下一步：
 - 基于共享日志定位延迟点后再改行为
 
-### 1.3 `pyannote-3.1` 真实运行时仍未完成验收
-
-状态：
-- 未收口
-
-当前事实：
-- 缺依赖与不完整目录的错误分类已经修好
-- `onnxruntime` 与 `numpy 2.x` 不再阻塞导入主链
-- 2026-04-03 已确认 `<repo>/models/diarization/pyannote-3.1` 的 base snapshot 下载完成，目录内有 `config.yaml`，大小约 `10.9 MB`
-- 之前把它判成“本地目录不完整”是后端规则错误；当前已修正为已下载可见
-- 2026-04-03 真实调用 `ensure_diarization_loaded('pyannote-3.1')` 时，已经优先按本地 `config.yaml` 进入 pyannote 加载，不再把 Windows 本地路径误当 repo id
-- 当前真实阻塞点已定位为 `pyannote/segmentation-3.0` 的 gated 依赖访问，以及 backend runtime 无法直接复用保存在 Windows Credential Manager 里的 Hugging Face token，因此真实 diarization 仍失败
-
-下一步：
-- 验证 `pyannote/segmentation-3.0` 条款是否已接受
-- 让 backend runtime 能拿到可用 Hugging Face token
-- 用真实音频做 diarization 验收
-
 ## 2. 中优先级未收口问题
 
 ### 2.1 `3D-Speaker` 下载后真实加载与真实转录未验

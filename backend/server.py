@@ -222,13 +222,6 @@ DIARIZATION_MODELS = {
         "requires_token": False,
         "engine_scope": ["funasr", "qwen3_asr", "whisper", "whispercpp", "parakeet"],
     },
-    "pyannote-3.1": {
-        "display_name": "pyannote 3.1",
-        "repo_id": "pyannote/speaker-diarization-3.1",
-        "downloadable": True,
-        "requires_token": True,
-        "engine_scope": ["funasr", "qwen3_asr", "whisper", "whispercpp", "parakeet"],
-    },
 }
 
 SPEAKER_MAPPING_MODELS = {
@@ -731,30 +724,19 @@ def _get_model_status(category: str, engine: str, model: str) -> ModelStatus:
     loaded = False
     error_message = download_state.get("error")
 
-    def _pyannote_local_dir_incomplete(path: Path) -> bool:
-        return category == "diarization" and model == "pyannote-3.1" and not SpeakerDiarizer.pyannote_local_dir_complete(path)
-
     if not entry:
         storage_path = _model_storage_path(engine, model, category=category)
         if storage_path and storage_path.exists():
             size_bytes = _path_size(storage_path)
-            if _pyannote_local_dir_incomplete(storage_path):
-                error_message = error_message or SpeakerDiarizer.pyannote_local_dir_incomplete_message(str(storage_path))
-            else:
-                _set_registry_entry(engine, model, str(storage_path), size_bytes, category=category)
-                entry = _get_registry_entry(engine, model, category=category)
+            _set_registry_entry(engine, model, str(storage_path), size_bytes, category=category)
+            entry = _get_registry_entry(engine, model, category=category)
 
     if entry and os.path.exists(entry.get("path", "")):
         entry_path = Path(entry["path"]).resolve()
         size_bytes = _path_size(entry_path)
-        if _pyannote_local_dir_incomplete(entry_path):
-            _delete_registry_entry(engine, model, category=category)
-            entry = None
-            error_message = error_message or SpeakerDiarizer.pyannote_local_dir_incomplete_message(str(entry_path))
-        else:
-            available = True
-            if int(entry.get("size_bytes", 0) or 0) != size_bytes:
-                _set_registry_entry(engine, model, str(entry_path), size_bytes, category=category)
+        available = True
+        if int(entry.get("size_bytes", 0) or 0) != size_bytes:
+            _set_registry_entry(engine, model, str(entry_path), size_bytes, category=category)
     elif entry and not os.path.exists(entry.get("path", "")):
         _delete_registry_entry(engine, model, category=category)
 
@@ -780,13 +762,6 @@ def _get_model_status(category: str, engine: str, model: str) -> ModelStatus:
         if loaded:
             loaded = bool(transcription_service.diarizer.sv_model_id == SPEAKER_MAPPING_MODELS.get(model, {}).get("model_id"))
 
-    if (
-        category == "diarization"
-        and model == "pyannote-3.1"
-        and DIARIZATION_AVAILABLE
-        and not SpeakerDiarizer.pyannote_audio_available()
-    ):
-        error_message = error_message or SpeakerDiarizer.pyannote_audio_requirement_message()
     if not error_message and not available and not bool(spec.get("downloadable", True)):
         error_message = spec.get("unavailable_reason")
 
@@ -852,19 +827,11 @@ async def _download_hf_snapshot(
             raise RuntimeError(f"Downloaded path escaped models root: {local_dir}")
 
         local_dir_path = Path(local_dir).resolve()
-        if category == "diarization" and model_name == "pyannote-3.1":
-            if not SpeakerDiarizer.pyannote_local_dir_complete(local_dir_path):
-                raise RuntimeError(
-                    SpeakerDiarizer.pyannote_local_dir_incomplete_message(str(local_dir_path))
-                )
-
         size_bytes = _path_size(local_dir_path)
         _set_registry_entry(engine, model_name, local_dir, size_bytes, category=category)
         state["size_bytes"] = size_bytes
         state["downloaded_bytes"] = size_bytes
     except Exception as e:
-        if category == "diarization" and model_name == "pyannote-3.1":
-            _delete_registry_entry(engine, model_name, category=category)
         state["error"] = str(e)
     finally:
         stop_event.set()
@@ -1185,19 +1152,6 @@ async def download_model(
             asyncio.create_task(_download_modelscope_snapshot(category, engine, model, spec["model_id"]))
         elif model == "3d-speaker":
             asyncio.create_task(_download_3d_speaker_bundle())
-        elif model == "pyannote-3.1":
-            if spec.get("requires_token") and not token:
-                raise HTTPException(400, "Token required for this model")
-            asyncio.create_task(
-                _download_hf_snapshot(
-                    "diarization",
-                    model,
-                    spec["repo_id"],
-                    _model_storage_path(engine, model, category="diarization"),
-                    category="diarization",
-                    token=token,
-                )
-            )
         else:
             raise HTTPException(400, f"Download not supported for diarization model: {model}")
     elif category == "speaker_mapping":

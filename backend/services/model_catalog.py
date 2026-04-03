@@ -35,7 +35,7 @@ def build_engine_catalog(
             "display_name": "Qwen3-ASR",
             "description": "Qwen3-ASR 独立引擎。",
             "asr_models": qwen3_asr_models,
-            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
+            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker"],
             "speaker_mapping_models": speaker_mapping_names,
             "default_selection": {
                 "asrModel": "qwen3-asr-1.7b",
@@ -48,7 +48,7 @@ def build_engine_catalog(
             "display_name": "Whisper",
             "description": "OpenAI Whisper，多语言通用引擎。",
             "asr_models": whisper_models,
-            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
+            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker"],
             "speaker_mapping_models": speaker_mapping_names,
             "default_selection": {
                 "asrModel": "large-v3",
@@ -61,7 +61,7 @@ def build_engine_catalog(
             "display_name": "WhisperCpp",
             "description": "whisper.cpp CLI 引擎。",
             "asr_models": whispercpp_models,
-            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
+            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker"],
             "speaker_mapping_models": speaker_mapping_names,
             "default_selection": {
                 "asrModel": "base",
@@ -74,7 +74,7 @@ def build_engine_catalog(
             "display_name": "Parakeet",
             "description": "NVIDIA Parakeet，本轮进入矩阵但说话人对齐能力受限。",
             "asr_models": parakeet_models,
-            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker", "pyannote-3.1"],
+            "diarization_models": ["campplus-diarization", "sond-diarization", "3d-speaker"],
             "speaker_mapping_models": speaker_mapping_names,
             "default_selection": {
                 "asrModel": "parakeet-ctc-1.1b",
@@ -156,4 +156,3 @@ def validate_engine_selection(
 
     if speaker_mapping_model and speaker_mapping_model not in engine_spec.get("speaker_mapping_models", []):
         raise HTTPException(400, f"Incompatible speaker mapping model for engine {engine}: {speaker_mapping_model}")
-

@@ -644,14 +644,9 @@ type HotkeyBinding = {
 
 - 冷启动 `Right Alt` 不触发
 - 热键 Apply 后恢复慢
-- `pyannote-3.1` 真实下载与真实运行时
-
 中优先级：
 
-- `Qwen3-ASR` 真实验收
 - `3D-Speaker` 真实验收
-- 启动 warning 收口
-- 快速测试启动脚本
 
 低优先级 / 后续整理：
 

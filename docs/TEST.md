@@ -108,10 +108,10 @@
 
 | 检查项 | 方法 | 当前状态 | 最近结果 |
 |---|---|---|---|
-| `/models` 接口返回模型状态 | 本地 API 调用 | 已通过 | 2026-04-03：mock backend `GET /models` 返回 `200`，状态总数 `25`，`qwen3-asr-1.7b` 显示 `available=true` |
-| 模型目录完整性规则可执行 | 本地目录校验 / service 调用 | 已通过 | 2026-04-03：已修正 `pyannote-3.1` 的目录判定；当前以 `config.yaml` 作为 base snapshot 就绪基线，`SpeakerDiarizer.pyannote_local_dir_complete(<repo>/models/diarization/pyannote-3.1)` 返回 `true`，`/models` 同步返回 `available=true` |
+| `/models` 接口返回模型状态 | 本地 API 调用 | 已通过 | 2026-04-03：删除 `pyannote-3.1` 支持后，in-process `list_models()` 返回 `24` 条状态；当前分离模型列表为 `funasr_builtin / campplus-diarization / sond-diarization / 3d-speaker` |
+| 模型目录完整性规则可执行 | 本地目录校验 / service 调用 | 已通过 | 2026-04-03：当前分离模型目录规则只覆盖仍在支持矩阵内的模型；被移除的 `pyannote-3.1` 已从 registry 和本地模型列表收敛掉，不再进入 `/models` 有效列表 |
 | registry 自愈/清理逻辑可执行 | 读写 `voicescribe_models.json` | 已通过 | 2026-04-03：`model_registry_service.load_registry()` 返回 canonical buckets `diarization/funasr/qwen3_asr/speaker_mapping/whisper`，无 `speaker`、`qwen3asr` 历史 bucket |
-| 下载失败后不会假可用 | 单点调用 + 状态校验 | 已通过 | 2026-04-03：已确认 `pyannote-3.1` 当前不是“下载失败”，而是 base snapshot 已下载；`/models` 现在显示 `available=true`、`size_bytes=10929498`、`error=null`，下载态与真实目录一致 |
+| 下载失败后不会假可用 | 单点调用 + 状态校验 | 已通过 | 2026-04-03：下载状态统一以当前支持矩阵和 registry/path 为准；被移除的 `pyannote-3.1` 即使原先有本地 snapshot，也不再通过 `/models` 暴露成“已下载” |
 | 预加载接口错误分类明确 | `/load` 或 service 调用 | 已通过 | 2026-04-03：`transcription_service.ensure_engine_loaded('qwen3_asr','qwen3-asr-1.7b',False, load_source='codex_test')` 成功，返回本地 `load_target=<repo>/models/qwen3_asr/qwen3-asr-1.7b` |
 
 #### 你手动测试
@@ -132,7 +132,7 @@
 |---|---|---|---|
 | speaker 相关后端代码可导入 | `python -m compileall backend` | 已通过 | 2026-04-03：`backend/venv/Scripts/python.exe -m compileall backend` 通过 |
 | `/speakers/register` / `/speakers` 接口可调用 | 本地 API 调用 | 已通过 | 2026-04-03：真实 backend 下使用示例 wav 成功完成 `GET /speakers -> POST /speakers/register -> GET /speakers -> DELETE /speakers/{id}` roundtrip；随后已把 speaker embedding 主链改成 GPU tensor，直接回归确认 `extract_embedding()` 返回 `Tensor@cuda:0`，新注册 speaker 落盘为 `.pt`，不再新写 `.npy`；另用临时 legacy speaker 目录实测 `_load_speakers()` 会把旧 `.npy` 自动迁移成 `.pt` 并删除旧文件 |
-| diarization 缺依赖错误分类明确 | 单点调用 `speaker.py` / service | 已通过 | 2026-04-03：`pyannote-3.1` 真实运行时现在会明确报出“base snapshot 已在本地，但运行时仍缺 `pyannote/segmentation-3.0` gated access 和 backend 可见 token”；`3d-speaker` 返回 bundle 已下载但 runtime 未实现的明确错误 |
+| diarization 缺依赖错误分类明确 | 单点调用 `speaker.py` / service | 已通过 | 2026-04-03：`3d-speaker` 返回 bundle 已下载但 runtime 未实现的明确错误；不支持的分离模型现在直接返回 `Unsupported diarization model` |
 | 失败时可回退普通转录的代码路径存在 | 代码与服务逻辑核对 | 已通过 | 2026-04-03：`transcribe()` 先拿 ASR 结果，再按分支决定是否跳过 diarization；空转录会直接保留普通结果，外部 diarization 失败则返回显式 HTTPException，不写伪成功结果 |
 
 #### 你手动测试
@@ -286,7 +286,7 @@
 |---|---|---|---|
 | 主模型路径保持在 `<repo>/models/` | 配置与实际目录校验 | 已通过 | 2026-04-02：mock backend `/models` 返回的 `cache_paths.model_root` 指向当前仓库 `D:\\learn\\AIGC\\voicescribe\\0324\\voicescribe\\models` |
 | registry 与目录状态一致 | 读取 `voicescribe_models.json` + 本地目录 | 已通过 | 2026-04-02：`bad_registry_count=0`、`missing_count=0`，当前 registry 条目都落在仓库 `models/` 下且路径存在 |
-| 不完整目录不会标记 `available=true` | service / API 校验 | 已通过 | 2026-04-03：`pyannote-3.1` 的状态语义已纠正；只有缺少 `config.yaml` 时才视为本地目录不完整。当前本地目录具备 `config.yaml`，因此 `_get_model_status('diarization','diarization','pyannote-3.1')` 返回 `available=true` |
+| 已移除模型不会继续标记 `available=true` | service / API 校验 | 已通过 | 2026-04-03：删除 `pyannote-3.1` 支持并清理本地目录后，`list_models()` 不再返回该模型；`models/voicescribe_models.json` 里的 diarization bucket 也不再包含该条目 |
 | stale registry 可被清理 | 单点调用 / 文件校验 | 已通过 | 2026-04-03：`ModelRegistryService.clean_registry_entries()` 已做严格 canonical 清理；`speaker -> speaker_mapping`、`cam++ -> campp` 已归并，`qwen3asr`、`firered`、`firered2` 等历史 bucket 已从文件移除 |
 
 #### 你手动测试
@@ -303,7 +303,7 @@
 |---|---|---|---|
 | token 读写命令可编译 | `cargo check` | 已通过 | 2026-04-02：`cargo check` 通过，`cargo test model_download_token_roundtrip_works` 通过 |
 | token 不进入普通 settings / registry / 文档 | 文件与代码校验 | 已通过 | 2026-04-03：`voicescribe_models.json` 与真实 `C:\\Users\\DingK\\AppData\\Roaming\\com.voicescribe.desktop\\voicescribe-settings.json` 均不含 token 字段；token 仍走 Windows Credential Manager |
-| gated 模型缺 token 时后端错误明确 | 单点调用 `/models/download` | 已通过 | 2026-04-03：直接调用 `download_model(category='diarization', engine='diarization', model='pyannote-3.1', token=None)` 返回 `HTTP 400`，detail=`Token required for this model` |
+| 当前支持矩阵无 token 依赖模型 | 代码与接口校验 | 已通过 | 2026-04-03：删除 `pyannote-3.1` 后，当前工作树中已无需要下载 token 的模型；token 存储基础设施保留但不再被现有模型矩阵使用 |
 | 下载链可从 Tauri token 命令取值 | 代码链核对 | 已通过 | 2026-04-02：确认 `EngineSettings.tsx -> api/tauri.ts(get/save/delete token) -> commands/credentials.rs -> api/backend.ts downloadModel(token)` 调用链存在 |
 
 #### 你手动测试
@@ -320,18 +320,14 @@
 | 检查项 | 方法 | 当前状态 | 最近结果 |
 |---|---|---|---|
 | `speaker.py` 可导入 | `python -m compileall backend` | 已通过 | 2026-04-02：`backend/venv/Scripts/python.exe -m compileall backend` 通过，`SpeakerDiarizer` 可实例化 |
-| 缺依赖时错误分类明确 | 单点调用 `ensure_diarization_loaded` | 已通过 | 2026-04-03：`ensure_diarization_loaded('pyannote-3.1')` 现在优先用本地 `config.yaml`，并将真实失败点收敛为明确 runtime 错误：base snapshot 已下载，但仍缺 `pyannote/segmentation-3.0` gated access 和 backend 可见 token |
-| `pyannote-3.1` 本地目录完整性规则存在 | 代码与 API 校验 | 已通过 | 2026-04-02：`_get_model_status(...)` 对本地不完整目录返回 `available=false` 和明确错误文案 |
-| 导入链不因 `onnxruntime/numpy` 旧问题直接炸主链 | 单点导入校验 | 已通过 | 2026-04-02：`SpeakerDiarizer()._import_pyannote_pipeline()` 返回 `Pipeline`，同时 `onnxruntime_runtime_available=False`，说明已从 pyannote 主导入链隔离 |
+| 不支持的分离模型会明确失败 | 单点调用 `ensure_diarization_loaded` | 已通过 | 2026-04-03：删除 `pyannote-3.1` 支持后，实测 `ensure_diarization_loaded('pyannote-3.1')` 直接返回 `Unsupported diarization model: pyannote-3.1`，不再进入隐式坏路径 |
 | `3D-Speaker` 真实加载结果明确 | 单点调用 `ensure_diarization_loaded('3d-speaker')` | 未通过 | 2026-04-03：当前 bundle 仅包含 speaker embedding + VAD，VoiceScribe 尚无可运行的 3d-speaker diarization integration；已改成返回明确 runtime 不可用错误 |
-| `pyannote-3.1` 真实运行时结果明确 | 单点调用 `ensure_diarization_loaded('pyannote-3.1')` | 未通过 | 2026-04-03：base snapshot 已在 `<repo>/models/diarization/pyannote-3.1`，并已按本地 `config.yaml` 进入 pyannote 加载；当前真实阻塞点已定位为 `pyannote/segmentation-3.0` gated 依赖和 backend runtime 不可见的 Hugging Face token，而不是下载目录不完整 |
 
 #### 你手动测试
 
 | 检查项 | 预期 | 当前状态 | 最近结果 |
 |---|---|---|---|
 | `3D-Speaker` 真实加载 | 可真实运行 | 待人工验收 | - |
-| `pyannote-3.1` 真实下载与 diarization | 可真实完成链路 | 待人工验收 | - |
 
 ### 4.6 历史与持久化对象
 
@@ -391,7 +387,7 @@
 1. 热键冷启动 `Right Alt`
 2. 热键 Apply 后恢复链
 3. `3D-Speaker` 下载后真实加载与转录
-4. `pyannote-3.1` 真实 token、真实下载、真实 diarization
+4. `3D-Speaker` 真实加载 / 真实 diarization
 
 ## 6. 当前测试结论写法
 

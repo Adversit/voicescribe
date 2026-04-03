@@ -153,7 +153,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock drift")
             .as_nanos();
-        format!("pyannote-3.1-test-{nanos}")
+        format!("model-download-token-test-{nanos}")
     }
 
     #[test]
