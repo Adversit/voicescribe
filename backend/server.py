@@ -25,11 +25,12 @@ import argparse
 import importlib.util
 import shutil
 import json
+import warnings
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 from config import (
     CONFIG_DIR,
@@ -58,6 +59,14 @@ from services.model_catalog import (
 )
 from services.model_registry import ModelRegistryService
 from services.transcription_service import RuntimeTranscriptionService
+
+# Suppress jieba's known pkg_resources deprecation noise during startup.
+warnings.filterwarnings(
+    "ignore",
+    message=r"pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+    module=r"jieba\._compat",
+)
 
 ensure_runtime_env()
 ensure_dirs()
@@ -103,9 +112,9 @@ try:
     from engines.whispercpp_engine import WhisperCppEngine
     WHISPERCPP_AVAILABLE = _whispercpp_cli_available() and _whispercpp_model_available()
     if not WHISPERCPP_AVAILABLE:
-        print("[Warning] Whisper.cpp engine not available: missing whisper-cli or model")
+        print("[Notice] Whisper.cpp engine not available: missing whisper-cli or model")
 except Exception as e:
-    print(f"[Warning] Whisper.cpp engine not available: {e}")
+    print(f"[Notice] Whisper.cpp engine not available: {e}")
 
 try:
     from engines.funasr_engine import FunASREngine
@@ -122,9 +131,9 @@ try:
     # Parakeet 依赖 nemo_toolkit 和 CUDA，尽量保守标记
     PARAKEET_AVAILABLE = _module_available("nemo") or _module_available("nemo_toolkit")
     if not PARAKEET_AVAILABLE:
-        print("[Warning] Parakeet engine not available: missing nemo_toolkit")
+        print("[Notice] Parakeet engine not available: missing nemo_toolkit")
 except ImportError as e:
-    print(f"[Warning] Parakeet engine not available: {e}")
+    print(f"[Notice] Parakeet engine not available: {e}")
 
 try:
     from engines.qwen3_asr_engine import Qwen3ASREngine
@@ -597,6 +606,7 @@ class TranscribeResult(BaseModel):
     diarization_model: Optional[str] = None
     speaker_mapping_model: Optional[str] = None
     speaker_text_alignment_limited: bool = False
+    warnings: List[str] = Field(default_factory=list)
 
 
 class EngineInfo(BaseModel):
@@ -1302,11 +1312,14 @@ async def summarize_text(payload: SummaryRequest) -> SummaryResponse:
     if not text:
         return SummaryResponse(summary="")
 
+    if MOCK_MODE:
+        return SummaryResponse(summary=_fallback_summary(text))
+
     if AI_REFINE_AVAILABLE:
         try:
             refiner = AIRefiner()
             if hasattr(refiner, "summarize"):
-                return SummaryResponse(summary=refiner.summarize(text))
+                return SummaryResponse(summary=refiner.summarize(text, timeout=5))
         except Exception as e:
             print(f"[Summary] AI summary failed, falling back: {e}")
 
@@ -1401,6 +1414,7 @@ async def transcribe(
         tmp_path = tmp.name
 
     try:
+        result_warnings: List[str] = []
         engine = asr_engine or engine
         model = asr_model or model
         _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
@@ -1418,10 +1432,20 @@ async def transcribe(
                 load_source="auto_on_demand",
             )
             result = mock_transcribe(tmp_path, language)
-            if enable_ai_refine and AI_REFINE_AVAILABLE:
-                refiner = AIRefiner()
-                hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
-                result["text"] = refiner.refine(result["text"], hotwords_list)
+            if enable_ai_refine:
+                if AI_REFINE_AVAILABLE:
+                    try:
+                        refiner = AIRefiner()
+                        hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
+                        result["text"] = refiner.refine(result["text"], hotwords_list)
+                    except Exception as e:
+                        warning = f"AI text refine failed; original transcription was kept: {e}"
+                        print(f"[AI Refine] {warning}")
+                        result_warnings.append(warning)
+                else:
+                    warning = "AI text refine is not available in the current runtime; original transcription was kept"
+                    print(f"[AI Refine] {warning}")
+                    result_warnings.append(warning)
             return TranscribeResult(
                 text=result["text"],
                 segments=result.get("segments", []),
@@ -1435,6 +1459,7 @@ async def transcribe(
                 speaker_text_alignment_limited=bool(
                     result.get("speaker_text_alignment_limited", False) or engine == "parakeet"
                 ),
+                warnings=result_warnings,
             )
 
         entry = await ensure_engine_loaded(
@@ -1516,13 +1541,23 @@ async def transcribe(
             if not diarization_done:
                 raise HTTPException(500, "Speaker diarization requested but no diarization result was produced")
 
-        if enable_ai_refine and AI_REFINE_AVAILABLE:
-            refiner = AIRefiner()
-            hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
-            print(f"[AI Refine] Hotwords: {hotwords_list}")
-            print(f"[AI Refine] Original: {result['text'][:100]}...")
-            result["text"] = refiner.refine(result["text"], hotwords_list)
-            print(f"[AI Refine] Refined: {result['text'][:100]}...")
+        if enable_ai_refine:
+            if AI_REFINE_AVAILABLE:
+                try:
+                    refiner = AIRefiner()
+                    hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
+                    print(f"[AI Refine] Hotwords: {hotwords_list}")
+                    print(f"[AI Refine] Original: {result['text'][:100]}...")
+                    result["text"] = refiner.refine(result["text"], hotwords_list)
+                    print(f"[AI Refine] Refined: {result['text'][:100]}...")
+                except Exception as e:
+                    warning = f"AI text refine failed; original transcription was kept: {e}"
+                    print(f"[AI Refine] {warning}")
+                    result_warnings.append(warning)
+            else:
+                warning = "AI text refine is not available in the current runtime; original transcription was kept"
+                print(f"[AI Refine] {warning}")
+                result_warnings.append(warning)
 
         print(
             f"[Transcribe] Completed engine={engine} model={model} text_length={len(result.get('text', ''))} segments={len(result.get('segments', []))} duration={result.get('duration', 0)}"
@@ -1538,6 +1573,7 @@ async def transcribe(
             diarization_model=diarization_model if enable_diarization else None,
             speaker_mapping_model=speaker_mapping_model if enable_diarization else None,
             speaker_text_alignment_limited=bool(result.get("speaker_text_alignment_limited", False)),
+            warnings=result_warnings,
         )
 
     finally:

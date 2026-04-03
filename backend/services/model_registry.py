@@ -6,6 +6,14 @@ from typing import Any, Callable, Dict, Optional
 
 
 class ModelRegistryService:
+    LEGACY_BUCKET_ALIASES = {
+        "speaker": "speaker_mapping",
+    }
+
+    LEGACY_MODEL_ALIASES = {
+        ("speaker_mapping", "cam++"): "campp",
+    }
+
     def __init__(
         self,
         *,
@@ -25,6 +33,26 @@ class ModelRegistryService:
         self.speaker_mapping_models = speaker_mapping_models
         self.get_funasr_model_id = get_funasr_model_id
 
+    def supported_registry_models(self) -> Dict[str, set[str]]:
+        return {
+            "whisper": {"tiny", "base", "small", "medium", "large-v2", "large-v3"},
+            "whispercpp": set(self.whispercpp_model_files.keys()),
+            "funasr": {
+                model_name
+                for model_name in (
+                    "paraformer-zh",
+                    "paraformer-zh-streaming",
+                    "seaco-paraformer",
+                    "sensevoice-small",
+                )
+                if self.get_funasr_model_id(model_name)
+            },
+            "parakeet": {"parakeet-ctc-1.1b", "parakeet-tdt-1.1b"},
+            "qwen3_asr": {"qwen3-asr-1.7b"},
+            "diarization": set(self.diarization_models.keys()) - {"funasr_builtin"},
+            "speaker_mapping": set(self.speaker_mapping_models.keys()),
+        }
+
     @staticmethod
     def category_bucket(category: str, engine: str) -> str:
         return engine if category == "asr" else category
@@ -33,7 +61,11 @@ class ModelRegistryService:
         try:
             if self.registry_path.exists():
                 with self.registry_path.open("r", encoding="utf-8") as handle:
-                    return json.load(handle)
+                    registry = json.load(handle)
+                cleaned_registry, changed = self.clean_registry_entries(registry)
+                if changed:
+                    self.save_registry(cleaned_registry)
+                return cleaned_registry
         except Exception as error:
             print(f"[ModelRegistry] Failed to read registry: {error}")
         return {}
@@ -74,6 +106,73 @@ class ModelRegistryService:
             return str(rebased)
 
         return None
+
+    def clean_registry_entries(self, registry: dict) -> tuple[dict, bool]:
+        if not isinstance(registry, dict):
+            return {}, True
+
+        cleaned: dict = {}
+        changed = False
+        supported_models = self.supported_registry_models()
+
+        for bucket, models in registry.items():
+            if not isinstance(models, dict):
+                changed = True
+                continue
+
+            canonical_bucket = self.LEGACY_BUCKET_ALIASES.get(bucket, bucket)
+            if canonical_bucket != bucket:
+                changed = True
+
+            allowed_models = supported_models.get(canonical_bucket)
+            if allowed_models is None:
+                changed = True
+                continue
+
+            cleaned_bucket: dict = {}
+            for model, entry in models.items():
+                if not isinstance(entry, dict):
+                    changed = True
+                    continue
+
+                canonical_model = self.LEGACY_MODEL_ALIASES.get((canonical_bucket, model), model)
+                if canonical_model != model:
+                    changed = True
+
+                if canonical_model not in allowed_models:
+                    changed = True
+                    continue
+
+                normalized_path = self.normalize_registry_path(entry.get("path"))
+                if not normalized_path:
+                    changed = True
+                    continue
+
+                normalized_entry = {
+                    **entry,
+                    "updated_at": entry.get("updated_at") or datetime.now().isoformat(),
+                    "path": normalized_path,
+                }
+                if normalized_entry != entry:
+                    changed = True
+                existing_entry = cleaned_bucket.get(canonical_model)
+                if existing_entry is None:
+                    cleaned_bucket[canonical_model] = normalized_entry
+                    continue
+
+                existing_updated = str(existing_entry.get("updated_at") or "")
+                normalized_updated = str(normalized_entry.get("updated_at") or "")
+                if normalized_updated >= existing_updated:
+                    if normalized_entry != existing_entry:
+                        changed = True
+                    cleaned_bucket[canonical_model] = normalized_entry
+
+            if cleaned_bucket:
+                cleaned[canonical_bucket] = cleaned_bucket
+            elif models:
+                changed = True
+
+        return cleaned, changed
 
     def get_registry_entry(self, engine: str, model: str, category: str = "asr") -> Optional[dict]:
         registry = self.load_registry()

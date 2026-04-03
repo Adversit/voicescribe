@@ -247,6 +247,10 @@ export async function finishRecordingSession() {
     useAppStore.getState().saveTranscription(result, settings.retainAudio ? audioPath : null);
     await persistTranscriptionHistory(result, audioPath);
     useAppStore.getState().setToast("转录完成，结果已输出并写入历史记录。");
+    const warningMessage = (result.warnings ?? []).find((message) => message.trim().length > 0) ?? null;
+    if (warningMessage) {
+      useAppStore.getState().setToast(`杞綍瀹屾垚锛屽凡淇濈暀鍘熷鏂囨湰銆?${warningMessage}`);
+    }
     await backendApi.listHistory().then((records) => {
       useAppStore.setState({
         historyRecords: records,

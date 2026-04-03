@@ -18,6 +18,12 @@ Workflow:
 - Write new bugs and unresolved items into `docs/BUGS.md`.
 - Packaging is a final-stage task unless it blocks earlier debugging.
 
+Bug repair rule:
+- When a bug is discovered during testing and the fix is local, low-risk, and clearly scoped, fix it immediately in the same round and record both the bug and the repair outcome.
+- If two consecutive repair attempts for the same bug do not close it, write the current cause analysis into `docs/BUGS.md` before continuing with other tests.
+- If four consecutive self-repair attempts for the same bug still fail, stop active repair for that bug in the current round, keep it recorded in `docs/BUGS.md`, and report it in the final summary.
+- Do not quietly retry the same repair path without updating the recorded understanding of the failure.
+
 Historical docs rule:
 - Historical phase docs are no longer kept in the working tree.
 - If a task explicitly requires old phase context, inspect Git history instead of expecting archived docs on disk.

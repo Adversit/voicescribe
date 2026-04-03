@@ -54,6 +54,9 @@ TRANSFORMERS_CACHE_DIR = (HF_HOME_DIR / "transformers").resolve()
 TORCH_CACHE_DIR = (MODEL_CACHE_DIR / "torch").resolve()
 JIEBA_CACHE_DIR = (MODEL_CACHE_DIR / "jieba").resolve()
 JIEBA_CACHE_FILE = (JIEBA_CACHE_DIR / "jieba.cache").resolve()
+FFMPEG_ROOT_DIR = Path(
+    os.environ.get("VOICESCRIBE_FFMPEG_DIR", str(PROJECT_ROOT / "tools" / "ffmpeg"))
+).expanduser().resolve()
 
 LEGACY_MODELSCOPE_CACHE_DIR = (Path.home() / ".cache" / "modelscope").resolve()
 LEGACY_HF_CACHE_DIR = (Path.home() / ".cache" / "huggingface").resolve()
@@ -81,6 +84,40 @@ CONFIG_DIR = Path(
 ).expanduser().resolve()
 
 
+def resolve_ffmpeg_bin_dir() -> Optional[Path]:
+    candidates = [
+        FFMPEG_ROOT_DIR / "bin",
+        FFMPEG_ROOT_DIR,
+    ]
+    for candidate in candidates:
+        ffmpeg_exe = candidate / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+        if ffmpeg_exe.exists():
+            return candidate.resolve()
+    return None
+
+
+def resolve_ffprobe_path() -> Optional[Path]:
+    ffmpeg_bin_dir = resolve_ffmpeg_bin_dir()
+    if not ffmpeg_bin_dir:
+        return None
+    candidate = ffmpeg_bin_dir / ("ffprobe.exe" if sys.platform == "win32" else "ffprobe")
+    if candidate.exists():
+        return candidate.resolve()
+    return None
+
+
+def prepend_env_path(candidate: Optional[Path]) -> None:
+    if not candidate:
+        return
+
+    candidate_str = str(candidate)
+    path_entries = os.environ.get("PATH", "").split(os.pathsep) if os.environ.get("PATH") else []
+    if candidate_str in path_entries:
+        return
+
+    os.environ["PATH"] = candidate_str + os.pathsep + os.environ.get("PATH", "")
+
+
 def ensure_runtime_env() -> None:
     os.environ.setdefault("MODELSCOPE_CACHE", MODELSCOPE_CACHE)
     os.environ.setdefault("HF_HOME", str(HF_HOME_DIR))
@@ -90,6 +127,14 @@ def ensure_runtime_env() -> None:
     os.environ.setdefault("TORCH_HOME", str(TORCH_CACHE_DIR))
     os.environ.setdefault("VOICESCRIBE_JIEBA_CACHE_DIR", str(JIEBA_CACHE_DIR))
     os.environ.setdefault("VOICESCRIBE_JIEBA_CACHE_FILE", str(JIEBA_CACHE_FILE))
+    os.environ.setdefault("VOICESCRIBE_FFMPEG_DIR", str(FFMPEG_ROOT_DIR))
+
+    ffmpeg_bin_dir = resolve_ffmpeg_bin_dir()
+    prepend_env_path(ffmpeg_bin_dir)
+
+    ffprobe_path = resolve_ffprobe_path()
+    if ffprobe_path:
+        os.environ.setdefault("VOICESCRIBE_FFPROBE", str(ffprobe_path))
 
 
 def resolve_modelscope_model_dir(model: str, revision: Optional[str] = None) -> str:

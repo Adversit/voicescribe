@@ -221,6 +221,16 @@ fn binding_matches_pressed(binding: &HotkeyBinding, pressed_keys: &BTreeSet<u32>
         return false;
     }
 
+    // Some Windows layouts report Right Alt as AltGr, which may carry an
+    // extra Ctrl key alongside VK_RMENU. Keep explicit 2-key bindings strict
+    // and only relax the single-key Right Alt path.
+    if binding_keys.as_slice() == [0xA5] {
+        let pressed = pressed_keys.iter().copied().collect::<Vec<_>>();
+        if matches!(pressed.as_slice(), [0xA5] | [0xA2, 0xA5] | [0xA3, 0xA5]) {
+            return true;
+        }
+    }
+
     binding_keys.len() == pressed_keys.len()
         && binding_keys
             .iter()
@@ -856,5 +866,49 @@ pub fn get_hotkey_display(state: State<'_, HotkeyState>) -> Result<String, Strin
         Ok(NOT_SET_LABEL.to_string())
     } else {
         Ok(binding.display)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::binding_matches_pressed;
+    use crate::state::HotkeyBinding;
+    use std::collections::BTreeSet;
+
+    fn pressed(keys: &[u32]) -> BTreeSet<u32> {
+        keys.iter().copied().collect()
+    }
+
+    #[test]
+    fn right_alt_binding_matches_plain_right_alt() {
+        let binding = HotkeyBinding {
+            keys: vec![0xA5],
+            display: "右 Alt".to_string(),
+        };
+
+        assert!(binding_matches_pressed(&binding, &pressed(&[0xA5])));
+    }
+
+    #[test]
+    fn right_alt_binding_matches_altgr_variants() {
+        let binding = HotkeyBinding {
+            keys: vec![0xA5],
+            display: "右 Alt".to_string(),
+        };
+
+        assert!(binding_matches_pressed(&binding, &pressed(&[0xA2, 0xA5])));
+        assert!(binding_matches_pressed(&binding, &pressed(&[0xA3, 0xA5])));
+    }
+
+    #[test]
+    fn two_key_bindings_remain_strict() {
+        let binding = HotkeyBinding {
+            keys: vec![0xA2, 0xA5],
+            display: "左 Ctrl+右 Alt".to_string(),
+        };
+
+        assert!(binding_matches_pressed(&binding, &pressed(&[0xA2, 0xA5])));
+        assert!(!binding_matches_pressed(&binding, &pressed(&[0xA5])));
+        assert!(!binding_matches_pressed(&binding, &pressed(&[0xA3, 0xA5])));
     }
 }

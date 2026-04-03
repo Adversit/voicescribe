@@ -55,6 +55,8 @@ pub struct TranscribeResult {
     pub diarization_model: Option<String>,
     pub speaker_mapping_model: Option<String>,
     pub speaker_text_alignment_limited: bool,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 fn dev_backend_dir() -> PathBuf {
@@ -175,6 +177,36 @@ fn resolve_runtime_dir(app: &AppHandle, backend_seed: &Path) -> Result<PathBuf, 
         .or_else(|_| app.path().local_data_dir())
         .map_err(|err| err.to_string())?;
     Ok(base.join("runtime"))
+}
+
+fn resolve_ffmpeg_root_dir(runtime_dir: &Path) -> PathBuf {
+    if let Some(path) = env::var_os("VOICESCRIBE_FFMPEG_DIR") {
+        return PathBuf::from(path);
+    }
+
+    runtime_dir.join("tools").join("ffmpeg")
+}
+
+fn resolve_ffmpeg_bin_dir(runtime_dir: &Path) -> Option<PathBuf> {
+    let root = resolve_ffmpeg_root_dir(runtime_dir);
+    let candidates = [root.join("bin"), root];
+    candidates.into_iter().find(|candidate| {
+        candidate
+            .join(if cfg!(target_os = "windows") {
+                "ffmpeg.exe"
+            } else {
+                "ffmpeg"
+            })
+            .exists()
+    })
+}
+
+fn prepend_path_value(existing: Option<std::ffi::OsString>, candidate: &Path) -> std::ffi::OsString {
+    let mut paths = vec![candidate.to_path_buf()];
+    if let Some(existing) = existing {
+        paths.extend(env::split_paths(&existing));
+    }
+    env::join_paths(paths).unwrap_or_else(|_| candidate.as_os_str().to_os_string())
 }
 
 fn ensure_runtime_dirs(runtime_dir: &Path) -> Result<(), String> {
@@ -715,6 +747,13 @@ pub fn start_backend(
             "VOICESCRIBE_SPEAKER_DIR",
             runtime_dir.join("data").join("speakers"),
         );
+        command.env("VOICESCRIBE_FFMPEG_DIR", resolve_ffmpeg_root_dir(&runtime_dir));
+        if let Some(ffmpeg_bin_dir) = resolve_ffmpeg_bin_dir(&runtime_dir) {
+            command.env(
+                "PATH",
+                prepend_path_value(env::var_os("PATH"), &ffmpeg_bin_dir),
+            );
+        }
 
         match command.spawn() {
             Ok(child) => {
@@ -1149,7 +1188,8 @@ mod tests {
             "asr_model": "parakeet-ctc-1.1b",
             "diarization_model": "3d-speaker",
             "speaker_mapping_model": "campp",
-            "speaker_text_alignment_limited": true
+            "speaker_text_alignment_limited": true,
+            "warnings": ["AI text refine is not available in the current runtime; original transcription was kept"]
         })
         .to_string();
 
@@ -1194,5 +1234,6 @@ mod tests {
         assert_eq!(result.diarization_model.as_deref(), Some("3d-speaker"));
         assert_eq!(result.speaker_mapping_model.as_deref(), Some("campp"));
         assert!(result.speaker_text_alignment_limited);
+        assert_eq!(result.warnings.len(), 1);
     }
 }

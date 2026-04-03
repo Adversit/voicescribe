@@ -60,6 +60,7 @@ export interface TranscribeResult {
   diarization_model: string | null;
   speaker_mapping_model: string | null;
   speaker_text_alignment_limited: boolean;
+  warnings?: string[];
 }
 
 export interface ModelStatus {

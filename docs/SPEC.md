@@ -1,37 +1,424 @@
 # VoiceScribe SPEC
 
-更新时间：2026-04-02
-
-## 1. Single Source Of Truth
-
-产品与模块边界：
+更新时间：2026-04-02  
+文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
+配套文档：
 - `docs/PRD.md`
-
-技术契约、运行链和接口：
-- `docs/SPEC.md`
-
-已执行测试：
 - `docs/TEST.md`
-
-已知问题与待修项：
 - `docs/BUGS.md`
 
-代码真相：
-- 以当前仓库实现为准，但新增或跨层改动必须先回写本文件
+## 1. 文档目的与范围
 
-## 2. 关键技术约束
+### 1.1 编写目的
 
-- 模型与缓存主目录固定为 `<repo>/models/`
-- 后端状态、下载、删除、加载都必须基于项目内模型目录
-- 桌面端通过 Tauri Rust 命令启动和管理后端
-- 跨层功能必须明确检查前端、Tauri、后端、持久化对象和日志
-- `backend/server.py` 是高风险中心文件；新增复杂业务规则时要优先评估是否下沉到 service 模块
+本文件不是理想化技术蓝图，而是面向后续 AI / 开发继续修改当前仓库时的实施交接文档。它要回答四类问题：
 
-## 3. 关键数据契约
+- 当前系统真实是怎么跑起来的
+- 哪些模块负责 canonical state
+- 请求、响应、持久化对象和运行时状态遵守什么契约
+- 哪些失败分支已经收口，哪些仍是已知缺口
 
-### 3.1 HotkeyBinding
+### 1.2 覆盖范围
 
-唯一正式结构：
+本文件覆盖当前仍在维护的真实能力：
+
+- React 前端页面、状态和流程层
+- Tauri 命令层与 Windows 桌面能力
+- Python FastAPI 路由层与服务层
+- 模型目录、模型注册表、历史记录、设置、token
+- 热键、录音、转录、说话人、实时流式、历史记录主链
+
+### 1.3 非覆盖范围
+
+本文件不覆盖：
+
+- 云端产品化方案
+- Web 版架构
+- 用户体系、多人协作、权限系统
+- 当前工作树中不存在的未来重构方案
+
+## 2. 系统上下文
+
+### 2.1 总体上下文
+
+VoiceScribe 是一个基于 Tauri 的 Windows 桌面语音转写应用。系统由三层共同组成：
+
+- 前端 React：承接用户交互、状态展示、录音流程编排
+- Tauri / Rust：承接桌面能力、音频录制、全局热键、token 安全存储、后端进程控制
+- 后端 FastAPI / Python：承接模型状态、下载、加载、转录、说话人链路、历史记录持久化
+
+### 2.2 总体架构图
+
+```mermaid
+graph TD
+  A[React Pages] --> B[Zustand Stores]
+  B --> C[Hooks / Flow Lib]
+  C --> D[Tauri API Wrapper]
+  C --> E[Backend HTTP Wrapper]
+  D --> F[Rust Commands]
+  E --> G[FastAPI Routes]
+  F --> G
+  G --> H[Service Layer]
+  H --> I[Engines / Speaker / Registry / History]
+  I --> J[models/ history.json settings token storage]
+```
+
+### 2.3 单一事实源
+
+当前系统的 canonical state 分布如下：
+
+| 领域 | 单一事实源 |
+|---|---|
+| 前端设置态 | `tauri-app/src/stores/appStore.ts` |
+| 前端模型状态列表 | `tauri-app/src/stores/modelStore.ts` + `/models` 响应 |
+| 热键正式结构 | `tauri-app/src/types/index.ts` 中的 `HotkeyBinding` |
+| 热键运行时注册状态 | Rust `hotkey.rs` 运行时状态 |
+| 后端健康状态 | Tauri backend command + `/health` |
+| 模型目录真实状态 | `<repo>/models/` 与 `backend/services/model_registry.py` |
+| 模型可运行性 | `backend/server.py` + service/runtime probe 判定 |
+| 历史记录 | `backend/services/history_service.py` 管理的 `history.json` |
+| token | Windows Credential Manager，通过 Tauri `credentials.rs` 管理 |
+
+## 3. 代码影响范围
+
+### 3.1 前端页面层
+
+- `tauri-app/src/AppShell.tsx`
+- `tauri-app/src/components/Layout.tsx`
+- `tauri-app/src/pages/EngineSettings.tsx`
+- `tauri-app/src/pages/GeneralSettings.tsx`
+- `tauri-app/src/pages/HotkeySettings.tsx`
+- `tauri-app/src/pages/SpeakerSettings.tsx`
+- `tauri-app/src/pages/RealtimeTranscriptionPage.tsx`
+- `tauri-app/src/pages/HistoryPage.tsx`
+- `tauri-app/src/pages/VocabularySettings.tsx`
+
+### 3.2 前端状态 / 流程层
+
+- `tauri-app/src/stores/appStore.ts`
+- `tauri-app/src/stores/modelStore.ts`
+- `tauri-app/src/lib/recordingFlow.ts`
+- `tauri-app/src/hooks/useHotkey.ts`
+- `tauri-app/src/hooks/useTrayEvents.ts`
+- `tauri-app/src/hooks/useBackendConnection.ts`
+- `tauri-app/src/api/backend.ts`
+- `tauri-app/src/api/tauri.ts`
+- `tauri-app/src/types/index.ts`
+
+### 3.3 Tauri / Rust 层
+
+- `tauri-app/src-tauri/src/lib.rs`
+- `tauri-app/src-tauri/src/commands/backend.rs`
+- `tauri-app/src-tauri/src/commands/audio.rs`
+- `tauri-app/src-tauri/src/commands/hotkey.rs`
+- `tauri-app/src-tauri/src/commands/text_input.rs`
+- `tauri-app/src-tauri/src/commands/credentials.rs`
+
+### 3.4 后端层
+
+- `backend/server.py`
+- `backend/services/transcription_service.py`
+- `backend/services/model_catalog.py`
+- `backend/services/model_registry.py`
+- `backend/services/history_service.py`
+- `backend/diarization/speaker.py`
+- `backend/engines/*.py`
+- `backend/config.py`
+- `backend/runtime_probe.py`
+
+### 3.5 持久化与运行时对象
+
+- `models/`
+- `models/voicescribe_models.json`
+- `history.json`
+- `voicescribe-settings.json`
+- Windows Credential Manager
+- 热键共享日志文件
+
+## 4. 关键运行链
+
+### 4.1 应用启动链
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as AppShell
+  participant TA as tauri.ts
+  participant RS as backend.rs
+  participant PY as FastAPI
+  U->>FE: 启动桌面应用
+  FE->>TA: start_backend / backend_status
+  TA->>RS: invoke backend commands
+  RS->>PY: 启动/探测 Python backend
+  PY-->>RS: health state
+  RS-->>TA: backend status
+  TA-->>FE: backend ready
+  FE->>FE: 初始化页面、stores、hooks
+```
+
+关键点：
+
+- 前端真正可用前依赖 backend ready。
+- `AppShell.tsx` 同时初始化后端连接、热键 hook、tray events、overlay bridge。
+- 启动通过不代表所有模型已可运行，只代表基础桌面壳和后端已起来。
+
+### 4.2 主窗口录音转录链
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as Page / appStore
+  participant FL as recordingFlow.ts
+  participant TA as tauri.ts
+  participant RS as audio/backend commands
+  participant PY as /transcribe
+  participant SV as transcription service
+  participant HI as history service
+  U->>FE: 点击开始录音
+  FE->>FL: beginRecording()
+  FL->>TA: start_recording
+  TA->>RS: invoke audio command
+  U->>FE: 点击停止录音
+  FE->>FL: finishRecording()
+  FL->>TA: stop_recording
+  TA->>RS: 收集音频文件
+  FL->>TA: transcribe
+  TA->>RS: invoke transcribe
+  RS->>PY: POST /transcribe
+  PY->>SV: 载入引擎 / 可选说话人链路 / 执行转录
+  SV-->>PY: structured result
+  PY-->>RS: response
+  RS-->>TA: transcribe result
+  TA-->>FL: result
+  FL->>HI: 写入 history
+  FL-->>FE: 更新 UI 与输出文本
+```
+
+关键点：
+
+- 录音和转录是同一条业务主链，不能把页面状态更新误当成成功。
+- 转录结果后续还会影响实时页、历史页和桌面文本输出。
+- 说话人链路是可选增强，不应反向拖垮普通 ASR 主链。
+
+### 4.3 热键录音链
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as HotkeySettings/useHotkey
+  participant TA as tauri.ts
+  participant RS as hotkey.rs
+  participant FL as recordingFlow.ts
+  U->>FE: 录制并应用热键
+  FE->>TA: suspend_hotkey_runtime
+  FE->>TA: register_hotkey_binding
+  FE->>TA: resume_hotkey_runtime
+  TA->>RS: 更新 runtime hotkey state
+  U->>RS: 在系统中按下热键
+  RS-->>FE: hotkey event
+  FE->>FL: 开始/停止/取消录音
+```
+
+关键点：
+
+- 设置页录制态和运行态监听必须共享 `HotkeyBinding`。
+- 热键 Apply 的核心风险点在 register/suspend/resume 恢复链。
+- 冷启动时还存在 persisted binding 自动恢复链。
+
+### 4.4 模型下载与状态刷新链
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as EngineSettings/modelStore
+  participant TA as token storage
+  participant PY as /models /models/download
+  participant RG as model registry
+  participant FS as models dir
+  U->>FE: 查看模型状态
+  FE->>PY: GET /models
+  PY->>RG: 读取 registry 和目录状态
+  RG->>FS: 检查本地目录/完整性
+  PY-->>FE: model status list
+  U->>FE: 下载模型
+  FE->>TA: 读取 token
+  FE->>PY: POST /models/download
+  PY->>FS: 下载 snapshot / 生成目录
+  PY->>RG: 刷新 registry
+  FE->>PY: 轮询 /models
+  PY-->>FE: 新状态
+```
+
+关键点：
+
+- 页面看到的可用性来自 `/models`，不是前端自己推断。
+- 对特殊模型，目录存在不等于可用。
+- 失败下载不能污染后续状态为“已下载”。
+
+### 4.5 说话人注册与转录链
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant FE as SpeakerSettings
+  participant PY as /speakers/*
+  participant SP as speaker.py
+  participant TR as transcription service
+  U->>FE: 上传 WAV 样本并注册姓名
+  FE->>PY: POST /speakers/register
+  PY->>SP: 保存样本/建立 speaker entry
+  SP-->>PY: register result
+  U->>FE: 启用 speaker chain 后发起转录
+  FE->>PY: POST /transcribe
+  PY->>TR: ensure diarization + mapping loaded
+  TR->>SP: diarize / map speakers
+  SP-->>TR: labeled segments
+  TR-->>PY: result with speakers
+```
+
+关键点：
+
+- speaker registry 和 diarization runtime 是两层能力，不能混为一体。
+- speaker page 能注册成功，不代表 runtime 已可真正推理。
+
+## 5. 模块设计
+
+### 5.1 前端页面层
+
+| 页面 | 职责 | 输入 | 输出 | 当前状态 |
+|---|---|---|---|---|
+| `EngineSettings.tsx` | 引擎选择、模型状态、下载/删除/预加载 | 用户操作、model store、token | 模型请求、状态展示 | 已实现主链 |
+| `GeneralSettings.tsx` | 通用设置、输出模式、录音相关设置 | app settings | 设置更新 | 已实现主链 |
+| `HotkeySettings.tsx` | 热键录制、保存、Apply | 键盘事件、hotkey binding | 调用 suspend/register/resume | 已实现，仍有 runtime 问题 |
+| `SpeakerSettings.tsx` | 说话人样本注册和删除 | 文件、姓名、模型选择 | speaker CRUD 请求 | 已实现主链 |
+| `RealtimeTranscriptionPage.tsx` | 展示流式片段和摘要 | app store realtime state | 页面展示 | 已实现主链 |
+| `HistoryPage.tsx` | 历史列表、复制、删除、导出 | history data | 用户操作回传 | 已实现主链 |
+| `VocabularySettings.tsx` | 热词和文本优化设置 | 热词、AI 优化开关 | 设置更新 | 已实现主链 |
+
+页面层边界：
+
+- 页面只负责展示和触发 action，不定义正式数据契约。
+- 页面可以聚合用户流程，但不能绕开 store / api 直接发明新状态结构。
+
+### 5.2 前端状态层
+
+#### `appStore.ts`
+
+- 职责：前端应用主状态入口
+- 上游：页面、hooks、recording flow
+- 下游：页面展示、后续 invoke/http 请求
+- 输入：设置变更、实时状态、录音状态、后端状态
+- 输出：统一设置对象、运行态对象、action
+- 持久化影响：设置文件、历史写回链上的部分用户选择
+
+#### `modelStore.ts`
+
+- 职责：模型列表、下载状态轮询、模型操作封装
+- 上游：EngineSettings
+- 下游：`backend.ts` `/models*`
+- 输入：refresh/download/delete/load 请求
+- 输出：模型状态列表、下载中状态
+- 持久化影响：间接影响 registry 与模型目录
+
+状态层边界：
+
+- 前端 store 保存 UI 视角状态，不替代后端的真实可用性判定。
+- 模型可用性、说话人 runtime 可用性等最终仍以后端为准。
+
+### 5.3 前端流程与 hook 层
+
+#### `recordingFlow.ts`
+
+- 职责：开始录音、停止录音、取消录音、转录完成后写回
+- 输入：用户操作、当前设置、热键事件
+- 输出：录音状态更新、转录结果、历史记录、文本输出
+- 对外依赖：`tauri.ts`、`appStore.ts`
+- 风险：该文件是前端主业务编排点，变更容易影响录音、实时页、历史、输出
+
+#### `useHotkey.ts`
+
+- 职责：热键 runtime 恢复、前端事件桥接、trace 日志串联
+- 输入：store 中的 `hotkeyBinding`、Tauri 事件
+- 输出：register/suspend/resume 调用、录音触发事件
+- 对外依赖：`tauri.ts`、`recordingFlow.ts`
+- 风险：冷启动恢复、Apply 恢复、单键特例
+
+#### `useBackendConnection.ts`
+
+- 职责：启动时连接后端、轮询/确认后端状态
+- 输入：AppShell 启动
+- 输出：backend ready / backend error 状态
+
+### 5.4 Tauri / Rust 命令层
+
+| 文件 | 职责 | 输入 | 输出 | 说明 |
+|---|---|---|---|---|
+| `backend.rs` | 后端进程启动/停止/探测 | frontend invoke | backend status / process result | dev 与 packaged 路径解析都在这里 |
+| `audio.rs` | 音频录制命令 | start/stop/cancel | 录音文件路径或状态 | 直接承接录音链 |
+| `hotkey.rs` | 全局热键注册与事件 | binding、runtime control | runtime state、事件、日志 | Windows 真实行为关键点 |
+| `text_input.rs` | 外部文本输出 | text/output mode | 输出结果 | 桌面集成能力 |
+| `credentials.rs` | token 安全存储 | key/category/model | token 读写结果 | Windows Credential Manager 封装 |
+
+命令层边界：
+
+- 向前端暴露稳定 invoke 契约。
+- 不承担跨模块产品级编排。
+- 对 Windows 能力的失败要尽量返回可诊断结果。
+
+### 5.5 FastAPI 路由层
+
+主要职责：
+
+- 解析 HTTP 入参
+- 返回统一响应/错误
+- 调用 service 层
+- 维护高层编排入口
+
+当前风险：
+
+- `backend/server.py` 是高风险中心文件。
+- 模型管理、转录、历史、说话人、流式逻辑过多集中在此。
+- 后续新增复杂规则前，应优先评估是否下沉到 `services/`。
+
+### 5.6 服务层
+
+#### `transcription_service.py`
+
+- 职责：引擎复用、加载、转录调度、diarization 加载收口
+- 输入：转录请求、模型选择、speaker chain 选项
+- 输出：转录结果或明确错误
+- 下游依赖：各 engine、`speaker.py`
+
+#### `model_registry.py`
+
+- 职责：模型 registry 读写、自愈、路径校正
+- 输入：模型路径、registry 条目、目录状态
+- 输出：registry 结果
+- 风险：错误 registry 会导致假可用状态
+
+#### `model_catalog.py`
+
+- 职责：定义引擎、模型、兼容性矩阵
+- 输入：engine/model 查询
+- 输出：model metadata
+
+#### `history_service.py`
+
+- 职责：history.json 读写、删除、清空、导出
+- 输入：转录结果对象
+- 输出：历史记录列表与文件落地
+
+#### `speaker.py`
+
+- 职责：speaker sample 管理、diarization 加载、runtime probe
+- 输入：说话人样本、模型名、token/本地模型目录
+- 输出：speaker list、diarization runtime、异常
+
+## 6. 数据模型与持久化对象
+
+### 6.1 `HotkeyBinding`
+
+正式结构：
 
 ```ts
 type HotkeyBinding = {
@@ -41,137 +428,232 @@ type HotkeyBinding = {
 ```
 
 约束：
+
 - `keys.length` 只能是 `1` 或 `2`
-- `keys` 必须唯一且排序
-- 左右键位保留 Windows 原生区分
+- `keys` 必须去重并排序
+- 左右键位差异必须保留
+- 不恢复旧的 `primaryCode / modifiers` 结构为正式主链
 
-### 3.2 Model Status
+### 6.2 `AppSettings`
 
-后端 `/models` 返回的模型状态至少要表达：
+当前正式设置至少包含：
+
+- 当前引擎与模型选择
+- 语言
+- 说话人链路开关
+- 输出模式
+- 热词
+- AI 文本优化开关
+- 流式与摘要开关
+- 保留音频开关
+- 自动启动
+- `hotkeyBinding`
+
+约束：
+
+- 新设置字段必须同步检查前端类型、持久化、默认值和相关页面。
+
+### 6.3 `HistoryRecord`
+
+任务级历史对象，至少承载：
+
+- 转录正文
+- 可选摘要
+- 引擎与模型信息
+- 可选音频路径
+- 可选说话人片段
+- 时间戳和任务级标识
+
+约束：
+
+- 历史是任务级记录，不按说话人拆成多条主记录。
+- 音频导出能力受 `retainAudio` 控制。
+
+### 6.4 模型状态对象
+
+模型状态至少表达：
+
 - `available`
-- `downloaded`
+- `downloadable`
+- `requires_token`
 - `downloading`
-- `path`
+- `loaded`
 - `size_bytes`
+- `downloaded_bytes`
 - `error`
 
 约束：
-- “目录存在”不等于“可用”
-- 某些模型需要模型专属完整性检查
-- 当前已对 `pyannote-3.1` 做完整目录校验
 
-### 3.3 Persisted Objects
+- “目录存在”不等于“模型可用”。
+- gated 模型不能只按下载请求成功来判定为可运行。
+- 特殊模型允许有专属完整性检查。
 
-需要同步检查的持久化对象：
-- 前端设置
-- 模型注册表 `models/voicescribe_models.json`
-- 历史记录
-- 转录结果对象
-- token 存储
-- 共享日志文件
+### 6.5 模型目录与注册表
 
-## 4. 运行链
+主根目录：
 
-### 4.1 引擎与模型管理
+- `<repo>/models/`
 
-主要链路：
-- `EngineSettings.tsx -> modelStore.ts -> backend.ts -> backend.rs -> server.py -> model registry / runtime services`
+关键对象：
 
-关键责任：
-- 前端展示完整模型清单与状态叠加
-- 后端负责模型状态判定、目录校验、下载和注册表修正
+- `models/voicescribe_models.json`
+- `models/huggingface/`
+- `models/diarization/`
+- 其他运行时缓存目录
 
-### 4.2 录音与转录
+约束：
 
-主要链路：
-- `UI / hotkey -> recordingFlow.ts -> tauri.ts -> audio.rs -> backend.rs -> server.py -> transcription_service.py -> engines/*.py`
+- 主路径不切回用户目录作为默认缓存语义。
+- 下载、删除、校验都要围绕项目内路径完成。
 
-关键责任：
-- Rust 负责录音设备、音频流和桌面能力
-- 后端负责模型加载、转录、说话人分离和结果组合
+### 6.6 token 存储
 
-### 4.3 热键
+当前 token 不直接放在工作树，而是通过 Tauri 写入 Windows Credential Manager。
 
-主要链路：
-- `HotkeySettings.tsx -> appStore.ts -> useHotkey.ts -> tauri.ts -> hotkey.rs`
+约束：
 
-当前原则：
-- 设置页只负责录制和更新设置
-- 正式注册入口只保留在 `useHotkey.ts`
-- 运行时全局监听在 Rust `WH_KEYBOARD_LL`
+- 页面发起下载时通过 Tauri 读取 token。
+- token 不进入文档、registry 或普通 settings 文件。
 
-### 4.4 历史记录
+## 7. 接口定义
 
-主要链路：
-- `recordingFlow.ts / stream flow -> backend.ts -> server.py -> history_service.py -> history.json`
+### 7.1 前端到 Tauri invoke 契约
 
-责任：
-- 后端负责最终落盘
-- 前端负责展示、筛选、复制、下载和删除
+| 命令 | 输入 | 输出 | 说明 |
+|---|---|---|---|
+| `start_backend` | 无或 backend config | backend start result | 启动 Python backend |
+| `stop_backend` | 无 | stop result | 停止 backend |
+| `backend_status` | 无 | running/ready/status detail | 前端启动期依赖 |
+| `register_hotkey_binding` | `HotkeyBinding` | register result | 更新 runtime binding |
+| `suspend_hotkey_runtime` | 无 | suspend result | 设置页录制前调用 |
+| `resume_hotkey_runtime` | 无 | resume result | Apply 后恢复 |
+| `start_recording` | audio config | recording state | 开始录音 |
+| `stop_recording` | 无 | audio file / state | 停止录音 |
+| `cancel_recording` | 无 | cancel result | 取消录音 |
+| `transcribe` | audio path + settings | transcribe result | 录音主链入口 |
+| `output_text` | text + output mode | output result | 文本输出到目标位置 |
+| token 读写命令 | category/engine/model | token or write result | 供模型下载使用 |
 
-## 5. 关键接口
+契约要求：
 
-### 5.1 Backend HTTP
+- 命令名、字段名必须与 `tauri-app/src/api/tauri.ts` 保持一致。
+- 热键命令应保留 trace 能力。
+- 返回错误必须区分“无法调用”和“调用成功但业务失败”。
 
-主要接口：
-- `GET /health`
-- `GET /engines`
-- `GET /models`
-- `POST /models/download`
-- `POST /models/delete`
-- `POST /transcribe`
-- `WS /stream`
-- `GET /history`
-- `POST /history`
-- `DELETE /history/{record_id}`
-- `DELETE /history`
-- `POST /summary`
+### 7.2 前端到 Backend HTTP 契约
 
-### 5.2 Tauri Commands
+| 接口 | 方法 | 输入 | 输出 | 用途 |
+|---|---|---|---|---|
+| `/health` | GET | 无 | backend health | 启动就绪判断 |
+| `/engines` | GET | 无 | engine catalog | 引擎页初始化 |
+| `/models` | GET | category/engine/model 可选过滤 | model status list | 模型状态刷新 |
+| `/models/download` | POST | model + token | download result | 下载模型 |
+| `/models/delete` | POST | model path/id | delete result | 删除模型 |
+| `/load` | POST | engine/model selection | load result | 预加载 |
+| `/transcribe` | POST | transcribe payload | structured result | 主转录入口 |
+| `/stream` | WS/stream | audio chunks | realtime entries | 实时转录 |
+| `/history` | GET/POST/DELETE | history params | history result | 历史读写 |
+| `/summary` | POST | summary input | summary result | AI 摘要 |
+| `/speakers/register` | POST | name + wav | register result | 注册说话人 |
+| `/speakers` | GET/DELETE | query/id | speaker list/result | speaker CRUD |
 
-主要命令：
-- `start_backend`
-- `stop_backend`
-- `backend_status`
-- `transcribe`
-- `register_hotkey_binding`
-- `suspend_hotkey_runtime`
-- `resume_hotkey_runtime`
-- `start_recording`
-- `stop_recording`
-- `cancel_recording`
-- `output_text`
-- token 读写相关命令
+契约要求：
 
-## 6. 模型路径与完整性规则
+- 错误应显式区分依赖缺失、目录不完整、token 缺失、运行时失败。
+- 后端不得把“可下载”误报成“可运行”。
 
-- 项目内模型根：`<repo>/models/`
-- Hugging Face 缓存：`models/huggingface/`
-- Torch 缓存：`models/torch/`
-- jieba 缓存：`models/jieba/`
+## 8. 失败分支与恢复策略
 
-当前特殊规则：
-- `pyannote-3.1` 仅在目录包含 `config.yaml` 和 checkpoint 文件时才允许视为本地可用
-- 不完整目录不得标记为 `available=true`
-- 指向不完整目录的 stale registry 必须自动清掉
+### 8.1 录音链失败分支
 
-## 7. 失败分支
+- 后端未启动：前端需阻止直接进入成功态。
+- 录音过短：返回明确提示，避免长等待。
+- 模型未加载或不可用：返回可理解错误。
+- 说话人链失败：优先回退纯 ASR，而非整体崩掉。
 
-必须显式考虑：
-- 后端未就绪
-- 模型目录存在但不完整
-- gated repo token 存在但下载不完整
-- 热键注册成功但冷启动后运行时未恢复
-- Apply 后 register/resume 存在延迟
-- 空录音、过短音频、无有效语音
-- Windows 专属路径、DLL、运行时依赖异常
+### 8.2 热键链失败分支
 
-## 8. 当前未收口项
+- 冷启动恢复失败：需可从 trace 看出卡在 bind/register/runtime 哪一段。
+- Apply 后恢复慢：需能定位 suspend/resume 间耗时。
+- 单键路径特例：不能和组合键路径共享错误假设。
 
-- 冷启动 `Right Alt` 不触发的真实断点和行为修复
-- 热键 Apply 后恢复慢的真实延迟点与行为修复
-- `pyannote-3.1` 真实完整下载与真实 diarization 验收
-- `Qwen3-ASR` 真实预加载与真实转录验收
-- `3D-Speaker` 下载后真实加载与转录验收
+### 8.3 模型链失败分支
+
+- 下载失败但残留目录：不得显示为可用。
+- 目录完整但依赖缺失：不得显示为真实可运行。
+- token 缺失或 gated repo 未授权：需返回明确错误。
+
+### 8.4 桌面能力失败分支
+
+- 托盘/Overlay/文本注入失败：需保留主窗口回退路径。
+- 自动启动未生效：需落到人工验收与平台差异排查。
+
+## 9. 日志、诊断与可观测性
+
+当前关键可观测对象：
+
+- backend start/stop/status
+- hotkey register/suspend/resume/trigger
+- model download/status/load
+- transcribe request/result/error
+- speaker load/runtime error
+
+当前要求：
+
+- 热键链应保留 trace_id 和时间线。
+- 模型状态错误要能从 `/models` 直接反映到前端。
+- 高风险 Windows 行为不能只留下“失败”而无阶段定位信息。
+
+## 10. 实施约束
+
+### 10.1 文档约束
+
+- 后续改代码前优先读 `PRD/SPEC/TEST/BUGS`。
+- 不再依赖已删除旧归档作为工作树入口。
+
+### 10.2 结构约束
+
+- 模型和缓存主路径保持在 `<repo>/models/`。
+- `backend/server.py` 新增复杂业务前，优先评估是否应下沉 service。
+- 页面不发明新正式数据结构，正式契约统一回到类型、接口和持久化对象。
+
+### 10.3 质量约束
+
+- 不把构建通过说成完成。
+- 不把路径存在说成模型可用。
+- 不在未人工验收前宣称桌面体验已完成。
+- 不在文档或普通配置文件中泄露 token。
+
+## 11. 测试与验收映射
+
+文档分工：
+
+- `docs/PRD.md`：定义功能验收口径
+- `docs/TEST.md`：记录已执行测试和待人工验收
+- `docs/BUGS.md`：记录未收口问题
+
+映射规则：
+
+- 变更某个功能模块时，应同步检查 `PRD` 对应验收项。
+- 变更接口或数据契约时，应至少记录编译/构建/静态验证。
+- 涉及 Windows 桌面行为时，应明确是否已做真机人工验收。
+
+## 12. 当前未收口点
+
+高优先级：
+
+- 冷启动 `Right Alt` 不触发
+- 热键 Apply 后恢复慢
+- `pyannote-3.1` 真实下载与真实运行时
+
+中优先级：
+
+- `Qwen3-ASR` 真实验收
+- `3D-Speaker` 真实验收
+- 启动 warning 收口
 - 快速测试启动脚本
-- 启动期 `ffmpeg / jieba / whisper.cpp / Parakeet` warning 收口
+
+低优先级 / 后续整理：
+
+- 持续收窄 `backend/server.py`
+- 进一步把模型状态校验从通用规则扩展到更多特殊模型

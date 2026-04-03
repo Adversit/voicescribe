@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import soundfile as sf
+import torch
+import torch.nn.functional as F
 from config import MODEL_CACHE_DIR, SPEAKER_DATA_DIR, ensure_runtime_env, resolve_modelscope_model_dir
 from runtime_probe import prepare_windows_runtime
 
@@ -50,6 +52,7 @@ class SpeakerDiarizer:
         self.sv_model = None  # speaker verification model
         self.sv_model_id: Optional[str] = None
         self.speakers: Dict[str, Dict] = {}  # speaker_id -> {name, embedding}
+        self.embedding_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self._load_speakers()
 
@@ -86,27 +89,49 @@ class SpeakerDiarizer:
     def pyannote_pipeline_unavailable_message(cls, model_id: str) -> str:
         return (
             f"pyannote-3.1 pipeline could not be loaded from '{model_id}'. "
-            "The repo may be gated or the local model files are incomplete. "
-            "Provide a valid Hugging Face token and ensure the pyannote model is downloaded before using this diarization model."
+            "The base pipeline snapshot may be present, but runtime still depends on gated pyannote sub-models "
+            "(for example pyannote/segmentation-3.0) and a Hugging Face token that is visible to the backend runtime. "
+            "Accept the required repo conditions and provide a valid Hugging Face token before using this diarization model."
+        )
+
+    @classmethod
+    def pyannote_dependency_access_message(cls, model_id: str) -> str:
+        return (
+            f"pyannote-3.1 base snapshot is available at '{model_id}', but runtime still needs gated dependency "
+            "access to pyannote/segmentation-3.0 and other referenced pyannote models. "
+            "Accept the conditions for both pyannote/speaker-diarization-3.1 and pyannote/segmentation-3.0, "
+            "and make a valid Hugging Face token visible to the backend runtime."
         )
 
     @staticmethod
     def pyannote_local_dir_complete(path: Path) -> bool:
         if not path.is_dir():
             return False
-        if not (path / "config.yaml").exists():
-            return False
-
-        for pattern in ("*.bin", "*.safetensors", "*.ckpt"):
-            if next(path.rglob(pattern), None) is not None:
-                return True
-        return False
+        return (path / "config.yaml").exists()
 
     @classmethod
     def pyannote_local_dir_incomplete_message(cls, path: str) -> str:
         return (
-            f"pyannote-3.1 local model directory is incomplete: '{path}'. "
-            "Retry the model download with a valid Hugging Face token until the full gated snapshot is present."
+            f"pyannote-3.1 base pipeline snapshot is missing required files: '{path}'. "
+            "The local directory must at least contain config.yaml."
+        )
+
+    @staticmethod
+    def three_d_speaker_bundle_manifest(path: Path) -> Optional[Path]:
+        if path.is_file() and path.name == "3d-speaker.bundle.json":
+            return path
+        candidate = path / "3d-speaker.bundle.json"
+        if candidate.exists():
+            return candidate
+        return None
+
+    @classmethod
+    def three_d_speaker_runtime_unavailable_message(cls, path: str) -> str:
+        return (
+            f"3d-speaker bundle is present at '{path}', but VoiceScribe does not yet have a "
+            "runnable diarization integration for this bundle. The current bundle only contains "
+            "speaker embedding and VAD assets, and the generic modelscope 'speaker-diarization' "
+            "pipeline path is not supported in this environment."
         )
 
     @contextlib.contextmanager
@@ -141,9 +166,18 @@ class SpeakerDiarizer:
             with open(speakers_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for sp in data.get("speakers", []):
-                    emb_file = self.data_dir / f"{sp['id']}.npy"
-                    if emb_file.exists():
-                        sp["embedding"] = np.load(emb_file)
+                    tensor_file = self.data_dir / f"{sp['id']}.pt"
+                    legacy_file = self.data_dir / f"{sp['id']}.npy"
+                    if tensor_file.exists():
+                        sp["embedding"] = torch.load(tensor_file, map_location=self.embedding_device)
+                    elif legacy_file.exists():
+                        embedding = torch.from_numpy(np.load(legacy_file)).to(
+                            device=self.embedding_device,
+                            dtype=torch.float32,
+                        )
+                        torch.save(embedding, tensor_file)
+                        legacy_file.unlink()
+                        sp["embedding"] = embedding
                     self.speakers[sp["id"]] = sp
 
     def _save_speakers(self):
@@ -290,14 +324,37 @@ class SpeakerDiarizer:
             pipeline_cls = self._import_pyannote_pipeline()
             model_path = self._resolve_local_model_path(logical_model, target_model_id)
             print(f"[Speaker] Loading pyannote diarization pipeline: {target_model_id} -> {model_path}...")
-            pipeline = pipeline_cls.from_pretrained(model_path)
+            pipeline_path = Path(model_path)
+            if pipeline_path.is_dir() and (pipeline_path / "config.yaml").exists():
+                pipeline_source: Any = pipeline_path / "config.yaml"
+            elif pipeline_path.exists():
+                pipeline_source = pipeline_path
+            else:
+                pipeline_source = model_path
+            try:
+                pipeline = pipeline_cls.from_pretrained(pipeline_source)
+            except Exception as e:
+                detail = str(e)
+                if "NoneType" in detail and "eval" in detail:
+                    raise RuntimeError(self.pyannote_dependency_access_message(model_path)) from e
+                raise RuntimeError(self.pyannote_pipeline_unavailable_message(model_path)) from e
             if pipeline is None:
-                raise RuntimeError(self.pyannote_pipeline_unavailable_message(model_path))
+                raise RuntimeError(self.pyannote_dependency_access_message(model_path))
             self.diarization_model = pipeline
             self.diarization_model_id = target_model_id
             self.diarization_backend = "pyannote_audio"
             print(f"[Speaker] Diarization pipeline loaded: {target_model_id} ({self.diarization_backend})")
             return self.diarization_model
+
+        if logical_model == "3d-speaker":
+            model_path = self._resolve_local_model_path(logical_model, target_model_id)
+            manifest = self.three_d_speaker_bundle_manifest(Path(model_path))
+            if manifest is not None:
+                raise RuntimeError(self.three_d_speaker_runtime_unavailable_message(str(manifest.parent)))
+            raise RuntimeError(
+                "3d-speaker runtime is not available. Download the official 3d-speaker bundle first, "
+                "then wire a dedicated runtime implementation before using it as a diarization model."
+            )
 
         pipeline_factory = self._import_modelscope_pipeline()
         diarization_candidates = [target_model_id]
@@ -476,7 +533,33 @@ class SpeakerDiarizer:
                     os.remove(temp_audio_path)
                 except Exception:
                     pass
-    def extract_embedding(self, audio_path: str) -> np.ndarray:
+    def _to_embedding_tensor(self, embedding: Any) -> torch.Tensor:
+        if isinstance(embedding, torch.Tensor):
+            return embedding.detach().to(device=self.embedding_device, dtype=torch.float32).flatten()
+        if isinstance(embedding, np.ndarray):
+            return torch.from_numpy(embedding).to(device=self.embedding_device, dtype=torch.float32).flatten()
+        return torch.as_tensor(embedding, dtype=torch.float32, device=self.embedding_device).flatten()
+
+    def extract_embedding_tensor(self, audio_path: str) -> torch.Tensor:
+        if self.sv_model is None:
+            raise RuntimeError("Model not loaded. Call load() first.")
+
+        result = self.sv_model.generate(audio_path)
+
+        if isinstance(result, dict) and "spk_embedding" in result:
+            embedding = result["spk_embedding"]
+        elif isinstance(result, list) and len(result) > 0:
+            if isinstance(result[0], dict) and "spk_embedding" in result[0]:
+                embedding = result[0]["spk_embedding"]
+            else:
+                embedding = result[0]
+        else:
+            embedding = result
+
+        return self._to_embedding_tensor(embedding)
+
+    def extract_embedding(self, audio_path: str) -> torch.Tensor:
+        return self.extract_embedding_tensor(audio_path)
         """提取音频的声纹特征"""
         if self.sv_model is None:
             raise RuntimeError("Model not loaded. Call load() first.")
@@ -495,9 +578,15 @@ class SpeakerDiarizer:
         else:
             embedding = result
 
-        # 确保是 numpy 数组
-        if not isinstance(embedding, np.ndarray):
-            embedding = np.array(embedding)
+        # Torch tensors may still live on CUDA; move them to host first.
+        if hasattr(embedding, "detach"):
+            embedding = embedding.detach()
+        if hasattr(embedding, "cpu"):
+            embedding = embedding
+        if hasattr(embedding, "numpy"):
+            embedding = embedding
+        elif not isinstance(embedding, np.ndarray):
+            embedding = embedding
 
         # 展平为一维
         embedding = embedding.flatten()
@@ -532,7 +621,10 @@ class SpeakerDiarizer:
             "embedding": embedding,
         }
 
-        np.save(self.data_dir / f"{speaker_id}.npy", embedding)
+        torch.save(embedding, self.data_dir / f"{speaker_id}.pt")
+        legacy_file = self.data_dir / f"{speaker_id}.npy"
+        if legacy_file.exists():
+            legacy_file.unlink()
         self._save_speakers()
 
         print(f"[Speaker] Registered: {name} ({speaker_id}), embedding shape: {embedding.shape}")
@@ -555,9 +647,9 @@ class SpeakerDiarizer:
         del self.speakers[speaker_id]
 
         # 删除 embedding 文件
-        emb_file = self.data_dir / f"{speaker_id}.npy"
-        if emb_file.exists():
-            emb_file.unlink()
+        for emb_file in (self.data_dir / f"{speaker_id}.pt", self.data_dir / f"{speaker_id}.npy"):
+            if emb_file.exists():
+                emb_file.unlink()
 
         # 更新 JSON 文件
         self._save_speakers()
@@ -565,7 +657,7 @@ class SpeakerDiarizer:
         print(f"[Speaker] Deleted: {speaker_id}")
         return True
 
-    def identify_speaker(self, embedding: np.ndarray, threshold: float = 0.7) -> Optional[str]:
+    def identify_speaker(self, embedding: torch.Tensor, threshold: float = 0.7) -> Optional[str]:
         """
         根据声纹识别说话人
 
@@ -587,9 +679,9 @@ class SpeakerDiarizer:
                 continue
 
             # 计算余弦相似度
-            emb1 = embedding.flatten()
-            emb2 = sp["embedding"].flatten()
-            score = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+            emb1 = self._to_embedding_tensor(embedding)
+            emb2 = self._to_embedding_tensor(sp["embedding"])
+            score = float(F.cosine_similarity(emb1.unsqueeze(0), emb2.unsqueeze(0)).item())
 
             if score > best_score and score >= threshold:
                 best_score = score
@@ -628,7 +720,7 @@ class SpeakerDiarizer:
 
                 if len(unique_labels) > 1 and diarization:
                     audio_data, sr = self._read_audio_mono(audio_path)
-                    embeddings_by_label: Dict[str, List[np.ndarray]] = {}
+                    embeddings_by_label: Dict[str, List[torch.Tensor]] = {}
 
                     for d in diarization:
                         emb = self._extract_embedding_for_segment(
@@ -644,7 +736,7 @@ class SpeakerDiarizer:
                     for label, embs in embeddings_by_label.items():
                         if not embs:
                             continue
-                        avg_emb = np.mean(np.stack(embs, axis=0), axis=0)
+                        avg_emb = torch.stack(embs, dim=0).mean(dim=0)
                         matched_id = self.identify_speaker(avg_emb)
                         if matched_id:
                             matched_name = self.speakers[matched_id].get("name", matched_id)

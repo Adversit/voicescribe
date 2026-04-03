@@ -4,6 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
+from config import resolve_ffmpeg_bin_dir
+
 _BACKEND_DIR = Path(__file__).resolve().parent
 _DLL_HANDLES: List[Any] = []
 
@@ -17,6 +19,9 @@ def prepare_windows_runtime() -> List[str]:
         _BACKEND_DIR / "venv" / "Scripts",
         _BACKEND_DIR / "venv" / "Lib" / "site-packages" / "torch" / "lib",
     ]
+    ffmpeg_bin_dir = resolve_ffmpeg_bin_dir()
+    if ffmpeg_bin_dir:
+        candidates.insert(0, ffmpeg_bin_dir)
 
     path_entries = os.environ.get("PATH", "").split(os.pathsep)
     for candidate in candidates:
