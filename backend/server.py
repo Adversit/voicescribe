@@ -26,6 +26,7 @@ import importlib.util
 import shutil
 import json
 import warnings
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -495,17 +496,6 @@ try:
 except Exception as e:
     print(f"[Warning] Speaker diarization not available: {e}")
 
-app = FastAPI(title="VoiceScribe", version="0.1.0")
-
-# CORS for local app
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Global instances
 MOCK_MODE = False
 
@@ -587,7 +577,6 @@ def _extract_builtin_speaker_labels(result: dict) -> List[dict]:
     return diarization_list
 
 
-@app.on_event("startup")
 async def preload_models():
     """启动时预加载模型，避免首次转录等待"""
     if MOCK_MODE:
@@ -609,6 +598,24 @@ async def preload_models():
                 print(f"[Preload] Whisper ready!")
         except Exception as e:
             print(f"[Preload] Failed to load {engine_name}: {e}")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await preload_models()
+    yield
+
+
+app = FastAPI(title="VoiceScribe", version="0.1.0", lifespan=lifespan)
+
+# CORS for local app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class TranscribeRequest(BaseModel):

@@ -105,11 +105,12 @@
 ### 4.4 FastAPI 启动事件存在弃用警告
 
 状态：
-- 未收口，低优先级
+- 已收口
 
 当前事实：
-- mock backend 启动时会报告 `on_event` 已弃用
-- 当前不影响 API 行为，但后续应迁移至 lifespan handler
+- 2026-06-13 已把旧 `@app.on_event("startup")` 迁移到 FastAPI lifespan
+- 自动化确认 lifespan 调用一次现有预加载入口
+- 真实 mock backend 启动成功，保留预加载跳过行为且不再报告 `on_event` 弃用警告
 
 ### 4.5 Windows 目标应用分类仍依赖窗口标题启发式
 

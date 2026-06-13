@@ -21,6 +21,15 @@
 - 单个 Provider 探测失败不得导致整个探测请求失败。
 - 不返回完整命令路径、原始 endpoint 响应、用户文本或凭据。
 
+## 2026-06-13 FastAPI Lifespan 迁移
+
+- Single source of truth：FastAPI `lifespan` 是后端启动生命周期的唯一入口。
+- 输入/输出契约：启动时仍调用现有 `preload_models()`；mock、禁用预加载、加载成功和加载失败行为保持不变；当前没有 shutdown 清理动作。
+- Affected File List：`backend/server.py`、`backend/tests/test_pipeline_routes.py`、`docs/SPEC.md`、`docs/TEST.md`、`docs/BUGS.md`。
+- Old-Logic Removal List：删除 `@app.on_event("startup")` 注册，不保留双重启动入口。
+- Acceptance Criteria：mock backend 启动日志不再出现 `on_event is deprecated`；lifespan 自动化确认调用一次预加载入口；后端测试与 compileall 通过。
+- Failure branches：单个模型预加载失败仍由 `preload_models()` 记录并继续启动；lifespan 不新增模型下载或用户目录缓存路径。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：

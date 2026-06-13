@@ -76,6 +76,16 @@ class PipelineRouteTests(unittest.TestCase):
             base_url="http://127.0.0.1:11434/v1",
         )
 
+    def test_lifespan_calls_preload_once(self):
+        async def run_lifespan():
+            async with server.lifespan(server.app):
+                return None
+
+        with patch.object(server, "preload_models", new=AsyncMock()) as preload:
+            asyncio.run(run_lifespan())
+
+        preload.assert_awaited_once_with()
+
     def test_deferred_transcribe_forces_raw_processing_contract(self):
         mock_asr = {
             "text": "raw transcript",

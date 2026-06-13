@@ -484,3 +484,12 @@
 | 设置页探测按钮与结果卡片 | 已通过 | Edge headless 点击“检测运行时”后显示四张结果卡；确认 Claude/Codex/SDK 就绪和 OpenAI-compatible 不可用状态；按钮在后端连接后可用 |
 | 探测安全边界 | 已通过 | 代码与测试确认探测不发送样本文本、不启动 Claude/Codex 会话、不下载模型、不返回完整命令路径；OpenAI-compatible 仅请求当前 endpoint 的 `/models` |
 | 探测结果失效规则 | 已通过 | model、base URL 或后端连接状态变化时清空旧的临时探测结果，避免把 stale 状态当作 canonical state |
+
+## 11. 2026-06-13 FastAPI Lifespan 迁移测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| Lifespan 自动化契约 | 已通过 | `backend/venv/Scripts/python.exe -m unittest discover -s tests -v`：25 项通过；新增 `test_lifespan_calls_preload_once`，确认 lifespan 调用一次现有预加载入口 |
+| 后端静态导入 | 已通过 | `backend/venv/Scripts/python.exe -m compileall server.py services tests` 通过 |
+| 真实 mock backend 启动 | 已通过 | mock backend 成功监听 `127.0.0.1:8765`，仍输出 `[Preload] Mock mode, skipping preload`，stderr 不再包含 `on_event is deprecated` |
+| 模型路径与下载行为 | 已通过 | 本轮仅迁移启动注册方式，没有触发模型下载，也没有修改 `<repo>/models/` 主路径约束 |
