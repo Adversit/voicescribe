@@ -440,3 +440,14 @@
 | 旧 history 记录迁移 | 已通过 | 缺少新字段的记录读取后补齐 `raw_text` 与 `text_processing=raw/skipped` |
 | 通用设置页文本处理控件 | 已通过 | 本地 Vite 页面确认：`raw` 时 Provider 禁用，切换到 `light` 后 Provider 启用，选择 `openai_compatible` 后显示模型和默认 `http://127.0.0.1:11434/v1` endpoint |
 | Windows 桌面完整闭环 | 待人工验收 | 设置页选择 provider/profile、热键录音、真实转写、文本处理、外部输入框输出和历史展示尚需真机验收 |
+
+## 8. 2026-06-13 Phase B 上下文感知首轮测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 目标窗口与粘贴目标共享快照 | 已通过 | Rust 代码已把原 `PREVIOUS_WINDOW` 升级为包含 HWND 与最小 `TargetContext` 的单一快照 |
+| 常见应用类别规则 | 已通过 | `cargo test classifies_common_target_app_titles -- --nocapture`：1 项通过，覆盖代码、邮件、聊天、终端和 other |
+| Rust 编译 | 已通过 | `cargo check` 通过 |
+| 前端 TargetContext invoke/type 契约 | 已通过 | `npm run build` 通过 |
+| Windows 真实目标应用捕获 | 待人工验收 | 需要在代码编辑器、聊天、邮件和浏览器中从录音开始到停止进行真机验证 |
+| 上下文接入 Provider 与 history | 未测试 | 尚未实现 |

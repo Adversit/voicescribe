@@ -13,7 +13,7 @@ use commands::{
         debug_hotkey_log, get_hotkey_display, register_hotkey_binding, resume_hotkey_runtime,
         suspend_hotkey_runtime, unregister_hotkey,
     },
-    text_input::output_text,
+    text_input::{get_target_context, output_text},
 };
 use state::{BackendProcessState, HotkeyState, RecordingState};
 use tauri::{
@@ -197,6 +197,7 @@ pub fn run() {
             delete_audio_file,
             get_recording_status,
             output_text,
+            get_target_context,
             get_model_download_token,
             save_model_download_token,
             delete_model_download_token,

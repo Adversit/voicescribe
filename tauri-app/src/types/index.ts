@@ -5,6 +5,12 @@ export type TextProcessingProfile = "raw" | "light" | "structured" | "formal" | 
 export type TextProcessingProvider = "claude_cli" | "codex_cli" | "codex_sdk" | "openai_compatible";
 export type TextProcessingStatus = "skipped" | "processed" | "fallback";
 
+export interface TargetContext {
+  app_kind: "code" | "chat" | "email" | "document" | "browser" | "terminal" | "other" | "unknown";
+  executable_name: string | null;
+  captured_at: string;
+}
+
 export interface EngineSelection {
   asrModel: string;
   diarizationModel: string;

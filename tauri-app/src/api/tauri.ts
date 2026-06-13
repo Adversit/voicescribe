@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { BackendRuntimeStatus, HotkeyBinding, TranscribeResult } from "../types";
+import type { BackendRuntimeStatus, HotkeyBinding, TargetContext, TranscribeResult } from "../types";
 
 export async function startBackend(): Promise<BackendRuntimeStatus> {
   return invoke("start_backend");
@@ -93,6 +93,10 @@ export async function transcribeAudio(payload: {
 
 export async function outputText(mode: string, text: string): Promise<void> {
   await invoke("output_text", { mode, text });
+}
+
+export async function getTargetContext(): Promise<TargetContext | null> {
+  return invoke("get_target_context");
 }
 
 export async function getModelDownloadToken(
