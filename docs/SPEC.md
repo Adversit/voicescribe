@@ -652,3 +652,17 @@ type HotkeyBinding = {
 
 - 持续收窄 `backend/server.py`
 - 进一步把模型状态校验从通用规则扩展到更多特殊模型
+
+## 13. Phase A：统一文本处理运行时
+
+本阶段正式规格见 `docs/TEXT_PROCESSING_DESIGN.md`。
+
+关键约束：
+
+- 后端 `TextProcessingService` 是 Provider/Profile 支持矩阵的单一事实源。
+- 前端设置只保存用户选择，不实现 Provider 业务逻辑。
+- `TranscribeResult.text` 是最终输出文本，`TranscribeResult.raw_text` 是原始 ASR 文本。
+- CLI 输入通过 stdin 传递，不把原始转写放入 argv。
+- Provider 失败统一回退原文，并通过结构化结果与 warnings 透传。
+- 历史记录同步保存原文、最终文本和文本处理元数据。
+- 新业务逻辑不继续堆叠到 `backend/server.py`。

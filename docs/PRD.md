@@ -582,3 +582,25 @@ flowchart TD
 ### 11.3 第三阶段
 
 - 更完整的安装、封装和最终交付链路
+
+## 12. Typeless 方向扩展
+
+### 12.1 智能文本处理
+
+VoiceScribe 的转写结果应支持原文、轻度润色、结构化提示词、正式文本和翻译等处理 Profile。处理层必须保留原始转写，不得在失败时丢失内容。
+
+首阶段 Provider 范围：
+
+- 本地 Claude Code CLI 无头模式
+- 本地 Codex CLI 无头模式
+- 本地 Codex SDK
+- 本地 OpenAI-compatible / Ollama endpoint
+
+验收要点：
+
+- 文本处理失败时自动输出原始转写并提示降级原因
+- 历史记录可同时查看原始转写与最终文本
+- 文本处理入口不得默认执行口述中的任务或获得写文件权限
+- VoiceScribe 管理的模型与缓存继续只使用仓库 `models/`
+
+详细实施规格见 `docs/TEXT_PROCESSING_DESIGN.md`，长期路线见 `docs/ROADMAP.md`。
