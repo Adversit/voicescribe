@@ -108,15 +108,30 @@ export function HistoryPage() {
                   <span className="app-chip">{selectedRecord.mode === "stream" ? "流式" : "非流式"}</span>
                   <span className="app-chip">{selectedRecord.asr_engine ?? selectedRecord.engine}</span>
                   <span className="app-chip">{selectedRecord.asr_model ?? selectedRecord.model}</span>
+                  <span className="app-chip">{selectedRecord.text_processing.profile}</span>
+                  <span className="app-chip">{selectedRecord.text_processing.status}</span>
                   {selectedRecord.diarization_model ? <span className="app-chip">{selectedRecord.diarization_model}</span> : null}
                   {selectedRecord.speaker_mapping_model ? <span className="app-chip">{selectedRecord.speaker_mapping_model}</span> : null}
                   <span className="app-chip">{formatDate(selectedRecord.created_at)}</span>
                 </div>
 
                 <div>
-                  <div className="text-xs text-ink/46">转录正文</div>
+                  <div className="text-xs text-ink/46">最终文本</div>
                   <div className="mt-1 text-sm leading-6 text-ink">{selectedRecord.text}</div>
                 </div>
+
+                {selectedRecord.raw_text !== selectedRecord.text ? (
+                  <div>
+                    <div className="text-xs text-ink/46">原始转写</div>
+                    <div className="mt-1 text-sm leading-6 text-ink">{selectedRecord.raw_text}</div>
+                  </div>
+                ) : null}
+
+                {selectedRecord.text_processing.warning ? (
+                  <div className="rounded-[10px] border border-line bg-[#fff8ef] px-3 py-2 text-sm text-ink">
+                    {selectedRecord.text_processing.warning}
+                  </div>
+                ) : null}
 
                 {selectedRecord.summary ? (
                   <div>

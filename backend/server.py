@@ -59,6 +59,11 @@ from services.model_catalog import (
 )
 from services.model_registry import ModelRegistryService
 from services.transcription_service import RuntimeTranscriptionService
+from services.text_processing_service import (
+    SUPPORTED_PROVIDERS,
+    TextProcessingRequest,
+    TextProcessingService,
+)
 
 # Suppress jieba's known pkg_resources deprecation noise during startup.
 warnings.filterwarnings(
@@ -370,6 +375,10 @@ def _iter_engine_models():
 
 
 history_service = HistoryService(HISTORY_STORAGE_PATH)
+text_processing_service = TextProcessingService(
+    model_root=MODEL_CACHE_DIR,
+    runtime_dir=CONFIG_DIR / "text-processing-runtime",
+)
 
 
 def _load_history_records() -> List[dict]:
@@ -401,6 +410,35 @@ def _fallback_summary(text: str) -> str:
     if len(condensed) <= 120:
         return condensed
     return condensed[:117].rstrip() + "..."
+
+
+def _apply_text_processing(
+    result: dict,
+    *,
+    profile: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    target_language: str,
+    hotwords: str,
+    legacy_enable_ai_refine: bool = False,
+) -> Optional[str]:
+    effective_profile = "light" if legacy_enable_ai_refine and profile == "raw" else profile
+    processing = text_processing_service.process(
+        TextProcessingRequest(
+            text=result.get("text") or "",
+            profile=effective_profile,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            target_language=target_language,
+            hotwords=tuple(word.strip() for word in hotwords.split(",") if word.strip()),
+        )
+    )
+    result["raw_text"] = processing.raw_text
+    result["text"] = processing.text
+    result["text_processing"] = processing.to_dict()
+    return processing.warning
 
 
 def _write_pcm16_wav(audio_bytes: bytes) -> str:
@@ -454,15 +492,6 @@ try:
         print(f"[Warning] Speaker diarization runtime not available: {FUNASR_RUNTIME.get('error')}")
 except Exception as e:
     print(f"[Warning] Speaker diarization not available: {e}")
-
-# AI 文本优化是可选的
-AI_REFINE_AVAILABLE = False
-try:
-    from postprocess.ai_refiner import AIRefiner
-    AI_REFINE_AVAILABLE = True
-except ImportError as e:
-    print(f"[Warning] AI refiner not available: {e}")
-
 
 app = FastAPI(title="VoiceScribe", version="0.1.0")
 
@@ -589,6 +618,7 @@ class TranscribeRequest(BaseModel):
 
 
 class TranscribeResult(BaseModel):
+    raw_text: str
     text: str
     segments: List[dict]
     duration: float
@@ -599,6 +629,7 @@ class TranscribeResult(BaseModel):
     diarization_model: Optional[str] = None
     speaker_mapping_model: Optional[str] = None
     speaker_text_alignment_limited: bool = False
+    text_processing: Dict[str, Any]
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -640,6 +671,7 @@ class HistoryRecordPayload(BaseModel):
     id: str
     created_at: str
     mode: Literal["stream", "non-stream"]
+    raw_text: Optional[str] = None
     text: str
     duration: float
     engine: str
@@ -650,6 +682,7 @@ class HistoryRecordPayload(BaseModel):
     speaker_mapping_model: Optional[str] = None
     speaker_entries: List[HistorySpeakerEntry] = []
     summary: Optional[str] = None
+    text_processing: Optional[Dict[str, Any]] = None
     retain_audio: bool = False
     audio_path: Optional[str] = None
 
@@ -676,7 +709,7 @@ async def root():
             "whisper": WHISPER_AVAILABLE,
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
-            "ai_refine": AI_REFINE_AVAILABLE,
+            "text_processing": list(SUPPORTED_PROVIDERS),
         },
         "runtime_checks": {
             "torch": TORCH_RUNTIME,
@@ -1269,14 +1302,9 @@ async def summarize_text(payload: SummaryRequest) -> SummaryResponse:
     if MOCK_MODE:
         return SummaryResponse(summary=_fallback_summary(text))
 
-    if AI_REFINE_AVAILABLE:
-        try:
-            refiner = AIRefiner()
-            if hasattr(refiner, "summarize"):
-                return SummaryResponse(summary=refiner.summarize(text, timeout=5))
-        except Exception as e:
-            print(f"[Summary] AI summary failed, falling back: {e}")
-
+    result = text_processing_service.summarize(text, timeout_seconds=5)
+    if result.status == "processed":
+        return SummaryResponse(summary=result.text)
     return SummaryResponse(summary=_fallback_summary(text))
 
 
@@ -1358,7 +1386,12 @@ async def transcribe(
     language: str = Form("zh"),
     enable_diarization: bool = Form(False),
     hotwords: str = Form(""),
-    enable_ai_refine: bool = Form(False),
+    text_processing_profile: str = Form("raw"),
+    text_processing_provider: str = Form("claude_cli"),
+    text_processing_model: str = Form(""),
+    text_processing_base_url: str = Form(""),
+    text_processing_target_language: str = Form(""),
+    enable_ai_refine: Optional[bool] = Form(None),
 ) -> TranscribeResult:
     """转录音频文件"""
     suffix = Path(audio.filename).suffix or ".wav"
@@ -1373,7 +1406,7 @@ async def transcribe(
         model = asr_model or model
         _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
         print(
-            f"[Transcribe] Request received filename={audio.filename or ''} engine={engine} model={model} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} language={language} diarization={enable_diarization} ai_refine={enable_ai_refine} size_bytes={len(content)}"
+            f"[Transcribe] Request received filename={audio.filename or ''} engine={engine} model={model} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} language={language} diarization={enable_diarization} text_profile={text_processing_profile} text_provider={text_processing_provider} size_bytes={len(content)}"
         )
 
         if MOCK_MODE:
@@ -1386,21 +1419,20 @@ async def transcribe(
                 load_source="auto_on_demand",
             )
             result = mock_transcribe(tmp_path, language)
-            if enable_ai_refine:
-                if AI_REFINE_AVAILABLE:
-                    try:
-                        refiner = AIRefiner()
-                        hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
-                        result["text"] = refiner.refine(result["text"], hotwords_list)
-                    except Exception as e:
-                        warning = f"AI text refine failed; original transcription was kept: {e}"
-                        print(f"[AI Refine] {warning}")
-                        result_warnings.append(warning)
-                else:
-                    warning = "AI text refine is not available in the current runtime; original transcription was kept"
-                    print(f"[AI Refine] {warning}")
-                    result_warnings.append(warning)
+            warning = _apply_text_processing(
+                result,
+                profile=text_processing_profile,
+                provider=text_processing_provider,
+                model=text_processing_model,
+                base_url=text_processing_base_url,
+                target_language=text_processing_target_language,
+                hotwords=hotwords,
+                legacy_enable_ai_refine=bool(enable_ai_refine),
+            )
+            if warning:
+                result_warnings.append(warning)
             return TranscribeResult(
+                raw_text=result["raw_text"],
                 text=result["text"],
                 segments=result.get("segments", []),
                 duration=result.get("duration", 0),
@@ -1413,6 +1445,7 @@ async def transcribe(
                 speaker_text_alignment_limited=bool(
                     result.get("speaker_text_alignment_limited", False) or engine == "parakeet"
                 ),
+                text_processing=result["text_processing"],
                 warnings=result_warnings,
             )
 
@@ -1430,7 +1463,7 @@ async def transcribe(
             f"[Transcribe] Engine ready engine={engine} model={model} load_target={entry.get('load_target')} diarization={entry.get('diarization', False)} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model}"
         )
         print(
-            f"[Transcribe] Start engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} ai_refine={enable_ai_refine}"
+            f"[Transcribe] Start engine={engine} model={model} diarization={enable_diarization} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} text_profile={text_processing_profile} text_provider={text_processing_provider}"
         )
 
         if engine == "funasr" and hotwords:
@@ -1495,28 +1528,24 @@ async def transcribe(
             if not diarization_done:
                 raise HTTPException(500, "Speaker diarization requested but no diarization result was produced")
 
-        if enable_ai_refine:
-            if AI_REFINE_AVAILABLE:
-                try:
-                    refiner = AIRefiner()
-                    hotwords_list = [w.strip() for w in hotwords.split(",") if w.strip()]
-                    print(f"[AI Refine] Hotwords: {hotwords_list}")
-                    print(f"[AI Refine] Original: {result['text'][:100]}...")
-                    result["text"] = refiner.refine(result["text"], hotwords_list)
-                    print(f"[AI Refine] Refined: {result['text'][:100]}...")
-                except Exception as e:
-                    warning = f"AI text refine failed; original transcription was kept: {e}"
-                    print(f"[AI Refine] {warning}")
-                    result_warnings.append(warning)
-            else:
-                warning = "AI text refine is not available in the current runtime; original transcription was kept"
-                print(f"[AI Refine] {warning}")
-                result_warnings.append(warning)
+        warning = _apply_text_processing(
+            result,
+            profile=text_processing_profile,
+            provider=text_processing_provider,
+            model=text_processing_model,
+            base_url=text_processing_base_url,
+            target_language=text_processing_target_language,
+            hotwords=hotwords,
+            legacy_enable_ai_refine=bool(enable_ai_refine),
+        )
+        if warning:
+            result_warnings.append(warning)
 
         print(
             f"[Transcribe] Completed engine={engine} model={model} text_length={len(result.get('text', ''))} segments={len(result.get('segments', []))} duration={result.get('duration', 0)}"
         )
         return TranscribeResult(
+            raw_text=result["raw_text"],
             text=result["text"],
             segments=result.get("segments", []),
             duration=result.get("duration", 0),
@@ -1527,6 +1556,7 @@ async def transcribe(
             diarization_model=diarization_model if enable_diarization else None,
             speaker_mapping_model=speaker_mapping_model if enable_diarization else None,
             speaker_text_alignment_limited=bool(result.get("speaker_text_alignment_limited", False)),
+            text_processing=result["text_processing"],
             warnings=result_warnings,
         )
 
@@ -1686,7 +1716,7 @@ async def health_check():
             "whisper": WHISPER_AVAILABLE,
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
-            "ai_refine": AI_REFINE_AVAILABLE,
+            "text_processing": list(SUPPORTED_PROVIDERS),
         },
         "loaded_engines": {
             name: {
@@ -1736,7 +1766,7 @@ def main():
         print(f"   FunASR:      {'OK' if FUNASR_AVAILABLE else 'NO'}")
         print(f"   Parakeet:    {'OK' if PARAKEET_AVAILABLE else 'NO'}")
         print(f"   Diarization: {'OK' if DIARIZATION_AVAILABLE else 'NO'}")
-        print(f"   AI Refine:   {'OK' if AI_REFINE_AVAILABLE else 'NO'}")
+        print(f"   Text processing providers: {', '.join(SUPPORTED_PROVIDERS)}")
         print("=" * 50)
     
     uvicorn.run(app, host=args.host, port=args.port)

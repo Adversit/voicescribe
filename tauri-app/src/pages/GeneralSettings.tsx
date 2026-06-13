@@ -5,6 +5,7 @@ import {
   SettingsRow,
   SettingsSection,
   ToggleSwitch,
+  inputClassName,
   selectClassName,
 } from "../components/settings-ui";
 import { useAppStore } from "../stores/appStore";
@@ -55,6 +56,82 @@ export function GeneralSettings() {
         </SettingsField>
       </SettingsSection>
 
+      <SettingsSection
+        title="智能文本处理"
+        description="转写后通过本地 Claude Code、Codex、Codex SDK 或本地 OpenAI-compatible 服务生成最终文本；失败时自动保留原始转写。"
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <SettingsField label="输出 Profile">
+            <select
+              value={settings.textProcessingProfile}
+              onChange={(event) =>
+                updateSettings({
+                  textProcessingProfile: event.target.value as typeof settings.textProcessingProfile,
+                })
+              }
+              className={selectClassName}
+            >
+              <option value="raw">原始转写</option>
+              <option value="light">轻度润色</option>
+              <option value="structured">结构化提示词</option>
+              <option value="formal">正式文本</option>
+              <option value="translate">清理并翻译</option>
+            </select>
+          </SettingsField>
+          <SettingsField label="处理 Provider">
+            <select
+              value={settings.textProcessingProvider}
+              disabled={settings.textProcessingProfile === "raw"}
+              onChange={(event) =>
+                updateSettings({
+                  textProcessingProvider: event.target.value as typeof settings.textProcessingProvider,
+                })
+              }
+              className={selectClassName}
+            >
+              <option value="claude_cli">Claude Code CLI</option>
+              <option value="codex_cli">Codex CLI</option>
+              <option value="codex_sdk">Codex SDK</option>
+              <option value="openai_compatible">本地 OpenAI-compatible / Ollama</option>
+            </select>
+          </SettingsField>
+          <SettingsField label="模型" hint="CLI 留空时使用其本地默认模型；OpenAI-compatible 必须填写。">
+            <input
+              value={settings.textProcessingModel}
+              disabled={settings.textProcessingProfile === "raw"}
+              onChange={(event) => updateSettings({ textProcessingModel: event.target.value })}
+              placeholder={
+                settings.textProcessingProvider === "openai_compatible"
+                  ? "例如 qwen3:8b"
+                  : "留空使用 Provider 默认模型"
+              }
+              className={inputClassName}
+            />
+          </SettingsField>
+          {settings.textProcessingProvider === "openai_compatible" ? (
+            <SettingsField label="本地 endpoint" hint="默认兼容 Ollama 的 OpenAI API。">
+              <input
+                value={settings.textProcessingBaseUrl}
+                disabled={settings.textProcessingProfile === "raw"}
+                onChange={(event) => updateSettings({ textProcessingBaseUrl: event.target.value })}
+                placeholder="http://127.0.0.1:11434/v1"
+                className={inputClassName}
+              />
+            </SettingsField>
+          ) : null}
+          {settings.textProcessingProfile === "translate" ? (
+            <SettingsField label="目标语言" hint="使用语言名或短语言代码，例如 English、zh、ja。">
+              <input
+                value={settings.textProcessingTargetLanguage}
+                onChange={(event) => updateSettings({ textProcessingTargetLanguage: event.target.value })}
+                placeholder="en"
+                className={inputClassName}
+              />
+            </SettingsField>
+          ) : null}
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="流式与历史记录" description="集中管理流式转录、AI 摘要和音频保留策略。">
         <SettingsRow
           title="启用流式传输"
@@ -96,16 +173,6 @@ export function GeneralSettings() {
             <ToggleSwitch
               checked={settings.enableDiarization}
               onChange={(next) => updateSettings({ enableDiarization: next })}
-            />
-          }
-        />
-        <SettingsRow
-          title="AI 文本优化"
-          description="去除语气词、修正部分错别字，并整理英文片段。"
-          control={
-            <ToggleSwitch
-              checked={settings.enableAIRefine}
-              onChange={(next) => updateSettings({ enableAIRefine: next })}
             />
           }
         />

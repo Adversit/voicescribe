@@ -68,7 +68,11 @@ export async function transcribeAudio(payload: {
   language: string;
   enableDiarization: boolean;
   hotwords: string;
-  enableAIRefine: boolean;
+  textProcessingProfile: string;
+  textProcessingProvider: string;
+  textProcessingModel: string;
+  textProcessingBaseUrl: string;
+  textProcessingTargetLanguage: string;
 }): Promise<TranscribeResult> {
   return invoke("transcribe", {
     audioPath: payload.audioPath,
@@ -79,7 +83,11 @@ export async function transcribeAudio(payload: {
     language: payload.language,
     enableDiarization: payload.enableDiarization,
     hotwords: payload.hotwords,
-    enableAiRefine: payload.enableAIRefine,
+    textProcessingProfile: payload.textProcessingProfile,
+    textProcessingProvider: payload.textProcessingProvider,
+    textProcessingModel: payload.textProcessingModel,
+    textProcessingBaseUrl: payload.textProcessingBaseUrl,
+    textProcessingTargetLanguage: payload.textProcessingTargetLanguage,
   });
 }
 

@@ -1,4 +1,6 @@
 # Web server (core)
+--index-url https://pypi.org/simple
+
 fastapi>=0.104.0
 uvicorn>=0.24.0
 python-multipart>=0.0.6
@@ -9,3 +11,4 @@ soundfile>=0.12.1
 
 # Utilities
 python-dotenv>=1.0.0
+openai-codex==0.1.0b3

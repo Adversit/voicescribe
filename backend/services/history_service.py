@@ -15,12 +15,31 @@ class HistoryService:
                 if isinstance(payload, dict):
                     records = payload.get("records", [])
                     if isinstance(records, list):
-                        return records
+                        return [self.normalize_record(record) for record in records]
                 if isinstance(payload, list):
-                    return payload
+                    return [self.normalize_record(record) for record in payload]
         except Exception as error:
             print(f"[History] Failed to read history: {error}")
         return []
+
+    @staticmethod
+    def normalize_record(record: dict) -> dict:
+        normalized = dict(record)
+        normalized.setdefault("raw_text", normalized.get("text", ""))
+        normalized.setdefault(
+            "text_processing",
+            {
+                "raw_text": normalized.get("raw_text", ""),
+                "text": normalized.get("text", ""),
+                "profile": "raw",
+                "provider": None,
+                "model": None,
+                "status": "skipped",
+                "duration_ms": 0,
+                "warning": None,
+            },
+        )
+        return normalized
 
     @staticmethod
     def sort_records(records: List[dict]) -> List[dict]:
@@ -47,6 +66,9 @@ class HistoryService:
             f"分离模型: {record.get('diarization_model', '')}",
             f"映射模型: {record.get('speaker_mapping_model', '')}",
             f"时长: {record.get('duration', 0)}",
+            "",
+            "原始转写:",
+            record.get("raw_text", record.get("text", "")),
             "",
             "正文:",
             record.get("text", ""),

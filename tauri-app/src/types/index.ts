@@ -1,6 +1,9 @@
 export type OutputMode = "directInput" | "clipboard" | "both";
 export type HistoryMode = "stream" | "non-stream";
 export type ModelCategory = "asr" | "diarization" | "speaker_mapping";
+export type TextProcessingProfile = "raw" | "light" | "structured" | "formal" | "translate";
+export type TextProcessingProvider = "claude_cli" | "codex_cli" | "codex_sdk" | "openai_compatible";
+export type TextProcessingStatus = "skipped" | "processed" | "fallback";
 
 export interface EngineSelection {
   asrModel: string;
@@ -37,6 +40,7 @@ export interface Transcription {
   id: string;
   date: string;
   duration: number;
+  rawText: string;
   text: string;
   segments: TranscriptionSegment[];
   engine: string;
@@ -46,10 +50,23 @@ export interface Transcription {
   diarizationModel: string | null;
   speakerMappingModel: string | null;
   speakerTextAlignmentLimited?: boolean;
+  textProcessing: TextProcessingResult;
   audioPath: string | null;
 }
 
+export interface TextProcessingResult {
+  raw_text: string;
+  text: string;
+  profile: string;
+  provider: string | null;
+  model: string | null;
+  status: TextProcessingStatus;
+  duration_ms: number;
+  warning: string | null;
+}
+
 export interface TranscribeResult {
+  raw_text: string;
   text: string;
   segments: Segment[];
   duration: number;
@@ -60,6 +77,7 @@ export interface TranscribeResult {
   diarization_model: string | null;
   speaker_mapping_model: string | null;
   speaker_text_alignment_limited: boolean;
+  text_processing: TextProcessingResult;
   warnings?: string[];
 }
 
@@ -94,6 +112,7 @@ export interface HistoryRecord {
   id: string;
   created_at: string;
   mode: HistoryMode;
+  raw_text: string;
   text: string;
   duration: number;
   engine: string;
@@ -104,6 +123,7 @@ export interface HistoryRecord {
   speaker_mapping_model?: string | null;
   speaker_entries: HistorySpeakerEntry[];
   summary: string | null;
+  text_processing: TextProcessingResult;
   retain_audio: boolean;
   audio_path: string | null;
 }
@@ -140,7 +160,11 @@ export interface AppSettings {
   enableDiarization: boolean;
   outputMode: OutputMode;
   hotwords: string;
-  enableAIRefine: boolean;
+  textProcessingProfile: TextProcessingProfile;
+  textProcessingProvider: TextProcessingProvider;
+  textProcessingModel: string;
+  textProcessingBaseUrl: string;
+  textProcessingTargetLanguage: string;
   enableStreaming: boolean;
   enableAISummary: boolean;
   retainAudio: boolean;

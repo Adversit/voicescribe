@@ -1,6 +1,6 @@
 # VoiceScribe TEST
 
-更新时间：2026-04-03（自动检查已回写）
+更新时间：2026-06-13（Typeless 文本处理首轮验证已回写）
 
 ## 1. 文档用途
 
@@ -406,3 +406,37 @@
 - “全部完成”
 - “全部已修复”
 - “全部已验证”
+
+## 7. 2026-06-13 Typeless 文本处理首轮测试记录
+
+### 7.1 自动化与构建
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 后端文本处理与路径守卫单元测试 | 已通过 | `backend/venv/Scripts/python.exe -m unittest discover -s tests -v`：11 项通过，包含 provider、SDK 超时中断、回退、仓库模型路径、旧历史迁移测试 |
+| 后端静态导入 | 已通过 | `python -m compileall .` 通过 |
+| 前端生产构建 | 已通过 | `npm ci` 后执行 `npm run build` 通过 |
+| Rust 编译 | 已通过 | `cargo check` 通过 |
+| Rust expanded transcribe payload 测试 | 已通过 | `cargo test transcribe_command_accepts_expanded_payload -- --nocapture` 通过 |
+| Rust 全仓格式检查 | 未通过 | `cargo fmt --check` 仍报告多个既有文件格式差异；本轮修改的 `backend.rs` 已单独格式化 |
+
+### 7.2 Provider 真实与 adapter 验证
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| Claude CLI 无头轻度润色 | 已通过 | 真实调用返回 `Hello there, this is a simple test.`，约 4.2 秒；用户转写通过 stdin 传入，禁用工具并启用 safe mode |
+| Codex CLI 无头轻度润色 | 已通过 | 真实调用返回 `Hello there. This is a simple test.`，约 22.8 秒；使用 ephemeral/read-only 模式 |
+| Codex Python SDK 无头轻度润色 | 已通过 | `openai-codex==0.1.0b3` 真实调用返回 `Hello there. This is a simple test.`，两次约 15.3 秒和 20.6 秒；超时中断分支另有单元测试 |
+| OpenAI-compatible adapter | 已通过 | 单元测试确认 `/chat/completions` 请求和结果解析；尚未用真实本地模型推理 |
+| Ollama 真实本地模型 | 未测试 | `ollama list` 当前为空，本轮未下载模型 |
+
+### 7.3 跨层 API 与数据契约
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| mock `/health` 文本处理能力与模型路径 | 已通过 | 返回四个 provider，模型根目录为 `G:\AI_projects\voicescriber\models` |
+| mock `/transcribe` raw profile | 已通过 | `status=skipped` 且 `raw_text == text` |
+| provider 失败回退 | 已通过 | 缺失 provider 时 `status=fallback`、保留原文并返回明确 warning |
+| 旧 history 记录迁移 | 已通过 | 缺少新字段的记录读取后补齐 `raw_text` 与 `text_processing=raw/skipped` |
+| 通用设置页文本处理控件 | 已通过 | 本地 Vite 页面确认：`raw` 时 Provider 禁用，切换到 `light` 后 Provider 启用，选择 `openai_compatible` 后显示模型和默认 `http://127.0.0.1:11434/v1` endpoint |
+| Windows 桌面完整闭环 | 待人工验收 | 设置页选择 provider/profile、热键录音、真实转写、文本处理、外部输入框输出和历史展示尚需真机验收 |

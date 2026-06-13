@@ -17,6 +17,7 @@ import type {
   TranscribeResult,
   Transcription,
   TranscriptionSegment,
+  TextProcessingProfile,
 } from "../types";
 
 export type PageKey =
@@ -86,7 +87,11 @@ const defaultSettings: AppSettings = {
   enableDiarization: false,
   outputMode: "directInput",
   hotwords: "",
-  enableAIRefine: false,
+  textProcessingProfile: "raw",
+  textProcessingProvider: "claude_cli",
+  textProcessingModel: "",
+  textProcessingBaseUrl: "http://127.0.0.1:11434/v1",
+  textProcessingTargetLanguage: "en",
   enableStreaming: false,
   enableAISummary: false,
   retainAudio: false,
@@ -300,7 +305,12 @@ function reconcileSelectionsWithCatalog(
 }
 
 function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppSettings {
-  const partial = (value ?? {}) as Partial<AppSettings> & { selectedModel?: string };
+  const partial = (value ?? {}) as Partial<AppSettings> & {
+    selectedModel?: string;
+    enableAIRefine?: boolean;
+  };
+  const migratedProfile: TextProcessingProfile = partial.textProcessingProfile
+    ?? (partial.enableAIRefine ? "light" : defaultSettings.textProcessingProfile);
   const next: AppSettings = {
     selectedEngine: partial.selectedEngine ?? defaultSettings.selectedEngine,
     engineSelections: mergeEngineSelections(partial.engineSelections),
@@ -308,7 +318,12 @@ function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppS
     enableDiarization: partial.enableDiarization ?? defaultSettings.enableDiarization,
     outputMode: partial.outputMode ?? defaultSettings.outputMode,
     hotwords: partial.hotwords ?? defaultSettings.hotwords,
-    enableAIRefine: partial.enableAIRefine ?? defaultSettings.enableAIRefine,
+    textProcessingProfile: migratedProfile,
+    textProcessingProvider: partial.textProcessingProvider ?? defaultSettings.textProcessingProvider,
+    textProcessingModel: partial.textProcessingModel ?? defaultSettings.textProcessingModel,
+    textProcessingBaseUrl: partial.textProcessingBaseUrl ?? defaultSettings.textProcessingBaseUrl,
+    textProcessingTargetLanguage:
+      partial.textProcessingTargetLanguage ?? defaultSettings.textProcessingTargetLanguage,
     enableStreaming: partial.enableStreaming ?? defaultSettings.enableStreaming,
     enableAISummary: partial.enableAISummary ?? defaultSettings.enableAISummary,
     retainAudio: partial.retainAudio ?? defaultSettings.retainAudio,
@@ -408,6 +423,7 @@ function createTranscription(result: TranscribeResult, audioPath: string | null)
     id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     date: new Date().toISOString(),
     duration: result.duration,
+    rawText: result.raw_text,
     text: result.text,
     segments,
     engine: result.engine,
@@ -417,6 +433,7 @@ function createTranscription(result: TranscribeResult, audioPath: string | null)
     diarizationModel: result.diarization_model,
     speakerMappingModel: result.speaker_mapping_model,
     speakerTextAlignmentLimited: result.speaker_text_alignment_limited,
+    textProcessing: result.text_processing,
     audioPath,
   };
 }

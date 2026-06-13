@@ -12,7 +12,7 @@ import {
 import { hideOverlay, pushOverlayState, showOverlay } from "./overlayWindow";
 import { cancelRealtimeStreamSession, startRealtimeStreamSession, stopRealtimeStreamSession } from "./realtimeStream";
 import { useAppStore } from "../stores/appStore";
-import type { HistoryRecord, HistorySpeakerEntry, TranscribeResult } from "../types";
+import type { HistoryRecord, HistorySpeakerEntry, TextProcessingResult, TranscribeResult } from "../types";
 
 let cancelResetTimer: number | null = null;
 
@@ -53,6 +53,7 @@ function createSpeakerEntries(result: TranscribeResult): HistorySpeakerEntry[] {
 
 function buildHistoryRecord(payload: {
   mode: "stream" | "non-stream";
+  rawText: string;
   text: string;
   duration: number;
   engine: string;
@@ -61,6 +62,7 @@ function buildHistoryRecord(payload: {
   speakerMappingModel: string | null;
   speakerEntries: HistorySpeakerEntry[];
   summary?: string | null;
+  textProcessing: TextProcessingResult;
   retainAudio: boolean;
   audioPath: string | null;
 }): HistoryRecord {
@@ -68,6 +70,7 @@ function buildHistoryRecord(payload: {
     id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     created_at: new Date().toISOString(),
     mode: payload.mode,
+    raw_text: payload.rawText,
     text: payload.text,
     duration: payload.duration,
     engine: payload.engine,
@@ -78,6 +81,7 @@ function buildHistoryRecord(payload: {
     speaker_mapping_model: payload.speakerMappingModel,
     speaker_entries: payload.speakerEntries,
     summary: payload.summary ?? null,
+    text_processing: payload.textProcessing,
     retain_audio: payload.retainAudio,
     audio_path: payload.audioPath,
   };
@@ -90,6 +94,7 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
 
   const nonStreamRecord = buildHistoryRecord({
     mode: "non-stream",
+    rawText: result.raw_text,
     text: result.text,
     duration: result.duration,
     engine: result.asr_engine,
@@ -97,6 +102,7 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
     diarizationModel: result.diarization_model,
     speakerMappingModel: result.speaker_mapping_model,
     speakerEntries: createSpeakerEntries(result),
+    textProcessing: result.text_processing,
     retainAudio: settings.retainAudio,
     audioPath: retainedAudioPath,
   });
@@ -110,6 +116,7 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
 
     const streamRecord = buildHistoryRecord({
       mode: "stream",
+      rawText: streamText,
       text: streamText,
       duration: result.duration,
       engine: result.asr_engine,
@@ -122,6 +129,16 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
         timestamp: entry.timestamp,
       })),
       summary: streamSummary,
+      textProcessing: {
+        raw_text: streamText,
+        text: streamText,
+        profile: "raw",
+        provider: null,
+        model: null,
+        status: "skipped",
+        duration_ms: 0,
+        warning: null,
+      },
       retainAudio: settings.retainAudio,
       audioPath: retainedAudioPath,
     });
@@ -236,7 +253,11 @@ export async function finishRecordingSession() {
       language: settings.language,
       enableDiarization: settings.enableDiarization,
       hotwords: settings.hotwords,
-      enableAIRefine: settings.enableAIRefine,
+      textProcessingProfile: settings.textProcessingProfile,
+      textProcessingProvider: settings.textProcessingProvider,
+      textProcessingModel: settings.textProcessingModel,
+      textProcessingBaseUrl: settings.textProcessingBaseUrl,
+      textProcessingTargetLanguage: settings.textProcessingTargetLanguage,
     });
 
     await debugHotkeyLog(
@@ -249,7 +270,7 @@ export async function finishRecordingSession() {
     useAppStore.getState().setToast("转录完成，结果已输出并写入历史记录。");
     const warningMessage = (result.warnings ?? []).find((message) => message.trim().length > 0) ?? null;
     if (warningMessage) {
-      useAppStore.getState().setToast(`杞綍瀹屾垚锛屽凡淇濈暀鍘熷鏂囨湰銆?${warningMessage}`);
+      useAppStore.getState().setToast(`转录完成，文本处理已回退到原始转写：${warningMessage}`);
     }
     await backendApi.listHistory().then((records) => {
       useAppStore.setState({

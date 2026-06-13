@@ -1,6 +1,6 @@
 # VoiceScribe BUGS
 
-更新时间：2026-04-03
+更新时间：2026-06-13
 
 ## 1. 高优先级未收口问题
 
@@ -62,7 +62,54 @@
 - 2026-04-03：`AI refine` 能力不可用时原先会静默跳过且不给提示；现已改为保留原始转录，并通过 `TranscribeResult.warnings[] -> recordingFlow toast` 显式提示降级
 - 2026-04-03：`/speakers/register` 曾在 CUDA 环境下因 speaker embedding 落盘链处理不当导致 500；现已改成 GPU tensor 主链，实时识别走 `torch`/CUDA，相似度计算用 `cosine_similarity`，新注册 speaker 写 `.pt`；历史 `.npy` 会在 `_load_speakers()` 阶段自动迁移成 `.pt` 并删除旧文件
 
-## 4. 记录规则
+## 4. Typeless 文本处理运行时
+
+### 4.1 本地 OpenAI-compatible 真实模型尚未验收
+
+状态：
+- 未收口
+
+当前事实：
+- `openai_compatible` adapter 单元测试已通过，默认 endpoint 为 `http://127.0.0.1:11434/v1`
+- 本机 `ollama list` 当前没有可用模型；为避免未经确认下载大模型，本轮没有执行真实本地模型推理
+- VoiceScribe 管理的 `OLLAMA_MODELS` 已强制指向 `<repo>/models/ollama`
+
+下一步：
+- 在仓库 `models/ollama` 下准备一个明确大小的模型后，完成真实 `/transcribe -> text processing -> history` 验收
+
+### 4.2 Codex 无头处理延迟偏高
+
+状态：
+- 待优化
+
+当前事实：
+- 2026-06-13 真实 smoke test 中，Codex CLI 约耗时 22.8 秒，Codex SDK 两次约耗时 15.3 秒和 20.6 秒
+- 两条路径均成功返回清理后的文本，功能正确但不适合作为低延迟默认体验
+
+下一步：
+- 增加 provider 可用性/延迟探测，并为默认选择提供性能提示
+- 评估进程复用、流式输出和更小本地模型
+
+### 4.3 Claude CLI 曾继承仓库上下文并偏离文本清理任务
+
+状态：
+- 已收口
+
+当前事实：
+- 首次真实调用会读取项目上下文并返回与文本清理无关的说明
+- 已增加 `--safe-mode`、禁用工具与 slash command、独立 system prompt
+- 2026-06-13 修复后真实调用约 4.2 秒并返回正确清理文本
+
+### 4.4 FastAPI 启动事件存在弃用警告
+
+状态：
+- 未收口，低优先级
+
+当前事实：
+- mock backend 启动时会报告 `on_event` 已弃用
+- 当前不影响 API 行为，但后续应迁移至 lifespan handler
+
+## 5. 记录规则
 
 - 本文件只保留当前仍有协作价值的问题
 - 历史问题与完整时间线从 Git 历史查看

@@ -44,7 +44,20 @@ pub struct Segment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextProcessingResult {
+    pub raw_text: String,
+    pub text: String,
+    pub profile: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub status: String,
+    pub duration_ms: u64,
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscribeResult {
+    pub raw_text: String,
     pub text: String,
     pub segments: Vec<Segment>,
     pub duration: f64,
@@ -55,6 +68,7 @@ pub struct TranscribeResult {
     pub diarization_model: Option<String>,
     pub speaker_mapping_model: Option<String>,
     pub speaker_text_alignment_limited: bool,
+    pub text_processing: TextProcessingResult,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -201,7 +215,10 @@ fn resolve_ffmpeg_bin_dir(runtime_dir: &Path) -> Option<PathBuf> {
     })
 }
 
-fn prepend_path_value(existing: Option<std::ffi::OsString>, candidate: &Path) -> std::ffi::OsString {
+fn prepend_path_value(
+    existing: Option<std::ffi::OsString>,
+    candidate: &Path,
+) -> std::ffi::OsString {
     let mut paths = vec![candidate.to_path_buf()];
     if let Some(existing) = existing {
         paths.extend(env::split_paths(&existing));
@@ -747,7 +764,10 @@ pub fn start_backend(
             "VOICESCRIBE_SPEAKER_DIR",
             runtime_dir.join("data").join("speakers"),
         );
-        command.env("VOICESCRIBE_FFMPEG_DIR", resolve_ffmpeg_root_dir(&runtime_dir));
+        command.env(
+            "VOICESCRIBE_FFMPEG_DIR",
+            resolve_ffmpeg_root_dir(&runtime_dir),
+        );
         if let Some(ffmpeg_bin_dir) = resolve_ffmpeg_bin_dir(&runtime_dir) {
             command.env(
                 "PATH",
@@ -880,7 +900,11 @@ pub async fn transcribe(
     language: String,
     enable_diarization: bool,
     hotwords: String,
-    enable_ai_refine: bool,
+    text_processing_profile: String,
+    text_processing_provider: String,
+    text_processing_model: String,
+    text_processing_base_url: String,
+    text_processing_target_language: String,
 ) -> Result<TranscribeResult, String> {
     let client = reqwest::Client::new();
     let file = tokio::fs::read(&audio_path)
@@ -890,13 +914,14 @@ pub async fn transcribe(
     let mut last_error = String::from("transcribe failed");
 
     log_hotkey(format!(
-        "backend transcribe request engine={} model={} diarization_model={} speaker_mapping_model={} diarization={} ai_refine={} audio_path={}",
+        "backend transcribe request engine={} model={} diarization_model={} speaker_mapping_model={} diarization={} text_profile={} text_provider={} audio_path={}",
         asr_engine,
         asr_model,
         diarization_model.as_deref().unwrap_or("none"),
         speaker_mapping_model.as_deref().unwrap_or("none"),
         enable_diarization,
-        enable_ai_refine,
+        text_processing_profile,
+        text_processing_provider,
         audio_path
     ));
 
@@ -916,7 +941,14 @@ pub async fn transcribe(
             .text("language", language.clone())
             .text("enable_diarization", enable_diarization.to_string())
             .text("hotwords", hotwords.clone())
-            .text("enable_ai_refine", enable_ai_refine.to_string());
+            .text("text_processing_profile", text_processing_profile.clone())
+            .text("text_processing_provider", text_processing_provider.clone())
+            .text("text_processing_model", text_processing_model.clone())
+            .text("text_processing_base_url", text_processing_base_url.clone())
+            .text(
+                "text_processing_target_language",
+                text_processing_target_language.clone(),
+            );
 
         if let Some(value) = diarization_model.clone() {
             form = form.text("diarization_model", value);
@@ -985,8 +1017,8 @@ pub async fn transcribe(
 mod tests {
     use super::{
         backend_bundle_sync_required_for_version, enable_embedded_site_import,
-        extract_embedded_python_zip, runtime_embedded_python_dir, transcribe,
-        should_use_dev_project_tree_for_paths,
+        extract_embedded_python_zip, runtime_embedded_python_dir,
+        should_use_dev_project_tree_for_paths, transcribe,
     };
     use std::fs;
     use std::io::{Read, Write};
@@ -1027,7 +1059,8 @@ mod tests {
                     let headers = String::from_utf8_lossy(&buffer[..index + 4]);
                     for line in headers.lines() {
                         if let Some(value) = line.strip_prefix("Content-Length:") {
-                            content_length = value.trim().parse::<usize>().expect("parse content-length");
+                            content_length =
+                                value.trim().parse::<usize>().expect("parse content-length");
                         }
                     }
                     header_end = Some(index + 4);
@@ -1172,6 +1205,7 @@ mod tests {
     async fn transcribe_command_accepts_expanded_payload() {
         let listener = TcpListener::bind("127.0.0.1:8765").expect("bind test backend port");
         let response_body = serde_json::json!({
+            "raw_text": "mock raw transcript",
             "text": "mock transcript",
             "segments": [
                 {
@@ -1189,7 +1223,17 @@ mod tests {
             "diarization_model": "3d-speaker",
             "speaker_mapping_model": "campp",
             "speaker_text_alignment_limited": true,
-            "warnings": ["AI text refine is not available in the current runtime; original transcription was kept"]
+            "text_processing": {
+                "raw_text": "mock raw transcript",
+                "text": "mock transcript",
+                "profile": "light",
+                "provider": "codex_cli",
+                "model": null,
+                "status": "processed",
+                "duration_ms": 25,
+                "warning": null
+            },
+            "warnings": ["Text processing failed; original transcription was kept"]
         })
         .to_string();
 
@@ -1221,7 +1265,11 @@ mod tests {
             "zh".to_string(),
             true,
             String::new(),
-            false,
+            "light".to_string(),
+            "codex_cli".to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
         )
         .await
         .expect("transcribe succeeds");
@@ -1234,6 +1282,11 @@ mod tests {
         assert_eq!(result.diarization_model.as_deref(), Some("3d-speaker"));
         assert_eq!(result.speaker_mapping_model.as_deref(), Some("campp"));
         assert!(result.speaker_text_alignment_limited);
+        assert_eq!(result.raw_text, "mock raw transcript");
+        assert_eq!(
+            result.text_processing.provider.as_deref(),
+            Some("codex_cli")
+        );
         assert_eq!(result.warnings.len(), 1);
     }
 }

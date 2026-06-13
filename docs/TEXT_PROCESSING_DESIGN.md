@@ -117,6 +117,8 @@ TextProcessingResult
 ### 测试
 
 - `backend/tests/test_text_processing_service.py`（新增）
+- `backend/tests/test_history_service.py`（新增）
+- `app/VoiceScribe/Services/BackendService.swift` 等旧 Swift 客户端入口（已审查；本轮通过后端兼容字段保持可用，未迁移其 UI）
 - Rust `transcribe_command_accepts_expanded_payload`
 - 前端 TypeScript 构建
 
@@ -209,4 +211,3 @@ TextProcessingResult
 - 把处理结果写入响应
 
 Provider 发现、进程调用、Prompt 组装、HTTP 请求、超时和 fallback 全部放入新增 service/postprocess 模块。后续再把转写路由编排逐步抽离。
-

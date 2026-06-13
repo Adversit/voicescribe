@@ -44,7 +44,22 @@ def _default_runtime_root() -> Path:
 
 RUNTIME_ROOT = _default_runtime_root()
 
-MODEL_CACHE_DIR = (PROJECT_ROOT / "models").expanduser().resolve()
+
+def _resolve_model_cache_dir() -> Path:
+    default_dir = (PROJECT_ROOT / "models").expanduser().resolve()
+    configured = os.environ.get("VOICESCRIBE_MODEL_DIR")
+    if not configured:
+        return default_dir
+
+    candidate = Path(configured).expanduser().resolve()
+    try:
+        candidate.relative_to(PROJECT_ROOT)
+    except ValueError:
+        return default_dir
+    return candidate
+
+
+MODEL_CACHE_DIR = _resolve_model_cache_dir()
 MODELSCOPE_CACHE = str(MODEL_CACHE_DIR)
 MODEL_REGISTRY_PATH = MODEL_CACHE_DIR / "voicescribe_models.json"
 HF_HOME_DIR = (MODEL_CACHE_DIR / "huggingface").resolve()
@@ -119,15 +134,16 @@ def prepend_env_path(candidate: Optional[Path]) -> None:
 
 
 def ensure_runtime_env() -> None:
-    os.environ.setdefault("MODELSCOPE_CACHE", MODELSCOPE_CACHE)
-    os.environ.setdefault("HF_HOME", str(HF_HOME_DIR))
-    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(HUGGINGFACE_HUB_CACHE))
-    os.environ.setdefault("HF_DATASETS_CACHE", str(HF_DATASETS_CACHE))
-    os.environ.setdefault("TRANSFORMERS_CACHE", str(TRANSFORMERS_CACHE_DIR))
-    os.environ.setdefault("TORCH_HOME", str(TORCH_CACHE_DIR))
-    os.environ.setdefault("VOICESCRIBE_JIEBA_CACHE_DIR", str(JIEBA_CACHE_DIR))
-    os.environ.setdefault("VOICESCRIBE_JIEBA_CACHE_FILE", str(JIEBA_CACHE_FILE))
-    os.environ.setdefault("VOICESCRIBE_FFMPEG_DIR", str(FFMPEG_ROOT_DIR))
+    os.environ["MODELSCOPE_CACHE"] = MODELSCOPE_CACHE
+    os.environ["HF_HOME"] = str(HF_HOME_DIR)
+    os.environ["HUGGINGFACE_HUB_CACHE"] = str(HUGGINGFACE_HUB_CACHE)
+    os.environ["HF_DATASETS_CACHE"] = str(HF_DATASETS_CACHE)
+    os.environ["TRANSFORMERS_CACHE"] = str(TRANSFORMERS_CACHE_DIR)
+    os.environ["TORCH_HOME"] = str(TORCH_CACHE_DIR)
+    os.environ["OLLAMA_MODELS"] = str(MODEL_CACHE_DIR / "ollama")
+    os.environ["VOICESCRIBE_JIEBA_CACHE_DIR"] = str(JIEBA_CACHE_DIR)
+    os.environ["VOICESCRIBE_JIEBA_CACHE_FILE"] = str(JIEBA_CACHE_FILE)
+    os.environ["VOICESCRIBE_FFMPEG_DIR"] = str(FFMPEG_ROOT_DIR)
 
     ffmpeg_bin_dir = resolve_ffmpeg_bin_dir()
     prepend_env_path(ffmpeg_bin_dir)

@@ -17,14 +17,16 @@ VoiceScribe 的长期目标是成为 Windows 上本地优先的智能语音输�
 
 ### Phase A：统一文本处理运行时
 
-状态：进行中
+状态：已实现首轮，进入真机验收与性能优化
 
-- 建立 Provider/Profile 正式契约
-- 支持 `claude_cli`、`codex_cli`、`codex_sdk`、`openai_compatible`
-- 原始转写和最终文本双轨保存
-- Provider 失败回退原文并返回结构化 warning
-- 设置页可配置 Profile、Provider、模型和本地 endpoint
-- 强化模型与缓存路径守卫
+- [x] 建立 Provider/Profile 正式契约
+- [x] 支持 `claude_cli`、`codex_cli`、`codex_sdk`、`openai_compatible`
+- [x] 原始转写和最终文本双轨保存
+- [x] Provider 失败回退原文并返回结构化 warning
+- [x] 设置页可配置 Profile、Provider、模型和本地 endpoint
+- [x] 强化模型与缓存路径守卫
+- [ ] 使用真实本地 OpenAI-compatible/Ollama 模型完成端到端推理验收
+- [ ] 完成 Windows 桌面 UI、热键录音、文本处理、外部输入框输出的真机闭环
 
 ### Phase B：上下文感知
 
@@ -69,4 +71,3 @@ VoiceScribe 的长期目标是成为 Windows 上本地优先的智能语音输�
 - “润色文本”和“Agent 执行任务”必须是两个显式入口。
 - 历史记录必须保留原始转写和最终输出，便于审计与重新处理。
 - 直接输入失败时必须回退到剪贴板，并向用户提示。
-
