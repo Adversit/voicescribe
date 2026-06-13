@@ -123,6 +123,34 @@
 - Windows 真机回归代码编辑器、聊天、邮件、终端和浏览器
 - 评估使用仅文件名级别的进程信息提升分类准确率，同时继续禁止完整路径和标题进入请求/history
 
+## 5. Phase C 可见处理流水线
+
+### 5.1 Windows 真机阶段序列与输出仍待验收
+
+状态：
+- 未收口
+
+当前事实：
+- 桌面主链已经拆成 raw ASR、独立文本处理、外部输出三个真实阶段
+- 主窗口真实挂载的 `Layout` 和 Overlay 已共享 `appStore.pipeline`
+- 自动化、构建、mock HTTP smoke 和浏览器渲染回归已通过
+- 尚未在 Windows 目标应用中完成一次非 raw 与一次 raw 的完整录音输出验证
+
+下一步：
+- 非 raw Profile 真机确认 `transcribing -> polishing -> outputting`
+- raw Profile 真机确认不出现 `polishing`
+- 确认最终文本、warning、history 和阶段耗时符合本轮契约
+
+### 5.2 Phase C 测试中发现并已修复的局部问题
+
+状态：
+- 已收口
+
+当前事实：
+- 首版路由测试使用 Starlette `TestClient`，但当前环境缺少其新增的 `httpx2` 依赖；已改为直接调用异步路由函数，不新增运行时依赖，19 项后端测试通过
+- 首版主窗口状态接到了未挂载的 `ShellHeader`；已通过真实浏览器渲染发现并改接到实际挂载的 `Layout`
+- 浏览器开发模式会由 backend/hotkey/tray hooks 误调用 Tauri `invoke` 并弹错误 toast；已增加运行时守卫，浏览器回归确认该 toast 消失
+
 ## 5. 记录规则
 
 - 本文件只保留当前仍有协作价值的问题

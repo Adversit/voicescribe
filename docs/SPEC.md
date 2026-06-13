@@ -1,5 +1,16 @@
 # VoiceScribe SPEC
 
+## 2026-06-13 Phase C 可见处理流水线
+
+本轮必须遵循 `docs/PIPELINE_STATE_DESIGN.md`：
+
+- 桌面主链通过 `defer_text_processing=true` 获取原始 ASR 结果，再调用独立 `/text/process`。
+- `appStore.pipeline` 是主窗口和 Overlay 的唯一可见阶段状态源。
+- raw Profile 必须跳过独立处理请求和 `polishing` 可见状态。
+- `/transcribe` 默认行为保持兼容，旧调用方不传 defer 字段时仍可获得组合结果。
+- 独立处理请求失败必须本地构造 fallback 结果，继续输出和持久化原始转写。
+- 不得用延时器或估算状态伪造 `polishing`。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：

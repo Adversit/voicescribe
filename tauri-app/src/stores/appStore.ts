@@ -11,6 +11,8 @@ import type {
   EngineInfo,
   HistoryRecord,
   HotkeyBinding,
+  PipelineStage,
+  PipelineState,
   RealtimeEntry,
   RealtimeSessionState,
   SpeakerInfo,
@@ -447,6 +449,67 @@ const defaultRealtimeState: RealtimeSessionState = {
   error: null,
 };
 
+const ACTIVE_PIPELINE_STAGES = new Set<PipelineStage>([
+  "recording",
+  "transcribing",
+  "polishing",
+  "outputting",
+]);
+
+const PIPELINE_TIMING_KEYS: Partial<Record<PipelineStage, keyof PipelineState["timings"]>> = {
+  recording: "recording_ms",
+  transcribing: "transcribing_ms",
+  polishing: "polishing_ms",
+  outputting: "outputting_ms",
+};
+
+function createIdlePipelineState(): PipelineState {
+  return {
+    stage: "idle",
+    started_at: null,
+    stage_started_at: null,
+    timings: {
+      recording_ms: 0,
+      transcribing_ms: 0,
+      polishing_ms: 0,
+      outputting_ms: 0,
+      total_ms: 0,
+    },
+  };
+}
+
+function transitionPipeline(current: PipelineState, stage: PipelineStage): PipelineState {
+  if (stage === "idle") {
+    return createIdlePipelineState();
+  }
+
+  const now = Date.now();
+  if (stage === "recording") {
+    return {
+      ...createIdlePipelineState(),
+      stage,
+      started_at: now,
+      stage_started_at: now,
+    };
+  }
+
+  const timings = { ...current.timings };
+  const priorTimingKey = PIPELINE_TIMING_KEYS[current.stage];
+  if (priorTimingKey && current.stage_started_at !== null) {
+    timings[priorTimingKey] += Math.max(0, now - current.stage_started_at);
+  }
+  if (current.started_at !== null && ["completed", "cancelled", "error"].includes(stage)) {
+    timings.total_ms = Math.max(0, now - current.started_at);
+  }
+
+  return {
+    stage,
+    started_at: current.started_at,
+    stage_started_at: ACTIVE_PIPELINE_STAGES.has(stage) ? now : null,
+    timings,
+  };
+}
+
 interface AppStore {
   currentPage: PageKey;
   settings: AppSettings;
@@ -459,7 +522,7 @@ interface AppStore {
   speakers: SpeakerInfo[];
   toast: string | null;
   isRecording: boolean;
-  isTranscribing: boolean;
+  pipeline: PipelineState;
   recordingCancelled: boolean;
   recordingStartedAt: number | null;
   recordingDuration: number;
@@ -478,7 +541,7 @@ interface AppStore {
   setLaunchAtLogin: (enabled: boolean) => Promise<void>;
   setToast: (message: string | null) => void;
   setRecording: (value: boolean) => void;
-  setTranscribing: (value: boolean) => void;
+  setPipelineStage: (stage: PipelineStage) => void;
   setRecordingCancelled: (value: boolean) => void;
   setAudioLevel: (value: number) => void;
   saveTranscription: (result: TranscribeResult, audioPath: string | null) => Transcription;
@@ -513,7 +576,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   speakers: [],
   toast: null,
   isRecording: false,
-  isTranscribing: false,
+  pipeline: createIdlePipelineState(),
   recordingCancelled: false,
   recordingStartedAt: null,
   recordingDuration: 0,
@@ -578,7 +641,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           : Math.max(0, (Date.now() - state.recordingStartedAt) / 1000),
       recordingCancelled: false,
     })),
-  setTranscribing: (value) => set({ isTranscribing: value }),
+  setPipelineStage: (stage) =>
+    set((state) => ({
+      pipeline: transitionPipeline(state.pipeline, stage),
+    })),
   setRecordingCancelled: (value) => set({ recordingCancelled: value }),
   setAudioLevel: (value) => set({ audioLevel: value }),
   saveTranscription: (result, audioPath) => {

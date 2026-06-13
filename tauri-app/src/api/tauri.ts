@@ -90,6 +90,7 @@ export async function transcribeAudio(payload: {
     textProcessingBaseUrl: payload.textProcessingBaseUrl,
     textProcessingTargetLanguage: payload.textProcessingTargetLanguage,
     targetContext: payload.targetContext,
+    deferTextProcessing: true,
   });
 }
 

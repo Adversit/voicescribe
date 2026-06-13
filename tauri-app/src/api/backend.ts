@@ -3,6 +3,8 @@ import type {
   HistoryRecord,
   ModelStatus,
   SpeakerInfo,
+  TextProcessRequest,
+  TextProcessingResult,
 } from "../types";
 
 const BASE_URL = "http://127.0.0.1:8765";
@@ -219,4 +221,14 @@ export async function requestSummary(text: string): Promise<string> {
   await ensureOk(response);
   const payload = (await response.json()) as { summary: string };
   return payload.summary;
+}
+
+export async function processText(payload: TextProcessRequest): Promise<TextProcessingResult> {
+  const response = await request(`${BASE_URL}/text/process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response);
+  return response.json();
 }

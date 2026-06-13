@@ -702,6 +702,17 @@ class SummaryResponse(BaseModel):
     summary: str
 
 
+class TextProcessPayload(BaseModel):
+    text: str
+    profile: str = "raw"
+    provider: str = "claude_cli"
+    model: str = ""
+    base_url: str = ""
+    target_language: str = ""
+    hotwords: str = ""
+    target_context: Optional[Dict[str, Any]] = None
+
+
 @app.get("/")
 async def root():
     return {
@@ -1311,6 +1322,25 @@ async def summarize_text(payload: SummaryRequest) -> SummaryResponse:
     return SummaryResponse(summary=_fallback_summary(text))
 
 
+@app.post("/text/process")
+async def process_text(payload: TextProcessPayload) -> Dict[str, Any]:
+    request = TextProcessingRequest(
+        text=payload.text,
+        profile=payload.profile,
+        provider=payload.provider,
+        model=payload.model,
+        base_url=payload.base_url,
+        target_language=payload.target_language,
+        hotwords=tuple(word.strip() for word in payload.hotwords.split(",") if word.strip()),
+        target_context=payload.target_context,
+    )
+    processing = await asyncio.to_thread(
+        text_processing_service.process,
+        request,
+    )
+    return processing.to_dict()
+
+
 @app.post("/load")
 async def load_engine(
     engine: Optional[str] = Form(None),
@@ -1397,6 +1427,7 @@ async def transcribe(
     target_app_kind: Optional[str] = Form(None),
     target_executable_name: Optional[str] = Form(None),
     target_captured_at: Optional[str] = Form(None),
+    defer_text_processing: bool = Form(False),
     enable_ai_refine: Optional[bool] = Form(None),
 ) -> TranscribeResult:
     """转录音频文件"""
@@ -1421,7 +1452,7 @@ async def transcribe(
         model = asr_model or model
         _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
         print(
-            f"[Transcribe] Request received filename={audio.filename or ''} engine={engine} model={model} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} language={language} diarization={enable_diarization} text_profile={text_processing_profile} text_provider={text_processing_provider} size_bytes={len(content)}"
+            f"[Transcribe] Request received filename={audio.filename or ''} engine={engine} model={model} diarization_model={diarization_model} speaker_mapping_model={speaker_mapping_model} language={language} diarization={enable_diarization} text_profile={text_processing_profile} text_provider={text_processing_provider} defer_text_processing={defer_text_processing} size_bytes={len(content)}"
         )
 
         if MOCK_MODE:
@@ -1436,7 +1467,7 @@ async def transcribe(
             result = mock_transcribe(tmp_path, language)
             warning = _apply_text_processing(
                 result,
-                profile=text_processing_profile,
+                profile="raw" if defer_text_processing else text_processing_profile,
                 provider=text_processing_provider,
                 model=text_processing_model,
                 base_url=text_processing_base_url,
@@ -1546,7 +1577,7 @@ async def transcribe(
 
         warning = _apply_text_processing(
             result,
-            profile=text_processing_profile,
+            profile="raw" if defer_text_processing else text_processing_profile,
             provider=text_processing_provider,
             model=text_processing_model,
             base_url=text_processing_base_url,

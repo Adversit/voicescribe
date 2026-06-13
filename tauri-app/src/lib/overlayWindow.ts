@@ -2,7 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { debugHotkeyLog } from "../api/tauri";
 
-export type OverlayMode = "hidden" | "recording" | "transcribing" | "cancelled";
+export type OverlayMode =
+  | "hidden"
+  | "recording"
+  | "transcribing"
+  | "polishing"
+  | "outputting"
+  | "completed"
+  | "cancelled"
+  | "error";
 
 export interface OverlayStatePayload {
   mode: OverlayMode;

@@ -10,7 +10,17 @@ const IDLE_FLOOR = 0.06;
 const CANCEL_LABEL = "取消录音";
 const STOP_LABEL = "完成录音";
 const TRANSCRIBING_LABEL = "正在转录";
+const POLISHING_LABEL = "正在润色";
+const OUTPUTTING_LABEL = "正在输出";
+const COMPLETED_LABEL = "已完成";
 const CANCELLED_LABEL = "已取消录音";
+const ERROR_LABEL = "处理失败";
+
+const PROCESSING_LABELS: Partial<Record<OverlayMode, string>> = {
+  transcribing: TRANSCRIBING_LABEL,
+  polishing: POLISHING_LABEL,
+  outputting: OUTPUTTING_LABEL,
+};
 
 function formatDuration(milliseconds: number | null) {
   if (!milliseconds) {
@@ -265,15 +275,21 @@ export function RecordingOverlay() {
             <Check className="h-5 w-5" strokeWidth={2.8} />
           </IconButton>
         </div>
-      ) : mode === "transcribing" ? (
+      ) : PROCESSING_LABELS[mode] ? (
         <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-white/10 bg-black px-5 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.30)]">
           <LoaderCircle className="h-4 w-4 animate-spin text-white/78" strokeWidth={2.2} />
-          <div className="text-sm font-medium tracking-[0.06em] text-white/86">{TRANSCRIBING_LABEL}</div>
+          <div className="text-sm font-medium tracking-[0.06em] text-white/86">{PROCESSING_LABELS[mode]}</div>
         </div>
       ) : (
         <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/10 bg-black px-4 py-2.5 text-white shadow-[0_14px_30px_rgba(0,0,0,0.28)]">
-          <X className="h-4 w-4 text-white/78" strokeWidth={2.4} />
-          <div className="text-sm font-medium text-white/86">{CANCELLED_LABEL}</div>
+          {mode === "completed" ? (
+            <Check className="h-4 w-4 text-white/78" strokeWidth={2.4} />
+          ) : (
+            <X className="h-4 w-4 text-white/78" strokeWidth={2.4} />
+          )}
+          <div className="text-sm font-medium text-white/86">
+            {mode === "completed" ? COMPLETED_LABEL : mode === "error" ? ERROR_LABEL : CANCELLED_LABEL}
+          </div>
         </div>
       )}
     </div>

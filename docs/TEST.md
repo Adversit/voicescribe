@@ -457,3 +457,18 @@
 | 上下文接入 raw Profile | 已通过 | server 单点调用确认 raw Profile 不调用 Provider，但结果仍保留规范化 `target_context` |
 | Claude CLI chat 上下文真实调用 | 已通过 | 返回 `Hey, can you send me the project update tomorrow?`，约 4.6 秒，结果保留 `app_kind=chat` |
 | 上下文 history 页面展示 | 待人工验收 | 类型、持久化与页面 chip 已接通，仍需完成一次 Windows 真机录音确认真实记录展示 |
+
+## 9. 2026-06-13 Phase C 可见处理流水线首轮测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 后端拆分契约自动化 | 已通过 | `backend/venv/Scripts/python.exe -m unittest discover -s tests -v`：19 项通过；新增覆盖独立 `/text/process`、`defer_text_processing=true` 强制 raw/skipped、旧 `/transcribe` 组合行为兼容 |
+| 后端静态导入 | 已通过 | `backend/venv/Scripts/python.exe -m compileall server.py services tests` 通过 |
+| Tauri defer multipart 契约 | 已通过 | `cargo test transcribe_command_accepts_expanded_payload -- --nocapture` 通过，并断言 multipart 含 `defer_text_processing=true` |
+| Rust 编译 | 已通过 | `cargo check` 通过 |
+| 前端生产构建 | 已通过 | `npm run build` 通过 |
+| mock API raw -> independent process smoke | 已通过 | 真实 HTTP 调用确认 deferred `/transcribe` 返回 `skipped`、`raw_text == text`、保留 `chat` context；独立 `/text/process` 的缺失 provider 返回 `fallback` 并保留原文/context |
+| 主窗口真实挂载状态展示 | 已通过 | Edge headless 打开本地 Vite 页面，确认真实挂载的 `Layout` 侧栏存在 `aria-label="处理状态：待命"`；不再依赖未挂载的 `ShellHeader` |
+| 浏览器开发模式 Tauri invoke 降级 | 已通过 | Edge headless 回归确认页面不再显示 `Cannot read properties of undefined (reading 'invoke')` toast；未启动后端时的连接拒绝仍为预期 |
+| pipeline stage 代码契约 | 已通过 | `appStore.pipeline` 为唯一 UI 状态源；stage 迁移会关闭上一阶段计时；raw Profile 跳过 `/text/process` 和 `polishing`；处理期间禁止重复开始录音 |
+| Windows Overlay + 外部输入完整阶段序列 | 待人工验收 | 需要真机确认非 raw 任务显示 `transcribing -> polishing -> outputting`，raw 任务不显示 `polishing`，最终文本进入目标应用并写入 history |

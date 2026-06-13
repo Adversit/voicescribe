@@ -914,6 +914,7 @@ pub async fn transcribe(
     text_processing_base_url: String,
     text_processing_target_language: String,
     target_context: Option<TargetContext>,
+    defer_text_processing: bool,
 ) -> Result<TranscribeResult, String> {
     let client = reqwest::Client::new();
     let file = tokio::fs::read(&audio_path)
@@ -954,6 +955,7 @@ pub async fn transcribe(
             .text("text_processing_provider", text_processing_provider.clone())
             .text("text_processing_model", text_processing_model.clone())
             .text("text_processing_base_url", text_processing_base_url.clone())
+            .text("defer_text_processing", defer_text_processing.to_string())
             .text(
                 "text_processing_target_language",
                 text_processing_target_language.clone(),
@@ -1265,6 +1267,8 @@ mod tests {
             let request = String::from_utf8_lossy(&read_http_request(&mut stream)).to_string();
             assert!(request.contains("name=\"target_app_kind\""));
             assert!(request.contains("code"));
+            assert!(request.contains("name=\"defer_text_processing\""));
+            assert!(request.contains("true"));
             assert!(!request.contains("README.md"));
 
             let response = format!(
@@ -1301,6 +1305,7 @@ mod tests {
                 executable_name: None,
                 captured_at: "2026-06-13T12:00:00Z".to_string(),
             }),
+            true,
         )
         .await
         .expect("transcribe succeeds");

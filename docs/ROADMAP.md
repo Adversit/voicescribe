@@ -40,12 +40,18 @@ VoiceScribe 的长期目标是成为 Windows 上本地优先的智能语音输�
 
 ### Phase C：低延迟体验
 
-状态：待开始
+状态：首轮已实现，待 Windows 真机验收
 
-- 独立 `polishing` / `outputting` pipeline 状态
+- [x] 拆分桌面原始 ASR 与独立文本处理请求
+- [x] 独立 `polishing` / `outputting` pipeline 状态
+- [x] 统一主窗口与 Overlay 的 pipeline stage
+- [x] 记录当前任务各阶段耗时
+- [x] 保留旧 `/transcribe` 组合行为兼容性
 - 流式润色结果展示
 - 流式插入与一次性粘贴回退
 - 任意处理阶段可取消
+
+首轮规格：`docs/PIPELINE_STATE_DESIGN.md`
 
 ### Phase D：风格与 Agent
 

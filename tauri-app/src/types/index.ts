@@ -4,6 +4,30 @@ export type ModelCategory = "asr" | "diarization" | "speaker_mapping";
 export type TextProcessingProfile = "raw" | "light" | "structured" | "formal" | "translate";
 export type TextProcessingProvider = "claude_cli" | "codex_cli" | "codex_sdk" | "openai_compatible";
 export type TextProcessingStatus = "skipped" | "processed" | "fallback";
+export type PipelineStage =
+  | "idle"
+  | "recording"
+  | "transcribing"
+  | "polishing"
+  | "outputting"
+  | "completed"
+  | "cancelled"
+  | "error";
+
+export interface PipelineTimings {
+  recording_ms: number;
+  transcribing_ms: number;
+  polishing_ms: number;
+  outputting_ms: number;
+  total_ms: number;
+}
+
+export interface PipelineState {
+  stage: PipelineStage;
+  started_at: number | null;
+  stage_started_at: number | null;
+  timings: PipelineTimings;
+}
 
 export interface TargetContext {
   app_kind: "code" | "chat" | "email" | "document" | "browser" | "terminal" | "other" | "unknown";
@@ -69,6 +93,17 @@ export interface TextProcessingResult {
   status: TextProcessingStatus;
   duration_ms: number;
   warning: string | null;
+  target_context: TargetContext | null;
+}
+
+export interface TextProcessRequest {
+  text: string;
+  profile: TextProcessingProfile;
+  provider: TextProcessingProvider;
+  model: string;
+  base_url: string;
+  target_language: string;
+  hotwords: string;
   target_context: TargetContext | null;
 }
 

@@ -18,6 +18,10 @@ const FOREGROUND_RIGHT_ALT_KEY = "AltRight";
 const FOREGROUND_HOTKEY_DEDUP_MS = 250;
 const FOREGROUND_LONG_PRESS_MS = 350;
 
+function isTauriRuntime() {
+  return "__TAURI_INTERNALS__" in window;
+}
+
 function formatBindingForLog(keys: number[], display: string): string {
   const keySummary = keys.length > 0 ? keys.join("+") : "none";
   return `keys=${keySummary} display=${display}`;
@@ -57,6 +61,10 @@ export function useHotkey() {
   };
 
   useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
     let unlistenStart: (() => void) | undefined;
     let unlistenStop: (() => void) | undefined;
     let unlistenCancel: (() => void) | undefined;
@@ -156,7 +164,7 @@ export function useHotkey() {
   }, [setAudioLevel, setToast]);
 
   useEffect(() => {
-    if (!settingsHydrated) {
+    if (!isTauriRuntime() || !settingsHydrated) {
       return;
     }
 

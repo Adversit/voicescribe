@@ -15,7 +15,19 @@ const items = [
 
 export function Layout({ children }: { children: ReactNode }) {
   const page = useAppStore((state) => state.currentPage);
+  const pipeline = useAppStore((state) => state.pipeline);
   const setPage = useAppStore((state) => state.setPage);
+  const pipelineLabels = {
+    idle: "待命",
+    recording: "录音中",
+    transcribing: "转录中",
+    polishing: "润色中",
+    outputting: "输出中",
+    completed: "已完成",
+    cancelled: "已取消",
+    error: "处理失败",
+  };
+  const isActive = ["recording", "transcribing", "polishing", "outputting"].includes(pipeline.stage);
 
   return (
     <div className="window-root">
@@ -46,6 +58,21 @@ export function Layout({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+
+          <div className="mt-auto px-3 pb-4">
+            <div
+              aria-label={`处理状态：${pipelineLabels[pipeline.stage]}`}
+              className="flex items-center gap-2 rounded-xl border border-[#ccb89d]/80 bg-[#fffaf3]/80 px-3 py-2.5 text-sm text-ink/75"
+            >
+              <span
+                className={clsx(
+                  "h-2 w-2 rounded-full",
+                  isActive ? "animate-pulse bg-accent" : pipeline.stage === "error" ? "bg-red-600" : "bg-ink/30",
+                )}
+              />
+              <span>{pipelineLabels[pipeline.stage]}</span>
+            </div>
+          </div>
         </aside>
 
         <main className="main-panel">{children}</main>

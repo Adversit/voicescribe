@@ -13,6 +13,10 @@ export function useTrayEvents() {
   const setToast = useAppStore((state) => state.setToast);
 
   useEffect(() => {
+    if (!("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
+
     let unlistenStart: (() => void) | undefined;
     let unlistenStop: (() => void) | undefined;
     let unlistenCancel: (() => void) | undefined;

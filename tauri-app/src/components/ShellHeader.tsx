@@ -18,7 +18,7 @@ function formatDuration(milliseconds: number | null) {
 export function ShellHeader() {
   const backendConnected = useAppStore((state) => state.backendConnected);
   const isRecording = useAppStore((state) => state.isRecording);
-  const isTranscribing = useAppStore((state) => state.isTranscribing);
+  const pipeline = useAppStore((state) => state.pipeline);
   const recordingStartedAt = useAppStore((state) => state.recordingStartedAt);
   const currentTranscription = useAppStore((state) => state.currentTranscription);
   const transcriptionCount = useAppStore((state) => state.transcriptions.length);
@@ -41,11 +41,18 @@ export function ShellHeader() {
     return now - recordingStartedAt;
   }, [isRecording, now, recordingStartedAt]);
 
-  const statusLabel = isRecording
-    ? `录音中 ${formatDuration(elapsed)}`
-    : isTranscribing
-      ? "转录中"
-      : "待命";
+  const pipelineLabels = {
+    idle: "待命",
+    recording: `录音中 ${formatDuration(elapsed)}`,
+    transcribing: "转录中",
+    polishing: "润色中",
+    outputting: "输出中",
+    completed: "已完成",
+    cancelled: "已取消",
+    error: "处理失败",
+  };
+  const statusLabel = pipelineLabels[pipeline.stage];
+  const isProcessing = ["transcribing", "polishing", "outputting"].includes(pipeline.stage);
 
   return (
     <section className="rounded-[22px] border border-[#e4dbc9] bg-[#f8f3ea] px-4 py-4">
@@ -88,12 +95,13 @@ export function ShellHeader() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                disabled={isProcessing}
                 onClick={() =>
                   void (isRecording ? finishRecordingSession() : beginRecordingSession()).catch(
                     (error) => setToast(error instanceof Error ? error.message : "录音操作失败"),
                   )
                 }
-                className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm text-white"
+                className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                 {isRecording ? "停止" : "开始录音"}

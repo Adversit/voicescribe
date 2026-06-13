@@ -13,7 +13,14 @@ import {
 import { hideOverlay, pushOverlayState, showOverlay } from "./overlayWindow";
 import { cancelRealtimeStreamSession, startRealtimeStreamSession, stopRealtimeStreamSession } from "./realtimeStream";
 import { useAppStore } from "../stores/appStore";
-import type { HistoryRecord, HistorySpeakerEntry, TargetContext, TextProcessingResult, TranscribeResult } from "../types";
+import type {
+  HistoryRecord,
+  HistorySpeakerEntry,
+  PipelineStage,
+  TargetContext,
+  TextProcessingResult,
+  TranscribeResult,
+} from "../types";
 
 let cancelResetTimer: number | null = null;
 
@@ -42,6 +49,54 @@ function clearCancelResetTimer() {
 
 function isTooShortRecordingError(message: string) {
   return TOO_SHORT_RECORDING_PATTERNS.some((pattern) => pattern.test(message));
+}
+
+async function setVisiblePipelineStage(stage: PipelineStage) {
+  useAppStore.getState().setPipelineStage(stage);
+  if (["transcribing", "polishing", "outputting", "completed", "error"].includes(stage)) {
+    await pushOverlayState({
+      mode: stage as "transcribing" | "polishing" | "outputting" | "completed" | "error",
+      startedAt: null,
+      audioLevel: 0,
+      canCancel: false,
+      canStop: false,
+    });
+  }
+}
+
+function createTransportFallback(
+  rawText: string,
+  settings: ReturnType<typeof useAppStore.getState>["settings"],
+  targetContext: TargetContext | null,
+  error: unknown,
+): TextProcessingResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    raw_text: rawText,
+    text: rawText,
+    profile: settings.textProcessingProfile,
+    provider: settings.textProcessingProvider,
+    model: settings.textProcessingModel || null,
+    status: "fallback",
+    duration_ms: 0,
+    warning: `Text processing request failed; original transcription was kept: ${message}`,
+    target_context: targetContext,
+  };
+}
+
+function mergeTextProcessingResult(
+  result: TranscribeResult,
+  processing: TextProcessingResult,
+): TranscribeResult {
+  return {
+    ...result,
+    raw_text: processing.raw_text,
+    text: processing.text,
+    text_processing: processing,
+    warnings: processing.warning
+      ? [...(result.warnings ?? []).filter((warning) => warning !== processing.warning), processing.warning]
+      : result.warnings,
+  };
 }
 
 function createSpeakerEntries(result: TranscribeResult): HistorySpeakerEntry[] {
@@ -161,6 +216,12 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
 export async function beginRecordingSession() {
   const startedAt = Date.now();
   const store = useAppStore.getState();
+  if (store.isRecording) {
+    throw new Error("录音已在进行中。");
+  }
+  if (["transcribing", "polishing", "outputting"].includes(store.pipeline.stage)) {
+    throw new Error("当前任务仍在处理中，请等待输出完成后再开始录音。");
+  }
   clearCancelResetTimer();
   await debugHotkeyLog("beginRecordingSession start").catch(() => undefined);
 
@@ -174,7 +235,7 @@ export async function beginRecordingSession() {
   }
 
   store.setRecording(true);
-  store.setTranscribing(false);
+  store.setPipelineStage("recording");
   store.setRecordingCancelled(false);
   store.setAudioLevel(0);
   store.setToast("开始录音");
@@ -217,7 +278,7 @@ export async function finishRecordingSession() {
     await cancelRecording().catch(() => undefined);
     cancelRealtimeStreamSession();
     store.setRecording(false);
-    store.setTranscribing(false);
+    store.setPipelineStage("idle");
     store.setRecordingCancelled(false);
     store.setAudioLevel(0);
     store.setToast(TOO_SHORT_RECORDING_MESSAGE);
@@ -227,7 +288,7 @@ export async function finishRecordingSession() {
   }
 
   store.setRecording(false);
-  store.setTranscribing(true);
+  store.setPipelineStage("transcribing");
   await debugHotkeyLog("finishRecordingSession pushOverlayState transcribing").catch(() => undefined);
   await pushOverlayState({
     mode: "transcribing",
@@ -250,7 +311,8 @@ export async function finishRecordingSession() {
       `finishRecordingSession transcribeAudio start engine=${settings.selectedEngine} model=${activeSelection?.asrModel ?? "unknown"}`,
     ).catch(() => undefined);
 
-    const result = await transcribeAudio({
+    const targetContext = settings.useAppContext ? await getTargetContext().catch(() => null) : null;
+    const rawResult = await transcribeAudio({
       audioPath,
       asrEngine: settings.selectedEngine,
       asrModel: activeSelection?.asrModel ?? "",
@@ -264,13 +326,30 @@ export async function finishRecordingSession() {
       textProcessingModel: settings.textProcessingModel,
       textProcessingBaseUrl: settings.textProcessingBaseUrl,
       textProcessingTargetLanguage: settings.textProcessingTargetLanguage,
-      targetContext: settings.useAppContext ? await getTargetContext().catch(() => null) : null,
+      targetContext,
     });
 
     await debugHotkeyLog(
-      `finishRecordingSession transcribeAudio success textLength=${result.text.length} segments=${result.segments.length}`,
+      `finishRecordingSession transcribeAudio success textLength=${rawResult.text.length} segments=${rawResult.segments.length}`,
     ).catch(() => undefined);
 
+    let result = rawResult;
+    if (settings.textProcessingProfile !== "raw") {
+      await setVisiblePipelineStage("polishing");
+      const processing = await backendApi.processText({
+        text: rawResult.raw_text,
+        profile: settings.textProcessingProfile,
+        provider: settings.textProcessingProvider,
+        model: settings.textProcessingModel,
+        base_url: settings.textProcessingBaseUrl,
+        target_language: settings.textProcessingTargetLanguage,
+        hotwords: settings.hotwords,
+        target_context: targetContext,
+      }).catch((error) => createTransportFallback(rawResult.raw_text, settings, targetContext, error));
+      result = mergeTextProcessingResult(rawResult, processing);
+    }
+
+    await setVisiblePipelineStage("outputting");
     await outputText(settings.outputMode, result.text);
     useAppStore.getState().saveTranscription(result, settings.retainAudio ? audioPath : null);
     await persistTranscriptionHistory(result, audioPath);
@@ -285,17 +364,19 @@ export async function finishRecordingSession() {
         selectedHistoryId: records[0]?.id ?? null,
       });
     });
+    await setVisiblePipelineStage("completed");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await debugHotkeyLog(`finishRecordingSession failed: ${message}`).catch(() => undefined);
     if (isTooShortRecordingError(message)) {
+      useAppStore.getState().setPipelineStage("idle");
       useAppStore.getState().setToast(TOO_SHORT_RECORDING_MESSAGE);
       return;
     }
+    await setVisiblePipelineStage("error");
     throw error;
   } finally {
     const nextStore = useAppStore.getState();
-    nextStore.setTranscribing(false);
     nextStore.setAudioLevel(0);
     await hideOverlay();
     await debugHotkeyLog("finishRecordingSession finally completed").catch(() => undefined);
@@ -303,6 +384,14 @@ export async function finishRecordingSession() {
 }
 
 export async function abortRecordingSession() {
+  const currentStore = useAppStore.getState();
+  if (!currentStore.isRecording) {
+    if (["transcribing", "polishing", "outputting"].includes(currentStore.pipeline.stage)) {
+      currentStore.setToast("当前处理阶段暂不支持取消，请等待输出完成。");
+    }
+    return;
+  }
+
   clearCancelResetTimer();
   await debugHotkeyLog("abortRecordingSession start").catch(() => undefined);
 
@@ -312,7 +401,7 @@ export async function abortRecordingSession() {
     cancelRealtimeStreamSession();
     const store = useAppStore.getState();
     store.setRecording(false);
-    store.setTranscribing(false);
+    store.setPipelineStage("cancelled");
     store.setAudioLevel(0);
     store.setRecordingCancelled(true);
     store.setToast("录音已取消");

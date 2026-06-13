@@ -41,6 +41,9 @@ export function useBackendConnection() {
 
       const connected = useAppStore.getState().backendConnected;
       if (!connected) {
+        if (!("__TAURI_INTERNALS__" in window)) {
+          return;
+        }
         try {
           await startBackend();
           const ready = await waitForBackendReady();
