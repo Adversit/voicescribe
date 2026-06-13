@@ -7,6 +7,7 @@ from fastapi import UploadFile
 
 import server
 from services.text_processing_service import TextProcessingResult
+from services.text_processing_service import ProviderReadiness
 
 
 class PipelineRouteTests(unittest.TestCase):
@@ -52,6 +53,28 @@ class PipelineRouteTests(unittest.TestCase):
         self.assertEqual(request.profile, "light")
         self.assertEqual(request.hotwords, ("VoiceScribe", "Typeless"))
         self.assertEqual(request.target_context["app_kind"], "chat")
+
+    def test_provider_probe_endpoint_returns_all_results(self):
+        providers = [
+            ProviderReadiness("claude_cli", "ready", 1, "Claude Code CLI is available"),
+            ProviderReadiness("openai_compatible", "unconfigured", 2, "Configure a model"),
+        ]
+        with patch.object(server.text_processing_service, "probe_providers", return_value=providers) as probe:
+            response = asyncio.run(
+                server.probe_text_providers(
+                    server.TextProviderProbePayload(
+                        model="qwen3:8b",
+                        base_url="http://127.0.0.1:11434/v1",
+                    )
+                )
+            )
+
+        self.assertEqual(len(response["providers"]), 2)
+        self.assertEqual(response["providers"][0]["status"], "ready")
+        probe.assert_called_once_with(
+            model="qwen3:8b",
+            base_url="http://127.0.0.1:11434/v1",
+        )
 
     def test_deferred_transcribe_forces_raw_processing_contract(self):
         mock_asr = {

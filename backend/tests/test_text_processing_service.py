@@ -247,6 +247,50 @@ class TextProcessingServiceTests(unittest.TestCase):
         self.assertEqual(result.text, "keep me")
         self.assertIn("provider timed out", result.warning)
 
+    def test_cli_probe_checks_command_without_launching_provider(self):
+        calls = []
+        service = self.make_service(command_runner=lambda *args: calls.append(args))
+
+        with patch("services.text_processing_service._resolve_command", return_value=["claude.exe"]):
+            result = service.probe_provider("claude_cli")
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(calls, [])
+        self.assertNotIn("claude.exe", result.detail)
+
+    def test_codex_sdk_probe_checks_import_without_starting_session(self):
+        service = self.make_service()
+        with patch("services.text_processing_service.importlib.util.find_spec", return_value=object()):
+            result = service.probe_provider("codex_sdk")
+
+        self.assertEqual(result.status, "ready")
+
+    def test_openai_compatible_probe_verifies_configured_model(self):
+        captured = {}
+
+        def getter(url, timeout):
+            captured.update(url=url, timeout=timeout)
+            return {"data": [{"id": "qwen3:8b"}]}
+
+        service = self.make_service(http_getter=getter)
+        result = service.probe_provider(
+            "openai_compatible",
+            model="qwen3:8b",
+            base_url="http://127.0.0.1:11434/v1",
+        )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(captured["url"], "http://127.0.0.1:11434/v1/models")
+
+    def test_openai_compatible_probe_distinguishes_unconfigured_and_missing_model(self):
+        service = self.make_service(http_getter=lambda *_: {"data": [{"id": "qwen3:8b"}]})
+
+        unconfigured = service.probe_provider("openai_compatible", model="")
+        missing = service.probe_provider("openai_compatible", model="missing:latest")
+
+        self.assertEqual(unconfigured.status, "unconfigured")
+        self.assertEqual(missing.status, "unavailable")
+
     def test_invalid_profile_falls_back(self):
         service = self.make_service()
         result = service.process(TextProcessingRequest(text="keep me", profile="unknown"))

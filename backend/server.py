@@ -713,6 +713,11 @@ class TextProcessPayload(BaseModel):
     target_context: Optional[Dict[str, Any]] = None
 
 
+class TextProviderProbePayload(BaseModel):
+    model: str = ""
+    base_url: str = ""
+
+
 @app.get("/")
 async def root():
     return {
@@ -1339,6 +1344,16 @@ async def process_text(payload: TextProcessPayload) -> Dict[str, Any]:
         request,
     )
     return processing.to_dict()
+
+
+@app.post("/text/providers/probe")
+async def probe_text_providers(payload: TextProviderProbePayload) -> Dict[str, Any]:
+    providers = await asyncio.to_thread(
+        text_processing_service.probe_providers,
+        model=payload.model,
+        base_url=payload.base_url,
+    )
+    return {"providers": [provider.to_dict() for provider in providers]}
 
 
 @app.post("/load")

@@ -73,6 +73,7 @@
 - `openai_compatible` adapter 单元测试已通过，默认 endpoint 为 `http://127.0.0.1:11434/v1`
 - 本机 `ollama list` 当前没有可用模型；为避免未经确认下载大模型，本轮没有执行真实本地模型推理
 - VoiceScribe 管理的 `OLLAMA_MODELS` 已强制指向 `<repo>/models/ollama`
+- 2026-06-13 已增加设置页就绪探测；当前本机 endpoint 探测约 2.1 秒后明确返回 `unavailable / timed out`
 
 下一步：
 - 在仓库 `models/ollama` 下准备一个明确大小的模型后，完成真实 `/transcribe -> text processing -> history` 验收
@@ -85,6 +86,7 @@
 当前事实：
 - 2026-06-13 真实 smoke test 中，Codex CLI 约耗时 22.8 秒，Codex SDK 两次约耗时 15.3 秒和 20.6 秒
 - 两条路径均成功返回清理后的文本，功能正确但不适合作为低延迟默认体验
+- 设置页就绪探测现在可确认 CLI/SDK 是否存在，但其毫秒级静态探测耗时不代表真实生成延迟
 
 下一步：
 - 增加 provider 可用性/延迟探测，并为默认选择提供性能提示

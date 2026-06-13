@@ -472,3 +472,15 @@
 | 浏览器开发模式 Tauri invoke 降级 | 已通过 | Edge headless 回归确认页面不再显示 `Cannot read properties of undefined (reading 'invoke')` toast；未启动后端时的连接拒绝仍为预期 |
 | pipeline stage 代码契约 | 已通过 | `appStore.pipeline` 为唯一 UI 状态源；stage 迁移会关闭上一阶段计时；raw Profile 跳过 `/text/process` 和 `polishing`；处理期间禁止重复开始录音 |
 | Windows Overlay + 外部输入完整阶段序列 | 待人工验收 | 需要真机确认非 raw 任务显示 `transcribing -> polishing -> outputting`，raw 任务不显示 `polishing`，最终文本进入目标应用并写入 history |
+
+## 10. 2026-06-13 文本处理 Provider 就绪探测测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| Provider probe 服务与路由自动化 | 已通过 | `backend/venv/Scripts/python.exe -m unittest discover -s tests -v`：24 项通过；覆盖 CLI 仅解析不执行、SDK 仅 import 检查、OpenAI-compatible 模型存在/缺失/未配置、路由聚合契约 |
+| 后端静态导入 | 已通过 | `backend/venv/Scripts/python.exe -m compileall server.py services tests` 通过 |
+| 前端生产构建 | 已通过 | `npm run build` 通过 |
+| 本机四 Provider 真实 readiness smoke | 已通过 | `POST /text/providers/probe`：Claude CLI `ready` 约 3 ms、Codex CLI `ready` 约 3 ms、Codex SDK `ready` 约 0 ms；本机未运行 OpenAI-compatible 服务，约 2.1 秒后返回 `unavailable / timed out` |
+| 设置页探测按钮与结果卡片 | 已通过 | Edge headless 点击“检测运行时”后显示四张结果卡；确认 Claude/Codex/SDK 就绪和 OpenAI-compatible 不可用状态；按钮在后端连接后可用 |
+| 探测安全边界 | 已通过 | 代码与测试确认探测不发送样本文本、不启动 Claude/Codex 会话、不下载模型、不返回完整命令路径；OpenAI-compatible 仅请求当前 endpoint 的 `/models` |
+| 探测结果失效规则 | 已通过 | model、base URL 或后端连接状态变化时清空旧的临时探测结果，避免把 stale 状态当作 canonical state |

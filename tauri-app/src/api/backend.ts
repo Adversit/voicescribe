@@ -2,6 +2,7 @@ import type {
   EngineInfo,
   HistoryRecord,
   ModelStatus,
+  ProviderReadiness,
   SpeakerInfo,
   TextProcessRequest,
   TextProcessingResult,
@@ -231,4 +232,15 @@ export async function processText(payload: TextProcessRequest): Promise<TextProc
   });
   await ensureOk(response);
   return response.json();
+}
+
+export async function probeTextProviders(model: string, baseUrl: string): Promise<ProviderReadiness[]> {
+  const response = await request(`${BASE_URL}/text/providers/probe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, base_url: baseUrl }),
+  });
+  await ensureOk(response);
+  const payload = (await response.json()) as { providers: ProviderReadiness[] };
+  return payload.providers;
 }

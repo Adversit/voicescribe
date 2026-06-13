@@ -494,6 +494,14 @@ flowchart TD
 - 主窗口和 Overlay 必须使用同一流水线状态源。
 - 首轮流水线状态与接口拆分契约见 `docs/PIPELINE_STATE_DESIGN.md`。
 
+### 10.0.2 文本处理 Provider 就绪探测增量
+
+- 用户可在设置页主动检测 Claude CLI、Codex CLI、Codex SDK 和 OpenAI-compatible 的当前就绪状态。
+- 检测不得执行真实润色、创建 Agent 会话或下载模型。
+- OpenAI-compatible 必须检查用户当前配置的 endpoint 和模型，而不是仅根据 URL 已填写判断可用。
+- 探测结果只作为临时诊断信息，不作为持久化 canonical state。
+- 详细契约见 `docs/PROVIDER_READINESS_DESIGN.md`。
+
 ### 10.0 Typeless 上下文感知增量
 
 - 用户可显式开启或关闭应用上下文。

@@ -11,6 +11,16 @@
 - 独立处理请求失败必须本地构造 fallback 结果，继续输出和持久化原始转写。
 - 不得用延时器或估算状态伪造 `polishing`。
 
+## 2026-06-13 文本处理 Provider 就绪探测
+
+本轮必须遵循 `docs/PROVIDER_READINESS_DESIGN.md`：
+
+- canonical readiness 由后端 `TextProcessingService` 产生。
+- 探测不得启动 Claude/Codex 任务或发送样本文本。
+- OpenAI-compatible 仅通过短超时 `/models` 请求核对 endpoint 与配置模型。
+- 单个 Provider 探测失败不得导致整个探测请求失败。
+- 不返回完整命令路径、原始 endpoint 响应、用户文本或凭据。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：

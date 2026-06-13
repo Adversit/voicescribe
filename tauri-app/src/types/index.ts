@@ -4,6 +4,7 @@ export type ModelCategory = "asr" | "diarization" | "speaker_mapping";
 export type TextProcessingProfile = "raw" | "light" | "structured" | "formal" | "translate";
 export type TextProcessingProvider = "claude_cli" | "codex_cli" | "codex_sdk" | "openai_compatible";
 export type TextProcessingStatus = "skipped" | "processed" | "fallback";
+export type ProviderReadinessStatus = "ready" | "unconfigured" | "unavailable";
 export type PipelineStage =
   | "idle"
   | "recording"
@@ -105,6 +106,13 @@ export interface TextProcessRequest {
   target_language: string;
   hotwords: string;
   target_context: TargetContext | null;
+}
+
+export interface ProviderReadiness {
+  provider: TextProcessingProvider;
+  status: ProviderReadinessStatus;
+  latency_ms: number;
+  detail: string;
 }
 
 export interface TranscribeResult {

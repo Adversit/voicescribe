@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import shutil
@@ -28,6 +29,7 @@ CLAUDE_CLI_SYSTEM_PROMPT = (
 
 CommandRunner = Callable[[list[str], str, int, Path, dict[str, str]], str]
 HttpSender = Callable[[str, dict, int], dict]
+HttpGetter = Callable[[str, int], dict]
 SdkRunner = Callable[[str, str, int], str]
 
 
@@ -55,6 +57,17 @@ class TextProcessingResult:
     duration_ms: int
     warning: Optional[str] = None
     target_context: Optional[dict] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ProviderReadiness:
+    provider: str
+    status: str
+    latency_ms: int
+    detail: str
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -148,6 +161,12 @@ def _default_http_sender(url: str, payload: dict, timeout_seconds: int) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _default_http_getter(url: str, timeout_seconds: int) -> dict:
+    request = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def _default_sdk_runner(
     prompt: str,
     model: str,
@@ -200,6 +219,7 @@ class TextProcessingService:
         runtime_dir: Path,
         command_runner: Optional[CommandRunner] = None,
         http_sender: Optional[HttpSender] = None,
+        http_getter: Optional[HttpGetter] = None,
         sdk_runner: Optional[SdkRunner] = None,
     ) -> None:
         self.model_root = model_root.resolve()
@@ -207,6 +227,7 @@ class TextProcessingService:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.command_runner = command_runner or _default_command_runner
         self.http_sender = http_sender or _default_http_sender
+        self.http_getter = http_getter or _default_http_getter
         self.sdk_runner = sdk_runner or (
             lambda prompt, model, timeout: _default_sdk_runner(
                 prompt,
@@ -315,6 +336,95 @@ class TextProcessingService:
                 timeout_seconds,
             )
         raise RuntimeError(f"Unsupported text processing provider: {request.provider}")
+
+    def probe_provider(
+        self,
+        provider: str,
+        *,
+        model: str = "",
+        base_url: str = "",
+        timeout_seconds: int = 2,
+    ) -> ProviderReadiness:
+        started = time.perf_counter()
+        status = "unavailable"
+        detail = "Provider is unavailable"
+        timeout_seconds = max(1, min(timeout_seconds, 5))
+
+        try:
+            if provider == "claude_cli":
+                try:
+                    _resolve_command("claude")
+                    status = "ready"
+                    detail = "Claude Code CLI is available"
+                except Exception:
+                    detail = "Claude Code CLI was not found or cannot be launched"
+            elif provider == "codex_cli":
+                try:
+                    _resolve_command("codex")
+                    status = "ready"
+                    detail = "Codex CLI is available"
+                except Exception:
+                    detail = "Codex CLI was not found or cannot be launched"
+            elif provider == "codex_sdk":
+                if importlib.util.find_spec("openai_codex") is None:
+                    detail = "Codex Python SDK is not installed"
+                else:
+                    status = "ready"
+                    detail = "Codex Python SDK is available"
+            elif provider == "openai_compatible":
+                endpoint = (base_url or DEFAULT_OPENAI_COMPATIBLE_URL).rstrip("/")
+                parsed = urlparse(endpoint)
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    detail = "OpenAI-compatible base URL must be an HTTP(S) URL"
+                else:
+                    if endpoint.endswith("/chat/completions"):
+                        endpoint = endpoint[: -len("/chat/completions")]
+                    response = self.http_getter(f"{endpoint}/models", timeout_seconds)
+                    data = response.get("data") if isinstance(response, dict) else None
+                    if not isinstance(data, list):
+                        detail = "OpenAI-compatible /models returned an invalid response"
+                    else:
+                        model_ids = {
+                            str(item.get("id") or "").strip()
+                            for item in data
+                            if isinstance(item, dict) and item.get("id")
+                        }
+                        if not model.strip():
+                            status = "unconfigured"
+                            detail = "Endpoint is reachable; configure a model"
+                        elif model.strip() in model_ids:
+                            status = "ready"
+                            detail = "Endpoint and configured model are available"
+                        else:
+                            detail = "Configured model was not found on the endpoint"
+            else:
+                detail = "Unsupported text processing provider"
+        except Exception as error:
+            detail = f"Probe failed: {_short_error(error)}"
+
+        return ProviderReadiness(
+            provider=provider,
+            status=status,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            detail=detail,
+        )
+
+    def probe_providers(
+        self,
+        *,
+        model: str = "",
+        base_url: str = "",
+        timeout_seconds: int = 2,
+    ) -> list[ProviderReadiness]:
+        return [
+            self.probe_provider(
+                provider,
+                model=model if provider == "openai_compatible" else "",
+                base_url=base_url if provider == "openai_compatible" else "",
+                timeout_seconds=timeout_seconds,
+            )
+            for provider in SUPPORTED_PROVIDERS
+        ]
 
     def process(self, request: TextProcessingRequest) -> TextProcessingResult:
         raw_text = request.text.strip()

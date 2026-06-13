@@ -1,4 +1,6 @@
 ﻿import { ConnectionStatus } from "../components/ConnectionStatus";
+import { useEffect, useState } from "react";
+import * as backendApi from "../api/backend";
 import {
   SettingsField,
   SettingsPage,
@@ -6,9 +8,24 @@ import {
   SettingsSection,
   ToggleSwitch,
   inputClassName,
+  secondaryButtonClassName,
   selectClassName,
 } from "../components/settings-ui";
 import { useAppStore } from "../stores/appStore";
+import type { ProviderReadiness, TextProcessingProvider } from "../types";
+
+const providerLabels: Record<TextProcessingProvider, string> = {
+  claude_cli: "Claude Code CLI",
+  codex_cli: "Codex CLI",
+  codex_sdk: "Codex SDK",
+  openai_compatible: "OpenAI-compatible",
+};
+
+const readinessLabels = {
+  ready: "已就绪",
+  unconfigured: "待配置",
+  unavailable: "不可用",
+};
 
 export function GeneralSettings() {
   const settings = useAppStore((state) => state.settings);
@@ -16,6 +33,28 @@ export function GeneralSettings() {
   const setLaunchAtLogin = useAppStore((state) => state.setLaunchAtLogin);
   const backendConnected = useAppStore((state) => state.backendConnected);
   const setToast = useAppStore((state) => state.setToast);
+  const [providerReadiness, setProviderReadiness] = useState<ProviderReadiness[]>([]);
+  const [probingProviders, setProbingProviders] = useState(false);
+
+  useEffect(() => {
+    setProviderReadiness([]);
+  }, [backendConnected, settings.textProcessingBaseUrl, settings.textProcessingModel]);
+
+  const probeProviders = async () => {
+    setProbingProviders(true);
+    try {
+      const providers = await backendApi.probeTextProviders(
+        settings.textProcessingProvider === "openai_compatible" ? settings.textProcessingModel : "",
+        settings.textProcessingBaseUrl,
+      );
+      setProviderReadiness(providers);
+      setToast("文本处理运行时检测完成");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "文本处理运行时检测失败");
+    } finally {
+      setProbingProviders(false);
+    }
+  };
 
   return (
     <SettingsPage
@@ -59,6 +98,16 @@ export function GeneralSettings() {
       <SettingsSection
         title="智能文本处理"
         description="转写后通过本地 Claude Code、Codex、Codex SDK 或本地 OpenAI-compatible 服务生成最终文本；失败时自动保留原始转写。"
+        actions={
+          <button
+            type="button"
+            disabled={!backendConnected || probingProviders}
+            onClick={() => void probeProviders()}
+            className={`${secondaryButtonClassName} whitespace-nowrap`}
+          >
+            {probingProviders ? "检测中..." : "检测运行时"}
+          </button>
+        }
       >
         <div className="grid gap-3 md:grid-cols-2">
           <SettingsField label="输出 Profile">
@@ -130,6 +179,28 @@ export function GeneralSettings() {
             </SettingsField>
           ) : null}
         </div>
+        {providerReadiness.length > 0 ? (
+          <div className="grid gap-2 md:grid-cols-2">
+            {providerReadiness.map((item) => (
+              <div
+                key={item.provider}
+                className="rounded-xl border border-[#e4dbc9] bg-white/65 px-3 py-2.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-ink">{providerLabels[item.provider]}</span>
+                  <span className="app-chip">
+                    {readinessLabels[item.status]} · {item.latency_ms} ms
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-ink/55">{item.detail}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs leading-5 text-ink/50">
+            连接后端后可检测本机 Provider 与当前 OpenAI-compatible 模型是否就绪；检测不会执行真实润色或下载模型。
+          </p>
+        )}
         <SettingsRow
           title="使用目标应用类别"
           description="仅使用录音开始时目标应用的类别提供风格提示，不读取选区、正文或完整窗口标题。"

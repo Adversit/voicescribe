@@ -27,6 +27,7 @@ VoiceScribe 的长期目标是成为 Windows 上本地优先的智能语音输�
 - [x] 强化模型与缓存路径守卫
 - [ ] 使用真实本地 OpenAI-compatible/Ollama 模型完成端到端推理验收
 - [ ] 完成 Windows 桌面 UI、热键录音、文本处理、外部输入框输出的真机闭环
+- [x] 设置页显示四类文本处理 Provider 的实时就绪探测
 
 ### Phase B：上下文感知
 
