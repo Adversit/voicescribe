@@ -27,6 +27,14 @@ PROFILE_PROMPTS = {
     "translate": "Clean the transcription, then translate the complete result into {target_language}.",
 }
 
+APP_CONTEXT_PROMPTS = {
+    "code": "The target is a code editor. Preserve commands, identifiers, technical terms, and useful structure.",
+    "terminal": "The target is a terminal. Preserve commands, flags, paths, identifiers, and line structure.",
+    "chat": "The target is chat. Keep the result natural, concise, and ready to send.",
+    "email": "The target is email. Use clear, polite, complete written prose.",
+    "document": "The target is a document editor. Use complete prose and helpful paragraph structure.",
+}
+
 
 def _sanitize_term(value: str) -> str:
     return " ".join(value.replace("<", "").replace(">", "").split())
@@ -36,6 +44,7 @@ def build_system_prompt(
     profile: str,
     hotwords: Iterable[str] = (),
     target_language: str = "",
+    app_kind: str = "",
 ) -> str:
     if profile not in SUPPORTED_PROFILES or profile == "raw":
         raise ValueError(f"Unsupported processing profile: {profile}")
@@ -46,6 +55,9 @@ def build_system_prompt(
         language = _sanitize_term(target_language) or "English"
         addon = addon.format(target_language=language)
     prompt += f"\n\nProfile rules:\n{addon}"
+    context_prompt = APP_CONTEXT_PROMPTS.get(app_kind)
+    if context_prompt:
+        prompt += f"\n\nTarget application style hint:\n{context_prompt}"
 
     terms = [_sanitize_term(item) for item in hotwords]
     terms = [item for item in terms if item]
@@ -60,8 +72,9 @@ def build_processing_prompt(
     profile: str,
     hotwords: Iterable[str] = (),
     target_language: str = "",
+    app_kind: str = "",
 ) -> str:
-    system_prompt = build_system_prompt(profile, hotwords, target_language)
+    system_prompt = build_system_prompt(profile, hotwords, target_language, app_kind)
     return f"{system_prompt}\n\n<transcription>\n{text.strip()}\n</transcription>"
 
 

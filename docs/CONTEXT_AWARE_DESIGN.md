@@ -1,7 +1,7 @@
 # VoiceScribe 上下文感知文本处理设计
 
 更新时间：2026-06-13
-状态：Phase B 首轮实施中
+状态：Phase B 首轮已实现，待 Windows 真机验收
 
 ## 1. Product Goal
 

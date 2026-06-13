@@ -18,6 +18,7 @@ from postprocess.text_processing_prompts import (
 
 
 SUPPORTED_PROVIDERS = ("claude_cli", "codex_cli", "codex_sdk", "openai_compatible")
+SUPPORTED_APP_KINDS = ("code", "chat", "email", "document", "browser", "terminal", "other", "unknown")
 DEFAULT_OPENAI_COMPATIBLE_URL = "http://127.0.0.1:11434/v1"
 CLAUDE_CLI_SYSTEM_PROMPT = (
     "You are a non-interactive voice-to-text cleanup engine. "
@@ -39,6 +40,7 @@ class TextProcessingRequest:
     base_url: str = ""
     target_language: str = ""
     hotwords: tuple[str, ...] = ()
+    target_context: Optional[dict] = None
     timeout_seconds: int = 30
 
 
@@ -52,6 +54,7 @@ class TextProcessingResult:
     status: str
     duration_ms: int
     warning: Optional[str] = None
+    target_context: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -60,6 +63,21 @@ class TextProcessingResult:
 def _short_error(error: Exception) -> str:
     message = " ".join(str(error).split())
     return message[:400] or error.__class__.__name__
+
+
+def normalize_target_context(value: Optional[dict]) -> Optional[dict]:
+    if not isinstance(value, dict):
+        return None
+    app_kind = str(value.get("app_kind") or "unknown").strip().lower()
+    if app_kind not in SUPPORTED_APP_KINDS:
+        app_kind = "unknown"
+    executable_name = str(value.get("executable_name") or "").strip()[:120] or None
+    captured_at = str(value.get("captured_at") or "").strip()[:64]
+    return {
+        "app_kind": app_kind,
+        "executable_name": executable_name,
+        "captured_at": captured_at,
+    }
 
 
 def _resolve_command(name: str) -> list[str]:
@@ -300,6 +318,7 @@ class TextProcessingService:
 
     def process(self, request: TextProcessingRequest) -> TextProcessingResult:
         raw_text = request.text.strip()
+        target_context = normalize_target_context(request.target_context)
         started = time.perf_counter()
         if not raw_text or request.profile == "raw":
             return TextProcessingResult(
@@ -310,6 +329,7 @@ class TextProcessingService:
                 model=None,
                 status="skipped",
                 duration_ms=0,
+                target_context=target_context,
             )
 
         if request.profile not in SUPPORTED_PROFILES:
@@ -323,6 +343,7 @@ class TextProcessingService:
                 status="fallback",
                 duration_ms=0,
                 warning=warning,
+                target_context=target_context,
             )
 
         try:
@@ -331,6 +352,7 @@ class TextProcessingService:
                 request.profile,
                 request.hotwords,
                 request.target_language,
+                target_context.get("app_kind", "") if target_context else "",
             )
             output = self._dispatch(request, prompt).strip()
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -347,6 +369,7 @@ class TextProcessingService:
                 model=request.model or None,
                 status="processed",
                 duration_ms=duration_ms,
+                target_context=target_context,
             )
         except Exception as error:
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -364,6 +387,7 @@ class TextProcessingService:
                 status="fallback",
                 duration_ms=duration_ms,
                 warning=warning,
+                target_context=target_context,
             )
 
     def summarize(

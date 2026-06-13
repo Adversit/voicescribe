@@ -73,6 +73,7 @@ export async function transcribeAudio(payload: {
   textProcessingModel: string;
   textProcessingBaseUrl: string;
   textProcessingTargetLanguage: string;
+  targetContext: TargetContext | null;
 }): Promise<TranscribeResult> {
   return invoke("transcribe", {
     audioPath: payload.audioPath,
@@ -88,6 +89,7 @@ export async function transcribeAudio(payload: {
     textProcessingModel: payload.textProcessingModel,
     textProcessingBaseUrl: payload.textProcessingBaseUrl,
     textProcessingTargetLanguage: payload.textProcessingTargetLanguage,
+    targetContext: payload.targetContext,
   });
 }
 

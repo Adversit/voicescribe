@@ -3,6 +3,9 @@ from pathlib import Path
 from typing import List, Optional
 
 
+SUPPORTED_APP_KINDS = {"code", "chat", "email", "document", "browser", "terminal", "other", "unknown"}
+
+
 class HistoryService:
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
@@ -26,6 +29,11 @@ class HistoryService:
     def normalize_record(record: dict) -> dict:
         normalized = dict(record)
         normalized.setdefault("raw_text", normalized.get("text", ""))
+        processing = normalized.get("text_processing")
+        processing_context = processing.get("target_context") if isinstance(processing, dict) else None
+        normalized["target_context"] = HistoryService.normalize_target_context(
+            normalized.get("target_context", processing_context)
+        )
         normalized.setdefault(
             "text_processing",
             {
@@ -37,9 +45,26 @@ class HistoryService:
                 "status": "skipped",
                 "duration_ms": 0,
                 "warning": None,
+                "target_context": normalized.get("target_context"),
             },
         )
+        if isinstance(normalized.get("text_processing"), dict):
+            normalized["text_processing"] = dict(normalized["text_processing"])
+            normalized["text_processing"]["target_context"] = normalized.get("target_context")
         return normalized
+
+    @staticmethod
+    def normalize_target_context(value: object) -> Optional[dict]:
+        if not isinstance(value, dict):
+            return None
+        app_kind = str(value.get("app_kind") or "unknown").strip().lower()
+        if app_kind not in SUPPORTED_APP_KINDS:
+            app_kind = "unknown"
+        return {
+            "app_kind": app_kind,
+            "executable_name": str(value.get("executable_name") or "").strip()[:120] or None,
+            "captured_at": str(value.get("captured_at") or "").strip()[:64],
+        }
 
     @staticmethod
     def sort_records(records: List[dict]) -> List[dict]:
@@ -48,7 +73,8 @@ class HistoryService:
     def save_records(self, records: List[dict]) -> None:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         with self.storage_path.open("w", encoding="utf-8") as handle:
-            json.dump({"records": self.sort_records(records)}, handle, ensure_ascii=False, indent=2)
+            normalized = [self.normalize_record(record) for record in records]
+            json.dump({"records": self.sort_records(normalized)}, handle, ensure_ascii=False, indent=2)
 
     def find_record(self, record_id: str) -> Optional[dict]:
         for record in self.load_records():
@@ -58,6 +84,8 @@ class HistoryService:
 
     @staticmethod
     def export_text(record: dict) -> str:
+        target_context = record.get("target_context")
+        app_kind = target_context.get("app_kind", "") if isinstance(target_context, dict) else ""
         lines = [
             f"时间: {record.get('created_at', '')}",
             f"模式: {record.get('mode', '')}",
@@ -66,6 +94,7 @@ class HistoryService:
             f"分离模型: {record.get('diarization_model', '')}",
             f"映射模型: {record.get('speaker_mapping_model', '')}",
             f"时长: {record.get('duration', 0)}",
+            f"目标应用类别: {app_kind}",
             "",
             "原始转写:",
             record.get("raw_text", record.get("text", "")),

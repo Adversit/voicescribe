@@ -92,6 +92,7 @@ const defaultSettings: AppSettings = {
   textProcessingModel: "",
   textProcessingBaseUrl: "http://127.0.0.1:11434/v1",
   textProcessingTargetLanguage: "en",
+  useAppContext: false,
   enableStreaming: false,
   enableAISummary: false,
   retainAudio: false,
@@ -324,6 +325,7 @@ function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppS
     textProcessingBaseUrl: partial.textProcessingBaseUrl ?? defaultSettings.textProcessingBaseUrl,
     textProcessingTargetLanguage:
       partial.textProcessingTargetLanguage ?? defaultSettings.textProcessingTargetLanguage,
+    useAppContext: partial.useAppContext ?? defaultSettings.useAppContext,
     enableStreaming: partial.enableStreaming ?? defaultSettings.enableStreaming,
     enableAISummary: partial.enableAISummary ?? defaultSettings.enableAISummary,
     retainAudio: partial.retainAudio ?? defaultSettings.retainAudio,

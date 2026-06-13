@@ -110,6 +110,9 @@ export function HistoryPage() {
                   <span className="app-chip">{selectedRecord.asr_model ?? selectedRecord.model}</span>
                   <span className="app-chip">{selectedRecord.text_processing.profile}</span>
                   <span className="app-chip">{selectedRecord.text_processing.status}</span>
+                  {selectedRecord.target_context && selectedRecord.target_context.app_kind !== "unknown" ? (
+                    <span className="app-chip">目标：{selectedRecord.target_context.app_kind}</span>
+                  ) : null}
                   {selectedRecord.diarization_model ? <span className="app-chip">{selectedRecord.diarization_model}</span> : null}
                   {selectedRecord.speaker_mapping_model ? <span className="app-chip">{selectedRecord.speaker_mapping_model}</span> : null}
                   <span className="app-chip">{formatDate(selectedRecord.created_at)}</span>

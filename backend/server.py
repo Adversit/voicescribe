@@ -421,6 +421,7 @@ def _apply_text_processing(
     base_url: str,
     target_language: str,
     hotwords: str,
+    target_context: Optional[dict] = None,
     legacy_enable_ai_refine: bool = False,
 ) -> Optional[str]:
     effective_profile = "light" if legacy_enable_ai_refine and profile == "raw" else profile
@@ -433,6 +434,7 @@ def _apply_text_processing(
             base_url=base_url,
             target_language=target_language,
             hotwords=tuple(word.strip() for word in hotwords.split(",") if word.strip()),
+            target_context=target_context,
         )
     )
     result["raw_text"] = processing.raw_text
@@ -683,6 +685,7 @@ class HistoryRecordPayload(BaseModel):
     speaker_entries: List[HistorySpeakerEntry] = []
     summary: Optional[str] = None
     text_processing: Optional[Dict[str, Any]] = None
+    target_context: Optional[Dict[str, Any]] = None
     retain_audio: bool = False
     audio_path: Optional[str] = None
 
@@ -1391,6 +1394,9 @@ async def transcribe(
     text_processing_model: str = Form(""),
     text_processing_base_url: str = Form(""),
     text_processing_target_language: str = Form(""),
+    target_app_kind: Optional[str] = Form(None),
+    target_executable_name: Optional[str] = Form(None),
+    target_captured_at: Optional[str] = Form(None),
     enable_ai_refine: Optional[bool] = Form(None),
 ) -> TranscribeResult:
     """转录音频文件"""
@@ -1402,6 +1408,15 @@ async def transcribe(
 
     try:
         result_warnings: List[str] = []
+        target_context = (
+            {
+                "app_kind": target_app_kind,
+                "executable_name": target_executable_name,
+                "captured_at": target_captured_at,
+            }
+            if target_app_kind
+            else None
+        )
         engine = asr_engine or engine
         model = asr_model or model
         _validate_engine_selection(engine, model, diarization_model, speaker_mapping_model)
@@ -1427,6 +1442,7 @@ async def transcribe(
                 base_url=text_processing_base_url,
                 target_language=text_processing_target_language,
                 hotwords=hotwords,
+                target_context=target_context,
                 legacy_enable_ai_refine=bool(enable_ai_refine),
             )
             if warning:
@@ -1536,6 +1552,7 @@ async def transcribe(
             base_url=text_processing_base_url,
             target_language=text_processing_target_language,
             hotwords=hotwords,
+            target_context=target_context,
             legacy_enable_ai_refine=bool(enable_ai_refine),
         )
         if warning:

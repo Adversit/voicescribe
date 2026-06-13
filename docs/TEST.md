@@ -450,4 +450,10 @@
 | Rust 编译 | 已通过 | `cargo check` 通过 |
 | 前端 TargetContext invoke/type 契约 | 已通过 | `npm run build` 通过 |
 | Windows 真实目标应用捕获 | 待人工验收 | 需要在代码编辑器、聊天、邮件和浏览器中从录音开始到停止进行真机验证 |
-| 上下文接入 Provider 与 history | 未测试 | 尚未实现 |
+| 上下文设置页开关 | 已通过 | 本地 Vite 页面确认“使用目标应用类别”默认关闭，点击后 `aria-checked` 从 `false` 变为 `true` |
+| 上下文关闭时请求不携带目标字段 | 已通过 | `recordingFlow.ts` 仅在 `useAppContext=true` 时读取快照；Rust multipart 仅在 `target_context=Some` 时加入目标字段 |
+| 上下文接入 Prompt 与 history 清洗 | 已通过 | 后端 16 项单元测试通过；已验证 `terminal` 提示进入 Prompt，未知类别被归一化且不进入 Prompt，可执行文件名不进入 Prompt，history 保存前再次清洗 |
+| 上下文接入 Tauri multipart 与响应 | 已通过 | `cargo test transcribe_command_accepts_expanded_payload -- --nocapture` 通过，并断言 multipart 含 `target_app_kind=code` 且不含窗口标题 |
+| 上下文接入 raw Profile | 已通过 | server 单点调用确认 raw Profile 不调用 Provider，但结果仍保留规范化 `target_context` |
+| Claude CLI chat 上下文真实调用 | 已通过 | 返回 `Hey, can you send me the project update tomorrow?`，约 4.6 秒，结果保留 `app_kind=chat` |
+| 上下文 history 页面展示 | 待人工验收 | 类型、持久化与页面 chip 已接通，仍需完成一次 Windows 真机录音确认真实记录展示 |

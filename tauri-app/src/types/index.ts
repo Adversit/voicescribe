@@ -69,6 +69,7 @@ export interface TextProcessingResult {
   status: TextProcessingStatus;
   duration_ms: number;
   warning: string | null;
+  target_context: TargetContext | null;
 }
 
 export interface TranscribeResult {
@@ -130,6 +131,7 @@ export interface HistoryRecord {
   speaker_entries: HistorySpeakerEntry[];
   summary: string | null;
   text_processing: TextProcessingResult;
+  target_context: TargetContext | null;
   retain_audio: boolean;
   audio_path: string | null;
 }
@@ -171,6 +173,7 @@ export interface AppSettings {
   textProcessingModel: string;
   textProcessingBaseUrl: string;
   textProcessingTargetLanguage: string;
+  useAppContext: boolean;
   enableStreaming: boolean;
   enableAISummary: boolean;
   retainAudio: boolean;

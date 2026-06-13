@@ -44,6 +44,13 @@ pub struct Segment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetContext {
+    pub app_kind: String,
+    pub executable_name: Option<String>,
+    pub captured_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextProcessingResult {
     pub raw_text: String,
     pub text: String,
@@ -53,6 +60,7 @@ pub struct TextProcessingResult {
     pub status: String,
     pub duration_ms: u64,
     pub warning: Option<String>,
+    pub target_context: Option<TargetContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -905,6 +913,7 @@ pub async fn transcribe(
     text_processing_model: String,
     text_processing_base_url: String,
     text_processing_target_language: String,
+    target_context: Option<TargetContext>,
 ) -> Result<TranscribeResult, String> {
     let client = reqwest::Client::new();
     let file = tokio::fs::read(&audio_path)
@@ -949,6 +958,14 @@ pub async fn transcribe(
                 "text_processing_target_language",
                 text_processing_target_language.clone(),
             );
+        if let Some(context) = target_context.clone() {
+            form = form
+                .text("target_app_kind", context.app_kind)
+                .text("target_captured_at", context.captured_at);
+            if let Some(executable_name) = context.executable_name {
+                form = form.text("target_executable_name", executable_name);
+            }
+        }
 
         if let Some(value) = diarization_model.clone() {
             form = form.text("diarization_model", value);
@@ -1037,7 +1054,7 @@ mod tests {
         std::env::temp_dir().join(format!("voicescribe-{name}-{nanos}"))
     }
 
-    fn read_http_request(stream: &mut std::net::TcpStream) {
+    fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .expect("set read timeout");
@@ -1073,6 +1090,7 @@ mod tests {
                 }
             }
         }
+        buffer
     }
 
     #[test]
@@ -1231,7 +1249,12 @@ mod tests {
                 "model": null,
                 "status": "processed",
                 "duration_ms": 25,
-                "warning": null
+                "warning": null,
+                "target_context": {
+                    "app_kind": "code",
+                    "executable_name": null,
+                    "captured_at": "2026-06-13T12:00:00Z"
+                }
             },
             "warnings": ["Text processing failed; original transcription was kept"]
         })
@@ -1239,7 +1262,10 @@ mod tests {
 
         let server_handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept request");
-            read_http_request(&mut stream);
+            let request = String::from_utf8_lossy(&read_http_request(&mut stream)).to_string();
+            assert!(request.contains("name=\"target_app_kind\""));
+            assert!(request.contains("code"));
+            assert!(!request.contains("README.md"));
 
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -1270,6 +1296,11 @@ mod tests {
             String::new(),
             String::new(),
             String::new(),
+            Some(super::TargetContext {
+                app_kind: "code".to_string(),
+                executable_name: None,
+                captured_at: "2026-06-13T12:00:00Z".to_string(),
+            }),
         )
         .await
         .expect("transcribe succeeds");
@@ -1286,6 +1317,14 @@ mod tests {
         assert_eq!(
             result.text_processing.provider.as_deref(),
             Some("codex_cli")
+        );
+        assert_eq!(
+            result
+                .text_processing
+                .target_context
+                .as_ref()
+                .map(|context| context.app_kind.as_str()),
+            Some("code")
         );
         assert_eq!(result.warnings.len(), 1);
     }

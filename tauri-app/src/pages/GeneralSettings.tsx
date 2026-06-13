@@ -130,6 +130,16 @@ export function GeneralSettings() {
             </SettingsField>
           ) : null}
         </div>
+        <SettingsRow
+          title="使用目标应用类别"
+          description="仅使用录音开始时目标应用的类别提供风格提示，不读取选区、正文或完整窗口标题。"
+          control={
+            <ToggleSwitch
+              checked={settings.useAppContext}
+              onChange={(next) => updateSettings({ useAppContext: next })}
+            />
+          }
+        />
       </SettingsSection>
 
       <SettingsSection title="流式与历史记录" description="集中管理流式转录、AI 摘要和音频保留策略。">

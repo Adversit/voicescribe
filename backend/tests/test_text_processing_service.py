@@ -60,6 +60,65 @@ class TextProcessingServiceTests(unittest.TestCase):
         self.assertIn("--system-prompt", captured["command"])
         self.assertEqual(captured["env"]["OLLAMA_MODELS"], str(service.model_root / "ollama"))
 
+    def test_target_app_kind_adds_minimal_style_hint(self):
+        captured = {}
+
+        def runner(command, prompt, timeout, cwd, env):
+            captured["prompt"] = prompt
+            return "Polished result"
+
+        service = self.make_service(command_runner=runner)
+        with patch("services.text_processing_service._resolve_command", return_value=["claude.exe"]):
+            result = service.process(
+                TextProcessingRequest(
+                    text="explain the command",
+                    profile="light",
+                    provider="claude_cli",
+                    target_context={
+                        "app_kind": "terminal",
+                        "executable_name": "pwsh.exe",
+                        "captured_at": "2026-06-13T12:00:00Z",
+                    },
+                )
+            )
+
+        self.assertIn("The target is a terminal", captured["prompt"])
+        self.assertNotIn("pwsh.exe", captured["prompt"])
+        self.assertEqual(result.target_context["app_kind"], "terminal")
+
+    def test_raw_profile_keeps_context_without_calling_provider(self):
+        calls = []
+        service = self.make_service(command_runner=lambda *args: calls.append(args))
+
+        result = service.process(
+            TextProcessingRequest(text="raw words", profile="raw", target_context={"app_kind": "chat"})
+        )
+
+        self.assertEqual(result.target_context["app_kind"], "chat")
+        self.assertEqual(calls, [])
+
+    def test_unknown_context_kind_is_normalized_and_not_added_to_prompt(self):
+        captured = {}
+
+        def runner(command, prompt, timeout, cwd, env):
+            captured["prompt"] = prompt
+            return "Polished result"
+
+        service = self.make_service(command_runner=runner)
+        with patch("services.text_processing_service._resolve_command", return_value=["claude.exe"]):
+            result = service.process(
+                TextProcessingRequest(
+                    text="spoken",
+                    profile="light",
+                    provider="claude_cli",
+                    target_context={"app_kind": "private-app-kind", "executable_name": "x" * 500},
+                )
+            )
+
+        self.assertEqual(result.target_context["app_kind"], "unknown")
+        self.assertEqual(len(result.target_context["executable_name"]), 120)
+        self.assertNotIn("Target application style hint", captured["prompt"])
+
     def test_codex_cli_uses_ephemeral_read_only_mode(self):
         captured = {}
 

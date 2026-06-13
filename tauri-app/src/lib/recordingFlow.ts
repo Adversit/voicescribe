@@ -3,6 +3,7 @@ import {
   cancelRecording,
   deleteAudioFile,
   getRecordingStatus,
+  getTargetContext,
   outputText,
   debugHotkeyLog,
   startRecording,
@@ -12,7 +13,7 @@ import {
 import { hideOverlay, pushOverlayState, showOverlay } from "./overlayWindow";
 import { cancelRealtimeStreamSession, startRealtimeStreamSession, stopRealtimeStreamSession } from "./realtimeStream";
 import { useAppStore } from "../stores/appStore";
-import type { HistoryRecord, HistorySpeakerEntry, TextProcessingResult, TranscribeResult } from "../types";
+import type { HistoryRecord, HistorySpeakerEntry, TargetContext, TextProcessingResult, TranscribeResult } from "../types";
 
 let cancelResetTimer: number | null = null;
 
@@ -63,6 +64,7 @@ function buildHistoryRecord(payload: {
   speakerEntries: HistorySpeakerEntry[];
   summary?: string | null;
   textProcessing: TextProcessingResult;
+  targetContext: TargetContext | null;
   retainAudio: boolean;
   audioPath: string | null;
 }): HistoryRecord {
@@ -82,6 +84,7 @@ function buildHistoryRecord(payload: {
     speaker_entries: payload.speakerEntries,
     summary: payload.summary ?? null,
     text_processing: payload.textProcessing,
+    target_context: payload.targetContext,
     retain_audio: payload.retainAudio,
     audio_path: payload.audioPath,
   };
@@ -103,6 +106,7 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
     speakerMappingModel: result.speaker_mapping_model,
     speakerEntries: createSpeakerEntries(result),
     textProcessing: result.text_processing,
+    targetContext: result.text_processing.target_context,
     retainAudio: settings.retainAudio,
     audioPath: retainedAudioPath,
   });
@@ -138,7 +142,9 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
         status: "skipped",
         duration_ms: 0,
         warning: null,
+        target_context: null,
       },
+      targetContext: null,
       retainAudio: settings.retainAudio,
       audioPath: retainedAudioPath,
     });
@@ -258,6 +264,7 @@ export async function finishRecordingSession() {
       textProcessingModel: settings.textProcessingModel,
       textProcessingBaseUrl: settings.textProcessingBaseUrl,
       textProcessingTargetLanguage: settings.textProcessingTargetLanguage,
+      targetContext: settings.useAppContext ? await getTargetContext().catch(() => null) : null,
     });
 
     await debugHotkeyLog(
