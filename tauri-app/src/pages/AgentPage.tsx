@@ -34,7 +34,15 @@ export function AgentPage() {
   const [probing, setProbing] = useState(false);
   const activeTaskId = useRef<string | null>(null);
   const isActive = task !== null && !terminalStatuses.has(task.status);
+  const selectedReadiness = readiness.find((item) => item.provider === provider) ?? null;
+  const selectedProviderUnavailable = selectedReadiness?.status === "unavailable";
   const capability = provider === "claude_cli" ? "仅根据输入回答，不读取仓库" : "只读分析当前 VoiceScribe 仓库";
+
+  useEffect(() => {
+    if (!backendConnected) {
+      setReadiness([]);
+    }
+  }, [backendConnected]);
 
   useEffect(() => {
     if (!activeTaskId.current || !isActive) {
@@ -146,7 +154,7 @@ export function AgentPage() {
             <button
               type="button"
               className={primaryButtonClassName}
-              disabled={!backendConnected || !prompt.trim()}
+              disabled={!backendConnected || !prompt.trim() || selectedProviderUnavailable}
               onClick={() => void startTask()}
             >
               启动任务
@@ -190,6 +198,7 @@ export function AgentPage() {
             />
           </SettingsField>
           {!backendConnected ? <div className="text-sm text-red-700">后端服务尚未就绪。</div> : null}
+          {selectedProviderUnavailable ? <div className="text-sm text-red-700">当前 Provider 检测为不可用，请切换或修复本机运行时。</div> : null}
           {requestError ? <div className="text-sm text-red-700">{requestError}</div> : null}
         </div>
       </SettingsSection>
