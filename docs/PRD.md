@@ -502,6 +502,14 @@ flowchart TD
 - 探测结果只作为临时诊断信息，不作为持久化 canonical state。
 - 详细契约见 `docs/PROVIDER_READINESS_DESIGN.md`。
 
+### 10.0.3 文本润色任务取消增量
+
+- 用户在真实 `polishing` 阶段可取消当前文本处理任务。
+- 取消后的晚到结果不得输出、不得写入 history，也不得被当作普通 fallback。
+- Claude CLI、Codex CLI 和 Codex SDK 必须中断其真实运行进程或 turn。
+- OpenAI-compatible 首轮至少必须立即取消 VoiceScribe 任务并丢弃晚到结果；本地服务是否立即停算由其取消能力决定。
+- 详细契约见 `docs/TEXT_PROCESSING_CANCELLATION_DESIGN.md`。
+
 ### 10.0 Typeless 上下文感知增量
 
 - 用户可显式开启或关闭应用上下文。

@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -27,10 +28,14 @@ CLAUDE_CLI_SYSTEM_PROMPT = (
     "Do not inspect or discuss the current directory, repository, tools, or session context."
 )
 
-CommandRunner = Callable[[list[str], str, int, Path, dict[str, str]], str]
+CommandRunner = Callable[[list[str], str, int, Path, dict[str, str], Optional[threading.Event]], str]
 HttpSender = Callable[[str, dict, int], dict]
 HttpGetter = Callable[[str, int], dict]
-SdkRunner = Callable[[str, str, int], str]
+SdkRunner = Callable[[str, str, int, Optional[threading.Event]], str]
+
+
+class TextProcessingCancelled(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -126,28 +131,61 @@ def _default_command_runner(
     timeout_seconds: int,
     cwd: Path,
     env: dict[str, str],
+    cancel_event: Optional[threading.Event] = None,
 ) -> str:
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-    result = subprocess.run(
+    process = subprocess.Popen(
         command,
-        input=prompt,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout_seconds,
         cwd=str(cwd),
         env=env,
         creationflags=creation_flags,
-        check=False,
     )
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+    deadline = time.monotonic() + timeout_seconds
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="voicescribe-cli-io") as executor:
+        communication = executor.submit(process.communicate, prompt)
+        while not communication.done():
+            if cancel_event is not None and cancel_event.is_set():
+                _terminate_process_tree(process)
+                raise TextProcessingCancelled("Text processing was cancelled")
+            if time.monotonic() >= deadline:
+                _terminate_process_tree(process)
+                raise TimeoutError(f"provider timed out after {timeout_seconds} seconds")
+            time.sleep(0.05)
+        stdout, stderr = communication.result()
+
+    if process.returncode != 0:
+        detail = stderr.strip() or stdout.strip() or f"exit code {process.returncode}"
         raise RuntimeError(detail)
-    output = result.stdout.strip()
+    output = stdout.strip()
     if not output:
         raise RuntimeError("provider returned empty text")
     return output
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            creationflags=creation_flags,
+            check=False,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
 
 
 def _default_http_sender(url: str, payload: dict, timeout_seconds: int) -> dict:
@@ -173,6 +211,7 @@ def _default_sdk_runner(
     timeout_seconds: int,
     runtime_dir: Optional[Path] = None,
     env: Optional[dict[str, str]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> str:
     try:
         from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
@@ -195,8 +234,21 @@ def _default_sdk_runner(
         turn = thread.turn(prompt)
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="voicescribe-codex-sdk")
         future = executor.submit(turn.run)
+        deadline = time.monotonic() + timeout_seconds
         try:
-            result = future.result(timeout=timeout_seconds)
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    turn.interrupt()
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise TextProcessingCancelled("Text processing was cancelled")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise FutureTimeoutError()
+                try:
+                    result = future.result(timeout=min(0.1, remaining))
+                    break
+                except FutureTimeoutError:
+                    continue
         except FutureTimeoutError as error:
             try:
                 turn.interrupt()
@@ -229,12 +281,13 @@ class TextProcessingService:
         self.http_sender = http_sender or _default_http_sender
         self.http_getter = http_getter or _default_http_getter
         self.sdk_runner = sdk_runner or (
-            lambda prompt, model, timeout: _default_sdk_runner(
+            lambda prompt, model, timeout, cancel_event: _default_sdk_runner(
                 prompt,
                 model,
                 timeout,
                 self.runtime_dir,
                 self._provider_env(),
+                cancel_event,
             )
         )
 
@@ -250,7 +303,13 @@ class TextProcessingService:
         env["MODELSCOPE_CACHE"] = str(self.model_root)
         return env
 
-    def _run_claude_cli(self, prompt: str, model: str, timeout_seconds: int) -> str:
+    def _run_claude_cli(
+        self,
+        prompt: str,
+        model: str,
+        timeout_seconds: int,
+        cancel_event: Optional[threading.Event],
+    ) -> str:
         command = _resolve_command("claude")
         command.extend(
             [
@@ -268,9 +327,15 @@ class TextProcessingService:
         )
         if model:
             command.extend(["--model", model])
-        return self.command_runner(command, prompt, timeout_seconds, self.runtime_dir, self._provider_env())
+        return self.command_runner(command, prompt, timeout_seconds, self.runtime_dir, self._provider_env(), cancel_event)
 
-    def _run_codex_cli(self, prompt: str, model: str, timeout_seconds: int) -> str:
+    def _run_codex_cli(
+        self,
+        prompt: str,
+        model: str,
+        timeout_seconds: int,
+        cancel_event: Optional[threading.Event],
+    ) -> str:
         command = _resolve_command("codex")
         command.extend(
             [
@@ -285,7 +350,7 @@ class TextProcessingService:
         if model:
             command.extend(["--model", model])
         command.append("-")
-        return self.command_runner(command, prompt, timeout_seconds, self.runtime_dir, self._provider_env())
+        return self.command_runner(command, prompt, timeout_seconds, self.runtime_dir, self._provider_env(), cancel_event)
 
     def _run_openai_compatible(
         self,
@@ -320,21 +385,31 @@ class TextProcessingService:
             raise RuntimeError("OpenAI-compatible provider returned empty text")
         return output
 
-    def _dispatch(self, request: TextProcessingRequest, prompt: str) -> str:
+    def _dispatch(
+        self,
+        request: TextProcessingRequest,
+        prompt: str,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> str:
         timeout_seconds = max(1, min(request.timeout_seconds, 300))
+        if cancel_event is not None and cancel_event.is_set():
+            raise TextProcessingCancelled("Text processing was cancelled")
         if request.provider == "claude_cli":
-            return self._run_claude_cli(prompt, request.model, timeout_seconds)
+            return self._run_claude_cli(prompt, request.model, timeout_seconds, cancel_event)
         if request.provider == "codex_cli":
-            return self._run_codex_cli(prompt, request.model, timeout_seconds)
+            return self._run_codex_cli(prompt, request.model, timeout_seconds, cancel_event)
         if request.provider == "codex_sdk":
-            return self.sdk_runner(prompt, request.model, timeout_seconds)
+            return self.sdk_runner(prompt, request.model, timeout_seconds, cancel_event)
         if request.provider == "openai_compatible":
-            return self._run_openai_compatible(
+            output = self._run_openai_compatible(
                 prompt,
                 request.model,
                 request.base_url,
                 timeout_seconds,
             )
+            if cancel_event is not None and cancel_event.is_set():
+                raise TextProcessingCancelled("Text processing was cancelled")
+            return output
         raise RuntimeError(f"Unsupported text processing provider: {request.provider}")
 
     def probe_provider(
@@ -426,7 +501,11 @@ class TextProcessingService:
             for provider in SUPPORTED_PROVIDERS
         ]
 
-    def process(self, request: TextProcessingRequest) -> TextProcessingResult:
+    def process(
+        self,
+        request: TextProcessingRequest,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> TextProcessingResult:
         raw_text = request.text.strip()
         target_context = normalize_target_context(request.target_context)
         started = time.perf_counter()
@@ -464,7 +543,7 @@ class TextProcessingService:
                 request.target_language,
                 target_context.get("app_kind", "") if target_context else "",
             )
-            output = self._dispatch(request, prompt).strip()
+            output = self._dispatch(request, prompt, cancel_event).strip()
             duration_ms = int((time.perf_counter() - started) * 1000)
             print(
                 f"[TextProcessing] status=processed profile={request.profile} "
@@ -481,6 +560,8 @@ class TextProcessingService:
                 duration_ms=duration_ms,
                 target_context=target_context,
             )
+        except TextProcessingCancelled:
+            raise
         except Exception as error:
             duration_ms = int((time.perf_counter() - started) * 1000)
             warning = f"Text processing failed; original transcription was kept: {_short_error(error)}"

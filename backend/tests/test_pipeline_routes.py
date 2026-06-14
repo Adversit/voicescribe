@@ -3,7 +3,7 @@ import io
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 import server
 from services.text_processing_service import TextProcessingResult
@@ -81,10 +81,51 @@ class PipelineRouteTests(unittest.TestCase):
             async with server.lifespan(server.app):
                 return None
 
-        with patch.object(server, "preload_models", new=AsyncMock()) as preload:
+        with (
+            patch.object(server, "preload_models", new=AsyncMock()) as preload,
+            patch.object(server.text_processing_task_service, "shutdown") as shutdown,
+        ):
             asyncio.run(run_lifespan())
 
         preload.assert_awaited_once_with()
+        shutdown.assert_called_once_with()
+
+    def test_text_task_endpoints_use_task_service_contract(self):
+        pending = {"task_id": "task-1", "status": "pending", "result": None, "error": None}
+        running = {"task_id": "task-1", "status": "running", "result": None, "error": None}
+        cancelled = {"task_id": "task-1", "status": "cancelled", "result": None, "error": None}
+        with (
+            patch.object(server.text_processing_task_service, "start", return_value=pending) as start,
+            patch.object(server.text_processing_task_service, "get", return_value=running) as get,
+            patch.object(server.text_processing_task_service, "cancel", return_value=cancelled) as cancel,
+        ):
+            payload = server.TextProcessPayload(
+                text="raw transcript",
+                profile="light",
+                provider="claude_cli",
+                target_context={"app_kind": "chat"},
+            )
+            self.assertEqual(asyncio.run(server.start_text_processing_task(payload)), pending)
+            self.assertEqual(asyncio.run(server.get_text_processing_task("task-1")), running)
+            self.assertEqual(asyncio.run(server.cancel_text_processing_task("task-1")), cancelled)
+
+        request = start.call_args.args[0]
+        self.assertEqual(request.text, "raw transcript")
+        self.assertEqual(request.target_context["app_kind"], "chat")
+        get.assert_called_once_with("task-1")
+        cancel.assert_called_once_with("task-1")
+
+    def test_text_task_endpoints_return_404_for_unknown_task(self):
+        with patch.object(server.text_processing_task_service, "get", return_value=None):
+            with self.assertRaises(HTTPException) as get_error:
+                asyncio.run(server.get_text_processing_task("missing"))
+
+        with patch.object(server.text_processing_task_service, "cancel", return_value=None):
+            with self.assertRaises(HTTPException) as cancel_error:
+                asyncio.run(server.cancel_text_processing_task("missing"))
+
+        self.assertEqual(get_error.exception.status_code, 404)
+        self.assertEqual(cancel_error.exception.status_code, 404)
 
     def test_deferred_transcribe_forces_raw_processing_contract(self):
         mock_asr = {

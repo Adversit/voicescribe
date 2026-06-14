@@ -277,6 +277,11 @@ export function RecordingOverlay() {
         </div>
       ) : PROCESSING_LABELS[mode] ? (
         <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-white/10 bg-black px-5 py-3 text-white shadow-[0_16px_36px_rgba(0,0,0,0.30)]">
+          {canCancel ? (
+            <IconButton label="取消处理" disabled={false} variant="muted" onClick={handleCancel}>
+              <X className="h-4 w-4" strokeWidth={2.3} />
+            </IconButton>
+          ) : null}
           <LoaderCircle className="h-4 w-4 animate-spin text-white/78" strokeWidth={2.2} />
           <div className="text-sm font-medium tracking-[0.06em] text-white/86">{PROCESSING_LABELS[mode]}</div>
         </div>

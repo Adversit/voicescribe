@@ -6,6 +6,7 @@ import type {
   SpeakerInfo,
   TextProcessRequest,
   TextProcessingResult,
+  TextProcessingTask,
 } from "../types";
 
 const BASE_URL = "http://127.0.0.1:8765";
@@ -229,6 +230,30 @@ export async function processText(payload: TextProcessRequest): Promise<TextProc
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  await ensureOk(response);
+  return response.json();
+}
+
+export async function startTextProcessingTask(payload: TextProcessRequest): Promise<TextProcessingTask> {
+  const response = await request(`${BASE_URL}/text/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response);
+  return response.json();
+}
+
+export async function getTextProcessingTask(taskId: string): Promise<TextProcessingTask> {
+  const response = await request(`${BASE_URL}/text/tasks/${encodeURIComponent(taskId)}`);
+  await ensureOk(response);
+  return response.json();
+}
+
+export async function cancelTextProcessingTask(taskId: string): Promise<TextProcessingTask> {
+  const response = await request(`${BASE_URL}/text/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
   });
   await ensureOk(response);
   return response.json();

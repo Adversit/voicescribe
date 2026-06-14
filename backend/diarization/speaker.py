@@ -318,10 +318,10 @@ class SpeakerDiarizer:
 
     def diarize(self, audio_path: str) -> List[Dict]:
         """
-        ????????
+        Run speaker diarization for an audio file.
 
         Args:
-            audio_path: ?????????
+            audio_path: Path to the input audio file.
 
         Returns:
             [

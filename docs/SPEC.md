@@ -30,6 +30,17 @@
 - Acceptance Criteria：mock backend 启动日志不再出现 `on_event is deprecated`；lifespan 自动化确认调用一次预加载入口；后端测试与 compileall 通过。
 - Failure branches：单个模型预加载失败仍由 `preload_models()` 记录并继续启动；lifespan 不新增模型下载或用户目录缓存路径。
 
+## 2026-06-14 文本润色任务取消
+
+本轮必须遵循 `docs/TEXT_PROCESSING_CANCELLATION_DESIGN.md`：
+
+- 后端 `TextProcessingTaskService` 是任务状态和取消事件的 canonical owner。
+- cancelled 是独立终态，不得转换成 fallback。
+- Claude/Codex CLI 必须终止子进程树；Codex SDK 必须调用 active turn 的 `interrupt()`。
+- 桌面端取消后不得输出或写入 history。
+- 同步 `/text/process` 保留兼容，但桌面 polishing 主链迁移到 task API。
+- 不修改模型目录、模型 registry 或下载行为。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：

@@ -65,6 +65,7 @@ from services.text_processing_service import (
     TextProcessingRequest,
     TextProcessingService,
 )
+from services.text_processing_task_service import TextProcessingTaskService
 
 # Suppress jieba's known pkg_resources deprecation noise during startup.
 warnings.filterwarnings(
@@ -380,6 +381,7 @@ text_processing_service = TextProcessingService(
     model_root=MODEL_CACHE_DIR,
     runtime_dir=CONFIG_DIR / "text-processing-runtime",
 )
+text_processing_task_service = TextProcessingTaskService(text_processing_service)
 
 
 def _load_history_records() -> List[dict]:
@@ -603,7 +605,10 @@ async def preload_models():
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await preload_models()
-    yield
+    try:
+        yield
+    finally:
+        text_processing_task_service.shutdown()
 
 
 app = FastAPI(title="VoiceScribe", version="0.1.0", lifespan=lifespan)
@@ -1336,7 +1341,16 @@ async def summarize_text(payload: SummaryRequest) -> SummaryResponse:
 
 @app.post("/text/process")
 async def process_text(payload: TextProcessPayload) -> Dict[str, Any]:
-    request = TextProcessingRequest(
+    request = _text_processing_request_from_payload(payload)
+    processing = await asyncio.to_thread(
+        text_processing_service.process,
+        request,
+    )
+    return processing.to_dict()
+
+
+def _text_processing_request_from_payload(payload: TextProcessPayload) -> TextProcessingRequest:
+    return TextProcessingRequest(
         text=payload.text,
         profile=payload.profile,
         provider=payload.provider,
@@ -1346,11 +1360,27 @@ async def process_text(payload: TextProcessPayload) -> Dict[str, Any]:
         hotwords=tuple(word.strip() for word in payload.hotwords.split(",") if word.strip()),
         target_context=payload.target_context,
     )
-    processing = await asyncio.to_thread(
-        text_processing_service.process,
-        request,
-    )
-    return processing.to_dict()
+
+
+@app.post("/text/tasks")
+async def start_text_processing_task(payload: TextProcessPayload) -> Dict[str, Any]:
+    return text_processing_task_service.start(_text_processing_request_from_payload(payload))
+
+
+@app.get("/text/tasks/{task_id}")
+async def get_text_processing_task(task_id: str) -> Dict[str, Any]:
+    task = text_processing_task_service.get(task_id)
+    if task is None:
+        raise HTTPException(404, "Text processing task not found")
+    return task
+
+
+@app.delete("/text/tasks/{task_id}")
+async def cancel_text_processing_task(task_id: str) -> Dict[str, Any]:
+    task = text_processing_task_service.cancel(task_id)
+    if task is None:
+        raise HTTPException(404, "Text processing task not found")
+    return task
 
 
 @app.post("/text/providers/probe")

@@ -1,6 +1,6 @@
 # VoiceScribe TEST
 
-更新时间：2026-06-13（Typeless 文本处理首轮验证已回写）
+更新时间：2026-06-14（文本润色取消首轮验证已回写）
 
 ## 1. 文档用途
 
@@ -493,3 +493,18 @@
 | 后端静态导入 | 已通过 | `backend/venv/Scripts/python.exe -m compileall server.py services tests` 通过 |
 | 真实 mock backend 启动 | 已通过 | mock backend 成功监听 `127.0.0.1:8765`，仍输出 `[Preload] Mock mode, skipping preload`，stderr 不再包含 `on_event is deprecated` |
 | 模型路径与下载行为 | 已通过 | 本轮仅迁移启动注册方式，没有触发模型下载，也没有修改 `<repo>/models/` 主路径约束 |
+
+## 12. 2026-06-14 文本润色取消首轮测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 后端取消与任务 API 自动化 | 已通过 | `python -m unittest discover -s tests -v`：33 项通过；覆盖 CLI 子进程终止与大输出管道排空、Codex SDK `turn.interrupt()`、取消后不发布迟到结果、任务完成、未知任务 404、任务路由 start/get/cancel 契约和 lifespan shutdown |
+| 后端静态导入 | 已通过 | `python -m compileall server.py services tests` 通过 |
+| 前端生产构建 | 已通过 | `npm run build` 通过；任务类型/API、轮询、取消竞态保护和 Overlay 取消按钮均通过 TypeScript 检查 |
+| mock 任务 API HTTP smoke | 已通过 | mock backend `POST /text/tasks -> GET /text/tasks/{id} -> DELETE /text/tasks/{id}` 真实 HTTP 调用通过；缺失 provider 终态为 `fallback` 且 DELETE 保持终态幂等 |
+| CLI 取消真实进程行为 | 已通过 | 单元测试启动真实 Python 长运行子进程，设置取消事件后 5 秒内结束，返回 `TextProcessingCancelled` |
+| Codex SDK 取消行为 | 已通过 | fake SDK turn 回归确认取消调用 `turn.interrupt()` 并返回 `TextProcessingCancelled` |
+| 取消后不输出、不写 history | 已通过 | 代码路径审查确认取消异常在 `outputting`、`outputText`、`saveTranscription`、`persistTranscriptionHistory` 之前返回；task service 测试确认迟到结果不再发布 |
+| Windows Overlay 点击取消完整闭环 | 待人工验收 | 需要使用真实 Claude/Codex 润色任务确认 Overlay 可点击取消、进程结束、pipeline 显示 cancelled，且外部输入框和 history 均无结果 |
+| OpenAI-compatible 服务端算力立即停止 | 待人工验收 | VoiceScribe 会立即标记 cancelled 并丢弃迟到结果；本地模型服务是否在 HTTP 断连后立即停止生成取决于服务实现 |
+| ASR / outputting 阶段取消 | 未测试 | 本轮规格明确不包含这两个独立运行时阶段，当前 UI 仍提示暂不支持取消 |

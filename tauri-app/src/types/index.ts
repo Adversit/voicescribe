@@ -115,6 +115,21 @@ export interface ProviderReadiness {
   detail: string;
 }
 
+export type TextProcessingTaskStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "fallback"
+  | "cancelled"
+  | "failed";
+
+export interface TextProcessingTask {
+  task_id: string;
+  status: TextProcessingTaskStatus;
+  result: TextProcessingResult | null;
+  error: string | null;
+}
+
 export interface TranscribeResult {
   raw_text: string;
   text: string;

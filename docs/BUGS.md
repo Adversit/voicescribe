@@ -1,6 +1,6 @@
 # VoiceScribe BUGS
 
-更新时间：2026-06-13
+更新时间：2026-06-14
 
 ## 1. 高优先级未收口问题
 
@@ -61,6 +61,7 @@
 - 悬浮窗视觉与事件桥接主链
 - 2026-04-03：`AI refine` 能力不可用时原先会静默跳过且不给提示；现已改为保留原始转录，并通过 `TranscribeResult.warnings[] -> recordingFlow toast` 显式提示降级
 - 2026-04-03：`/speakers/register` 曾在 CUDA 环境下因 speaker embedding 落盘链处理不当导致 500；现已改成 GPU tensor 主链，实时识别走 `torch`/CUDA，相似度计算用 `cosine_similarity`，新注册 speaker 写 `.pt`；历史 `.npy` 会在 `_load_speakers()` 阶段自动迁移成 `.pt` 并删除旧文件
+- 2026-06-14：UTF-8 内容扫描发现 `backend/diarization/speaker.py` 的 `diarize()` docstring 存在已提交的连续问号损坏；已用 ASCII 英文恢复说明，并通过后端静态导入与测试。
 
 ## 4. Typeless 文本处理运行时
 
@@ -153,6 +154,22 @@
 - 首版路由测试使用 Starlette `TestClient`，但当前环境缺少其新增的 `httpx2` 依赖；已改为直接调用异步路由函数，不新增运行时依赖，19 项后端测试通过
 - 首版主窗口状态接到了未挂载的 `ShellHeader`；已通过真实浏览器渲染发现并改接到实际挂载的 `Layout`
 - 浏览器开发模式会由 backend/hotkey/tray hooks 误调用 Tauri `invoke` 并弹错误 toast；已增加运行时守卫，浏览器回归确认该 toast 消失
+
+### 5.3 文本润色取消仍有 Provider 边界
+
+状态：
+- 部分收口
+
+当前事实：
+- Claude CLI、Codex CLI 已支持终止真实子进程树，Codex SDK 已支持 `turn.interrupt()`
+- VoiceScribe 任务状态会在取消后保持 `cancelled`，不会发布迟到结果，也不会输出或写入 history
+- OpenAI-compatible 当前使用同步 HTTP 请求；VoiceScribe 能立即丢弃结果，但本地模型服务是否立即停止计算取决于该服务的断连处理
+- ASR 和 `outputting` 使用不同的运行时与 OS 交互契约，本轮没有伪装成“任意阶段可取消”
+
+下一步：
+- 在 Windows 桌面使用真实 Claude/Codex 任务完成 Overlay 取消闭环验收
+- 为 OpenAI-compatible 增加可中止 HTTP transport，并按 Ollama/兼容服务分别验证服务端停止行为
+- 分别设计 ASR 任务取消和文本注入取消/回滚契约
 
 ## 5. 记录规则
 

@@ -1,6 +1,6 @@
 # VoiceScribe Typeless 路线图
 
-更新时间：2026-06-13
+更新时间：2026-06-14
 
 ## 产品方向
 
@@ -50,9 +50,11 @@ VoiceScribe 的长期目标是成为 Windows 上本地优先的智能语音输�
 - [x] 保留旧 `/transcribe` 组合行为兼容性
 - 流式润色结果展示
 - 流式插入与一次性粘贴回退
-- 任意处理阶段可取消
+- [x] 文本润色阶段可真实取消
+- [ ] ASR / outputting 阶段可取消
 
 首轮规格：`docs/PIPELINE_STATE_DESIGN.md`
+取消规格：`docs/TEXT_PROCESSING_CANCELLATION_DESIGN.md`
 
 ### Phase D：风格与 Agent
 

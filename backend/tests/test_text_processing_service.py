@@ -1,5 +1,7 @@
+import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -7,7 +9,9 @@ from unittest.mock import patch
 
 from services.text_processing_service import (
     TextProcessingRequest,
+    TextProcessingCancelled,
     TextProcessingService,
+    _default_command_runner,
     _default_sdk_runner,
 )
 
@@ -37,7 +41,7 @@ class TextProcessingServiceTests(unittest.TestCase):
     def test_claude_cli_receives_transcription_through_stdin_not_argv(self):
         captured = {}
 
-        def runner(command, prompt, timeout, cwd, env):
+        def runner(command, prompt, timeout, cwd, env, cancel_event):
             captured.update(command=command, prompt=prompt, timeout=timeout, cwd=cwd, env=env)
             return "Polished result"
 
@@ -63,7 +67,7 @@ class TextProcessingServiceTests(unittest.TestCase):
     def test_target_app_kind_adds_minimal_style_hint(self):
         captured = {}
 
-        def runner(command, prompt, timeout, cwd, env):
+        def runner(command, prompt, timeout, cwd, env, cancel_event):
             captured["prompt"] = prompt
             return "Polished result"
 
@@ -100,7 +104,7 @@ class TextProcessingServiceTests(unittest.TestCase):
     def test_unknown_context_kind_is_normalized_and_not_added_to_prompt(self):
         captured = {}
 
-        def runner(command, prompt, timeout, cwd, env):
+        def runner(command, prompt, timeout, cwd, env, cancel_event):
             captured["prompt"] = prompt
             return "Polished result"
 
@@ -122,7 +126,7 @@ class TextProcessingServiceTests(unittest.TestCase):
     def test_codex_cli_uses_ephemeral_read_only_mode(self):
         captured = {}
 
-        def runner(command, prompt, timeout, cwd, env):
+        def runner(command, prompt, timeout, cwd, env, cancel_event):
             captured["command"] = command
             return "Structured result"
 
@@ -144,7 +148,7 @@ class TextProcessingServiceTests(unittest.TestCase):
     def test_codex_sdk_adapter_is_used(self):
         captured = {}
 
-        def sdk_runner(prompt, model, timeout):
+        def sdk_runner(prompt, model, timeout, cancel_event):
             captured.update(prompt=prompt, model=model, timeout=timeout)
             return "SDK result"
 
@@ -209,6 +213,89 @@ class TextProcessingServiceTests(unittest.TestCase):
         self.assertTrue(interrupted.is_set())
         self.assertTrue(captured["thread_options"]["ephemeral"])
         self.assertEqual(captured["thread_options"]["approval_mode"], "deny-all")
+
+    def test_default_command_runner_terminates_process_on_cancel(self):
+        cancel_event = threading.Event()
+        outcome = {}
+
+        def run():
+            try:
+                _default_command_runner(
+                    [sys.executable, "-c", "import sys,time; sys.stdin.read(); time.sleep(30)"],
+                    "prompt",
+                    60,
+                    Path(tempfile.gettempdir()),
+                    {},
+                    cancel_event,
+                )
+            except Exception as error:
+                outcome["error"] = error
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        time.sleep(0.2)
+        cancel_event.set()
+        worker.join(timeout=5)
+
+        self.assertFalse(worker.is_alive())
+        self.assertIsInstance(outcome.get("error"), TextProcessingCancelled)
+
+    def test_default_command_runner_drains_large_output(self):
+        output = _default_command_runner(
+            [sys.executable, "-c", "import sys; sys.stdin.read(); sys.stdout.write('x' * 200000)"],
+            "prompt",
+            10,
+            Path(tempfile.gettempdir()),
+            {},
+        )
+
+        self.assertEqual(len(output), 200000)
+
+    def test_codex_sdk_runner_interrupts_on_cancel(self):
+        cancel_event = threading.Event()
+        interrupted = threading.Event()
+
+        class FakeTurn:
+            def run(self):
+                interrupted.wait(5)
+                return types.SimpleNamespace(final_response="too late")
+
+            def interrupt(self):
+                interrupted.set()
+
+        class FakeThread:
+            def turn(self, prompt):
+                return FakeTurn()
+
+        class FakeCodex:
+            def __init__(self, config=None):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def thread_start(self, **options):
+                return FakeThread()
+
+        class FakeCodexConfig:
+            def __init__(self, **options):
+                pass
+
+        fake_module = types.SimpleNamespace(
+            ApprovalMode=types.SimpleNamespace(deny_all="deny-all"),
+            Codex=FakeCodex,
+            CodexConfig=FakeCodexConfig,
+            Sandbox=types.SimpleNamespace(read_only="read-only"),
+        )
+        cancel_event.set()
+        with patch.dict("sys.modules", {"openai_codex": fake_module}):
+            with self.assertRaises(TextProcessingCancelled):
+                _default_sdk_runner("prompt", "", 30, cancel_event=cancel_event)
+
+        self.assertTrue(interrupted.is_set())
 
     def test_openai_compatible_adapter_uses_chat_completions(self):
         captured = {}
