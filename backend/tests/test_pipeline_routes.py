@@ -86,11 +86,47 @@ class PipelineRouteTests(unittest.TestCase):
         with (
             patch.object(server, "preload_models", new=AsyncMock()) as preload,
             patch.object(server.text_processing_task_service, "shutdown") as shutdown,
+            patch.object(server.agent_task_service, "shutdown") as agent_shutdown,
         ):
             asyncio.run(run_lifespan())
 
         preload.assert_awaited_once_with()
         shutdown.assert_called_once_with()
+        agent_shutdown.assert_called_once_with()
+
+    def test_agent_task_endpoints_use_independent_task_service(self):
+        pending = {"task_id": "agent-1", "status": "pending", "result": None, "error": None}
+        running = {"task_id": "agent-1", "status": "running", "result": None, "error": None}
+        cancelled = {"task_id": "agent-1", "status": "cancelled", "result": None, "error": None}
+        with (
+            patch.object(server.agent_task_service, "start", return_value=pending) as start,
+            patch.object(server.agent_task_service, "get", return_value=running) as get,
+            patch.object(server.agent_task_service, "cancel", return_value=cancelled) as cancel,
+        ):
+            payload = server.AgentTaskPayload(prompt="Inspect this repository", provider="codex_cli")
+            self.assertEqual(asyncio.run(server.start_agent_task(payload)), pending)
+            self.assertEqual(asyncio.run(server.get_agent_task("agent-1")), running)
+            self.assertEqual(asyncio.run(server.cancel_agent_task("agent-1")), cancelled)
+
+        request = start.call_args.args[0]
+        self.assertEqual(request.prompt, "Inspect this repository")
+        self.assertEqual(request.provider, "codex_cli")
+        get.assert_called_once_with("agent-1")
+        cancel.assert_called_once_with("agent-1")
+
+    def test_agent_task_endpoints_reject_blank_and_unknown_task(self):
+        with self.assertRaises(HTTPException) as blank_error:
+            asyncio.run(server.start_agent_task(server.AgentTaskPayload(prompt=" ")))
+        with patch.object(server.agent_task_service, "get", return_value=None):
+            with self.assertRaises(HTTPException) as get_error:
+                asyncio.run(server.get_agent_task("missing"))
+        with patch.object(server.agent_task_service, "cancel", return_value=None):
+            with self.assertRaises(HTTPException) as cancel_error:
+                asyncio.run(server.cancel_agent_task("missing"))
+
+        self.assertEqual(blank_error.exception.status_code, 422)
+        self.assertEqual(get_error.exception.status_code, 404)
+        self.assertEqual(cancel_error.exception.status_code, 404)
 
     def test_text_task_endpoints_use_task_service_contract(self):
         pending = {"task_id": "task-1", "status": "pending", "result": None, "error": None}

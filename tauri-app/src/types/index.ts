@@ -140,6 +140,33 @@ export interface TextProcessingTask {
   error: string | null;
 }
 
+export type AgentProvider = "claude_cli" | "codex_cli" | "codex_sdk";
+export type AgentCapability = "prompt_only" | "workspace_read_only";
+export type AgentTaskStatus = "pending" | "running" | "completed" | "cancelled" | "failed";
+
+export interface AgentTaskRequest {
+  prompt: string;
+  provider: AgentProvider;
+  model: string;
+  timeout_seconds: number;
+}
+
+export interface AgentResult {
+  output: string;
+  provider: AgentProvider;
+  model: string | null;
+  workspace: string;
+  capability: AgentCapability;
+  duration_ms: number;
+}
+
+export interface AgentTask {
+  task_id: string;
+  status: AgentTaskStatus;
+  result: AgentResult | null;
+  error: string | null;
+}
+
 export interface TranscribeResult {
   raw_text: string;
   text: string;

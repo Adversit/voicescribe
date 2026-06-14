@@ -27,6 +27,7 @@ export type PageKey =
   | "general"
   | "engine"
   | "realtime"
+  | "agent"
   | "history"
   | "vocabulary"
   | "speaker"

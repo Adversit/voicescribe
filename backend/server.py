@@ -41,6 +41,7 @@ from config import (
     MODEL_CACHE_DIR,
     MODEL_REGISTRY_PATH,
     MODELSCOPE_CACHE,
+    PROJECT_ROOT,
     migrate_legacy_caches,
     WHISPER_CPP_MODEL_DIR,
     ensure_dirs,
@@ -49,6 +50,8 @@ from config import (
     HISTORY_STORAGE_PATH,
 )
 from runtime_probe import prepare_windows_runtime, probe_funasr_runtime, probe_torch_runtime
+from services.agent_service import SUPPORTED_AGENT_PROVIDERS, AgentRequest, AgentService
+from services.agent_task_service import AgentTaskService
 from services.history_service import HistoryService
 from services.model_catalog import (
     all_model_entries,
@@ -382,6 +385,8 @@ text_processing_service = TextProcessingService(
     runtime_dir=CONFIG_DIR / "text-processing-runtime",
 )
 text_processing_task_service = TextProcessingTaskService(text_processing_service)
+agent_service = AgentService(project_root=PROJECT_ROOT, model_root=MODEL_CACHE_DIR)
+agent_task_service = AgentTaskService(agent_service)
 
 
 def _load_history_records() -> List[dict]:
@@ -609,6 +614,7 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         text_processing_task_service.shutdown()
+        agent_task_service.shutdown()
 
 
 app = FastAPI(title="VoiceScribe", version="0.1.0", lifespan=lifespan)
@@ -731,6 +737,13 @@ class TextProviderProbePayload(BaseModel):
     base_url: str = ""
 
 
+class AgentTaskPayload(BaseModel):
+    prompt: str = Field(min_length=1, max_length=20000)
+    provider: Literal["claude_cli", "codex_cli", "codex_sdk"] = "codex_cli"
+    model: str = Field(default="", max_length=200)
+    timeout_seconds: int = Field(default=120, ge=5, le=600)
+
+
 @app.get("/")
 async def root():
     return {
@@ -742,6 +755,7 @@ async def root():
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
             "text_processing": list(SUPPORTED_PROVIDERS),
+            "agent": list(SUPPORTED_AGENT_PROVIDERS),
         },
         "runtime_checks": {
             "torch": TORCH_RUNTIME,
@@ -1393,6 +1407,36 @@ async def probe_text_providers(payload: TextProviderProbePayload) -> Dict[str, A
         base_url=payload.base_url,
     )
     return {"providers": [provider.to_dict() for provider in providers]}
+
+
+@app.post("/agent/tasks")
+async def start_agent_task(payload: AgentTaskPayload) -> Dict[str, Any]:
+    if not payload.prompt.strip():
+        raise HTTPException(422, "Agent prompt must not be empty")
+    return agent_task_service.start(
+        AgentRequest(
+            prompt=payload.prompt,
+            provider=payload.provider,
+            model=payload.model,
+            timeout_seconds=payload.timeout_seconds,
+        )
+    )
+
+
+@app.get("/agent/tasks/{task_id}")
+async def get_agent_task(task_id: str) -> Dict[str, Any]:
+    task = agent_task_service.get(task_id)
+    if task is None:
+        raise HTTPException(404, "Agent task not found")
+    return task
+
+
+@app.delete("/agent/tasks/{task_id}")
+async def cancel_agent_task(task_id: str) -> Dict[str, Any]:
+    task = agent_task_service.cancel(task_id)
+    if task is None:
+        raise HTTPException(404, "Agent task not found")
+    return task
 
 
 @app.post("/load")

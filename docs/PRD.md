@@ -458,6 +458,14 @@ flowchart TD
 - 模型与缓存不回退到用户目录作为主路径
 - token 存储不能明文散落在代码和工作树文档中
 
+### 8.8 独立只读 Agent 入口
+
+- 用户可从独立页面调用本机 Claude Code、Codex CLI 或 Codex SDK 的无头模式。
+- Agent 首轮为单轮、可取消、只读任务，不参与转写、文本输出或 history。
+- Codex 可只读分析当前仓库；Claude 首轮禁用工具，仅根据 prompt 回答。
+- Agent 不接受任意工作目录，不下载模型，Provider 缓存仍固定在仓库 `models/`。
+- 详细契约见 `docs/AGENT_ENTRY_DESIGN.md`。
+
 ## 9. 非功能需求
 
 ### 9.1 性能要求

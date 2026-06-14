@@ -530,3 +530,17 @@
 | 活跃任务 Style 稳定性 | 已通过 | `Layout` 与 General Settings 在 `recording/transcribing/polishing/outputting` 禁用 Style 操作；`appStore.selectStyleProfile()` 同时拒绝非 UI 绕过调用 |
 | 全局热键 / 托盘快捷切换 | 未测试 | 本轮明确未新增第二套全局键盘 hook 或动态 Rust tray 菜单 |
 | Windows 主窗口真实点击与重启持久化 | 待人工验收 | 浏览器插件无法访问宿主机 Vite 端口；需在 Tauri 桌面主窗口确认按钮显示、循环顺序、任务期间禁用和重启恢复 |
+
+## 15. 2026-06-14 独立只读 Agent 入口首轮测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 后端 Agent 服务、任务与路由自动化 | 已通过 | `python -m unittest discover -s tests -v`：44 项通过；新增覆盖 Claude 禁用工具、Codex CLI 只读且保留仓库规则、Codex SDK 仓库目录、仓库模型缓存环境、空输入、取消后不发布迟到结果、路由和 lifespan shutdown |
+| 后端静态导入 | 已通过 | `python -m compileall server.py services tests` 通过 |
+| 前端生产构建 | 已通过 | `npm run build` 通过；独立 Agent 页面、Provider 能力提示、启动/轮询/取消和结果展示通过 TypeScript 检查 |
+| Agent 与转写链路隔离 | 已通过 | 第二遍跨层代码审查确认 Agent 页面和服务不调用 settings 持久化、录音 pipeline、外部文本输出或 history |
+| mock Agent API HTTP smoke | 已通过 | 真实 HTTP `GET /health -> POST /agent/tasks -> DELETE /agent/tasks/{id}` 通过；任务从 `running` 到 `cancelled`，health 返回模型根目录 `G:\AI_projects\voicescriber\models` |
+| Provider 安全边界 | 已通过 | 自动化验证 Codex CLI 使用 `--sandbox read-only` 且不含 `--ignore-rules`；Codex SDK 使用现有 deny-all/read-only runner；Claude Code 使用 `--tools ""`、safe mode 和无 session |
+| 真实 Provider 完成输出 | 待人工验收 | 本轮真实 HTTP smoke 只验证启动与取消，没有等待 Claude/Codex 完成并核对输出质量 |
+| Windows Tauri Agent 页面完整交互 | 待人工验收 | 需要在桌面主窗口验证页面显示、Provider 切换、长任务取消、错误提示和结果滚动 |
+| 模型与缓存路径 | 已通过 | Agent Provider 环境把 Ollama、Hugging Face、Transformers、Torch、ModelScope 缓存固定到仓库 `models/`；本轮没有下载模型 |

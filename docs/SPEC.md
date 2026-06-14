@@ -738,3 +738,16 @@ type HotkeyBinding = {
 - 首轮只透传应用类别和可执行文件名，不读取选区、正文、完整标题、完整路径、PID 或 HWND。
 - 上下文失败不得阻断录音、转写、文本处理或输出。
 - 上下文只影响文本风格，不覆盖显式 Profile，不允许 Provider 执行口述任务。
+
+## 15. Phase D：独立只读 Agent 入口
+
+本阶段正式规格见 `docs/AGENT_ENTRY_DESIGN.md`。
+
+关键约束：
+
+- 后端 `AgentTaskService` 是任务生命周期的单一事实源。
+- Agent 与 `TextProcessingService`、录音 pipeline、外部文本输出和 history 隔离。
+- 工作目录固定为 `PROJECT_ROOT`，客户端不能提交任意目录。
+- Codex CLI/SDK 使用只读沙箱且拒绝授权；Claude Code 首轮禁用工具。
+- Agent Provider 环境必须继续把模型和缓存指向 `<repo>/models/`。
+- `server.py` 只增加薄路由，Agent 业务规则放入独立 service。

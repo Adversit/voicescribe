@@ -1,4 +1,6 @@
 import type {
+  AgentTask,
+  AgentTaskRequest,
   EngineInfo,
   HistoryRecord,
   ModelStatus,
@@ -268,4 +270,28 @@ export async function probeTextProviders(model: string, baseUrl: string): Promis
   await ensureOk(response);
   const payload = (await response.json()) as { providers: ProviderReadiness[] };
   return payload.providers;
+}
+
+export async function startAgentTask(payload: AgentTaskRequest): Promise<AgentTask> {
+  const response = await request(`${BASE_URL}/agent/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await ensureOk(response);
+  return response.json();
+}
+
+export async function getAgentTask(taskId: string): Promise<AgentTask> {
+  const response = await request(`${BASE_URL}/agent/tasks/${encodeURIComponent(taskId)}`);
+  await ensureOk(response);
+  return response.json();
+}
+
+export async function cancelAgentTask(taskId: string): Promise<AgentTask> {
+  const response = await request(`${BASE_URL}/agent/tasks/${encodeURIComponent(taskId)}`, {
+    method: "DELETE",
+  });
+  await ensureOk(response);
+  return response.json();
 }

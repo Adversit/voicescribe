@@ -12,12 +12,14 @@ import { HotkeySettings } from "../pages/HotkeySettings";
 import { RealtimeTranscriptionPage } from "../pages/RealtimeTranscriptionPage";
 import { SpeakerSettings } from "../pages/SpeakerSettings";
 import { VocabularySettings } from "../pages/VocabularySettings";
+import { AgentPage } from "../pages/AgentPage";
 import { primeOverlayBridge } from "../lib/overlayWindow";
 
 const pageMap = {
   general: <GeneralSettings />,
   engine: <EngineSettings />,
   realtime: <RealtimeTranscriptionPage />,
+  agent: <AgentPage />,
   history: <HistoryPage />,
   vocabulary: <VocabularySettings />,
   speaker: <SpeakerSettings />,
