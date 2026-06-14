@@ -199,11 +199,11 @@
 当前事实：
 - 首轮独立 Agent 页面、后端只读 Provider 适配和可取消任务 API 已实现
 - Codex CLI/SDK 固定在当前仓库只读运行；Claude Code 首轮禁用工具，只做 prompt-only 回答
-- 自动化、静态导入、前端构建和真实 HTTP 启动/取消 smoke 已通过
+- 自动化、静态导入、前端构建、真实 HTTP 启动/取消、Provider readiness 和 Codex CLI 最小完成输出已通过
 - 当前没有多轮会话、写模式、任意工作目录或 Agent history
 
 下一步：
-- 在 Windows Tauri 主窗口分别完成 Claude CLI、Codex CLI、Codex SDK 的真实任务
+- 在 Windows Tauri 主窗口分别完成 Claude CLI、Codex CLI、Codex SDK 的真实任务；其中 Codex CLI 后端 API 最小输出已验证
 - 验证长任务取消后本次 CLI/SDK 运行时退出，且不影响已有 Codex 会话
 - 真实验证输出不进入转写 history、不触发外部文本输入
 - 多轮或写模式必须单独设计授权、工作区和审计契约后再实施

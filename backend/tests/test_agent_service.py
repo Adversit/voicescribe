@@ -81,6 +81,17 @@ class AgentServiceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.run(AgentRequest(prompt="test", provider="openai_compatible"))
 
+    def test_probe_checks_installation_without_starting_agent(self):
+        service = AgentService(project_root=self.project_root, model_root=self.model_root)
+        with (
+            patch("services.agent_service._resolve_command", return_value=["provider"]) as resolve,
+            patch("services.agent_service.importlib.util.find_spec", return_value=object()),
+        ):
+            results = service.probe_providers()
+
+        self.assertEqual([result.status for result in results], ["ready", "ready", "ready"])
+        self.assertEqual(resolve.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

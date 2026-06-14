@@ -1439,6 +1439,12 @@ async def cancel_agent_task(task_id: str) -> Dict[str, Any]:
     return task
 
 
+@app.post("/agent/providers/probe")
+async def probe_agent_providers() -> Dict[str, Any]:
+    providers = await asyncio.to_thread(agent_service.probe_providers)
+    return {"providers": [provider.to_dict() for provider in providers]}
+
+
 @app.post("/load")
 async def load_engine(
     engine: Optional[str] = Form(None),
@@ -1863,6 +1869,7 @@ async def health_check():
             "funasr": FUNASR_AVAILABLE,
             "diarization": DIARIZATION_AVAILABLE,
             "text_processing": list(SUPPORTED_PROVIDERS),
+            "agent": list(SUPPORTED_AGENT_PROVIDERS),
         },
         "loaded_engines": {
             name: {

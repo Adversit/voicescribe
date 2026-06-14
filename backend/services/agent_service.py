@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import threading
 import time
@@ -7,6 +8,7 @@ from typing import Callable, Optional
 
 from services.text_processing_service import (
     TextProcessingCancelled,
+    ProviderReadiness,
     _default_command_runner,
     _default_sdk_runner,
     _resolve_command,
@@ -76,6 +78,38 @@ class AgentService:
             path.mkdir(parents=True, exist_ok=True)
             env[name] = str(path)
         return env
+
+    def probe_providers(self) -> list[ProviderReadiness]:
+        results = []
+        for provider in SUPPORTED_AGENT_PROVIDERS:
+            started = time.perf_counter()
+            try:
+                if provider == "claude_cli":
+                    _resolve_command("claude")
+                    detail = "Claude Code CLI is available"
+                    status = "ready"
+                elif provider == "codex_cli":
+                    _resolve_command("codex")
+                    detail = "Codex CLI is available"
+                    status = "ready"
+                elif importlib.util.find_spec("openai_codex") is None:
+                    detail = "Codex Python SDK is not installed"
+                    status = "unavailable"
+                else:
+                    detail = "Codex Python SDK is available"
+                    status = "ready"
+            except Exception:
+                detail = f"{provider} is unavailable"
+                status = "unavailable"
+            results.append(
+                ProviderReadiness(
+                    provider=provider,
+                    status=status,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    detail=detail,
+                )
+            )
+        return results
 
     def _run_claude(
         self,

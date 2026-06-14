@@ -535,12 +535,14 @@
 
 | 检查项 | 当前状态 | 最近结果 |
 |---|---|---|
-| 后端 Agent 服务、任务与路由自动化 | 已通过 | `python -m unittest discover -s tests -v`：44 项通过；新增覆盖 Claude 禁用工具、Codex CLI 只读且保留仓库规则、Codex SDK 仓库目录、仓库模型缓存环境、空输入、取消后不发布迟到结果、路由和 lifespan shutdown |
+| 后端 Agent 服务、任务与路由自动化 | 已通过 | `python -m unittest discover -s tests -v`：46 项通过；新增覆盖 Claude 禁用工具、Codex CLI 只读且保留仓库规则、Codex SDK 仓库目录、仓库模型缓存环境、空输入、取消后不发布迟到结果、无会话 readiness probe、路由和 lifespan shutdown |
 | 后端静态导入 | 已通过 | `python -m compileall server.py services tests` 通过 |
 | 前端生产构建 | 已通过 | `npm run build` 通过；独立 Agent 页面、Provider 能力提示、启动/轮询/取消和结果展示通过 TypeScript 检查 |
 | Agent 与转写链路隔离 | 已通过 | 第二遍跨层代码审查确认 Agent 页面和服务不调用 settings 持久化、录音 pipeline、外部文本输出或 history |
 | mock Agent API HTTP smoke | 已通过 | 真实 HTTP `GET /health -> POST /agent/tasks -> DELETE /agent/tasks/{id}` 通过；任务从 `running` 到 `cancelled`，health 返回模型根目录 `G:\AI_projects\voicescriber\models` |
+| Codex CLI 真实只读完成输出 | 已通过 | 通过真实 `/agent/tasks` API 完成最小任务，终态为 `completed`、能力为 `workspace_read_only`、输出为 `READY`；模型根目录保持在仓库 `models/` |
+| Agent Provider 真实 readiness HTTP smoke | 已通过 | `/health` 返回 `claude_cli,codex_cli,codex_sdk`；`POST /agent/providers/probe` 返回本机三个 Provider 均为 `ready`，检测未启动 Agent 会话 |
 | Provider 安全边界 | 已通过 | 自动化验证 Codex CLI 使用 `--sandbox read-only` 且不含 `--ignore-rules`；Codex SDK 使用现有 deny-all/read-only runner；Claude Code 使用 `--tools ""`、safe mode 和无 session |
-| 真实 Provider 完成输出 | 待人工验收 | 本轮真实 HTTP smoke 只验证启动与取消，没有等待 Claude/Codex 完成并核对输出质量 |
+| Claude CLI / Codex SDK 真实完成输出 | 待人工验收 | Codex CLI 最小只读任务已完成；Claude CLI 与 Codex SDK 尚未通过新 Agent 页面完成真实输出验收 |
 | Windows Tauri Agent 页面完整交互 | 待人工验收 | 需要在桌面主窗口验证页面显示、Provider 切换、长任务取消、错误提示和结果滚动 |
 | 模型与缓存路径 | 已通过 | Agent Provider 环境把 Ollama、Hugging Face、Transformers、Torch、ModelScope 缓存固定到仓库 `models/`；本轮没有下载模型 |

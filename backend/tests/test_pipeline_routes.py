@@ -128,6 +128,14 @@ class PipelineRouteTests(unittest.TestCase):
         self.assertEqual(get_error.exception.status_code, 404)
         self.assertEqual(cancel_error.exception.status_code, 404)
 
+    def test_agent_probe_endpoint_returns_agent_results(self):
+        providers = [ProviderReadiness("codex_cli", "ready", 1, "Codex CLI is available")]
+        with patch.object(server.agent_service, "probe_providers", return_value=providers) as probe:
+            response = asyncio.run(server.probe_agent_providers())
+
+        self.assertEqual(response["providers"][0]["provider"], "codex_cli")
+        probe.assert_called_once_with()
+
     def test_text_task_endpoints_use_task_service_contract(self):
         pending = {"task_id": "task-1", "status": "pending", "result": None, "error": None}
         running = {"task_id": "task-1", "status": "running", "result": None, "error": None}

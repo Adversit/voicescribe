@@ -7,10 +7,11 @@ import {
   dangerButtonClassName,
   inputClassName,
   primaryButtonClassName,
+  secondaryButtonClassName,
   selectClassName,
 } from "../components/settings-ui";
 import { useAppStore } from "../stores/appStore";
-import type { AgentProvider, AgentTask } from "../types";
+import type { AgentProvider, AgentTask, ProviderReadiness } from "../types";
 
 const providerLabels: Record<AgentProvider, string> = {
   claude_cli: "Claude Code CLI",
@@ -27,6 +28,8 @@ export function AgentPage() {
   const [model, setModel] = useState("");
   const [task, setTask] = useState<AgentTask | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<ProviderReadiness[]>([]);
+  const [probing, setProbing] = useState(false);
   const activeTaskId = useRef<string | null>(null);
   const isActive = task !== null && !terminalStatuses.has(task.status);
   const capability = provider === "claude_cli" ? "仅根据输入回答，不读取仓库" : "只读分析当前 VoiceScribe 仓库";
@@ -86,16 +89,46 @@ export function AgentPage() {
     }
   }
 
+  async function probeProviders() {
+    setProbing(true);
+    setRequestError(null);
+    try {
+      setReadiness(await backendApi.probeAgentProviders());
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Agent 运行时检测失败");
+    } finally {
+      setProbing(false);
+    }
+  }
+
   return (
     <SettingsPage
       title="只读 Agent"
       description="独立调用本机 Claude Code、Codex CLI 或 Codex SDK。任务不会写入转录历史，也不会修改仓库。"
     >
-      <SettingsSection title="运行边界" description="首阶段固定使用当前 VoiceScribe 仓库，且不接受任意工作目录。">
+      <SettingsSection
+        title="运行边界"
+        description="首阶段固定使用当前 VoiceScribe 仓库，且不接受任意工作目录。检测只检查安装状态，不启动 Agent 会话。"
+        actions={
+          <button
+            type="button"
+            className={secondaryButtonClassName}
+            disabled={!backendConnected || probing || isActive}
+            onClick={() => void probeProviders()}
+          >
+            {probing ? "检测中..." : "检测运行时"}
+          </button>
+        }
+      >
         <div className="flex flex-wrap gap-2 text-sm text-ink/70">
           <span className="app-chip">模式：单轮只读</span>
           <span className="app-chip">能力：{capability}</span>
           <span className="app-chip">缓存：仓库 models/</span>
+          {readiness.map((item) => (
+            <span key={item.provider} className="app-chip" title={item.detail}>
+              {providerLabels[item.provider as AgentProvider]}：{item.status === "ready" ? "已就绪" : "不可用"}
+            </span>
+          ))}
         </div>
       </SettingsSection>
 

@@ -295,3 +295,10 @@ export async function cancelAgentTask(taskId: string): Promise<AgentTask> {
   await ensureOk(response);
   return response.json();
 }
+
+export async function probeAgentProviders(): Promise<ProviderReadiness[]> {
+  const response = await request(`${BASE_URL}/agent/providers/probe`, { method: "POST" });
+  await ensureOk(response);
+  const payload = (await response.json()) as { providers: ProviderReadiness[] };
+  return payload.providers;
+}
