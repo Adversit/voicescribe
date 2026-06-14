@@ -82,10 +82,12 @@ VoiceScribe 增加一个与语音转写、文本润色相互隔离的 Agent 页�
 ## 9. 失败分支
 
 - 空 prompt 或不支持的 Provider：请求返回 422。
-- CLI/SDK 缺失、Provider 超时：任务进入 `failed` 并返回短错误。
+- CLI/SDK 缺失、Provider 超时或配额失败：任务进入 `failed` 并返回不超过 400 字符的短错误；长错误必须同时保留开头上下文和末尾根因，避免前置 warning 掩盖真实失败。
 - 用户取消：任务立即固定为 `cancelled`，迟到结果不得发布。
 - 应用退出：取消全部非终态 Agent 任务。
 - 后端未就绪：前端显示现有后端不可用错误。
+- 活跃任务轮询发生瞬时读取失败：前端保留活动任务 ID、显示临时错误并继续轮询；下一次成功读取后清除临时错误。前端不得因单次读取失败伪造 `failed` 终态。
+- 取消或终态更新后收到旧轮询响应：前端按活动任务 ID 丢弃晚到响应，不得把 `cancelled` 或其他终态覆盖回 `running`。
 - 页面卸载：停止轮询，不自动取消已启动任务。
 
 ## 10. Acceptance Criteria
@@ -93,6 +95,9 @@ VoiceScribe 增加一个与语音转写、文本润色相互隔离的 Agent 页�
 - 用户可从独立 Agent 页面启动三个本地无头 Provider。
 - 页面明确展示 Claude `prompt_only` 与 Codex `workspace_read_only` 的能力差异。
 - 任务可轮询、取消，并展示输出或短错误。
+- 长 Provider 错误不会只显示前置 warning，页面可看到末尾真实失败原因。
+- 活跃任务单次轮询失败后仍可继续轮询和取消，恢复成功时错误提示自动清除。
+- 取消后的晚到轮询响应不会覆盖取消终态。
 - Agent 输出不写入转写 history，不触发外部文本输出。
 - Codex CLI/SDK 只读且不请求授权；Claude 不启用工具。
 - 所有模型和缓存环境仍指向 `<repo>/models/`。

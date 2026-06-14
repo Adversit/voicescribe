@@ -52,14 +52,20 @@ export function AgentPage() {
     const timer = window.setInterval(() => {
       void backendApi.getAgentTask(taskId)
         .then((next) => {
+          if (activeTaskId.current !== taskId) {
+            return;
+          }
+          setRequestError(null);
           setTask(next);
           if (terminalStatuses.has(next.status)) {
             activeTaskId.current = null;
           }
         })
         .catch((error: unknown) => {
+          if (activeTaskId.current !== taskId) {
+            return;
+          }
           setRequestError(error instanceof Error ? error.message : "Agent 任务状态读取失败");
-          activeTaskId.current = null;
         });
     }, 500);
     return () => window.clearInterval(timer);

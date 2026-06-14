@@ -546,3 +546,21 @@
 | Windows Tauri 页面内真实 Provider 完成输出 | 待人工验收 | 三个 Provider 的后端真实 API 输出均已通过；仍需在桌面页面点击启动并确认结果、错误与滚动体验 |
 | Windows Tauri Agent 页面完整交互 | 待人工验收 | 需要在桌面主窗口验证页面显示、Provider 切换、长任务取消、错误提示和结果滚动 |
 | 模型与缓存路径 | 已通过 | Agent Provider 环境把 Ollama、Hugging Face、Transformers、Torch、ModelScope 缓存固定到仓库 `models/`；本轮没有下载模型 |
+
+## 16. 2026-06-14 Agent 轮询恢复与真实页面回归
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 后端全量回归 | 已通过 | `backend/venv/Scripts/python.exe -m unittest discover -s tests -v`：47 项通过；新增覆盖长 Provider 错误保留末尾真实根因 |
+| 后端静态导入 | 已通过 | `backend/venv/Scripts/python.exe -m compileall server.py services tests` 通过 |
+| 前端生产构建 | 已通过 | `npm run build` 通过；Agent 轮询身份守卫与重试恢复通过 TypeScript 检查 |
+| Rust 编译 | 已通过 | `cargo check` 通过；本轮未修改 Rust 业务逻辑 |
+| 瞬时轮询读取失败恢复 | 已通过 | 使用不修改仓库的临时 HTTP smoke，让同一任务第一次 `GET /agent/tasks/retry-task` 返回 `503`、下一次返回 `completed`；真实页面最终自动显示 `RECOVERED`，没有卡在 `running` |
+| 取消终态不被晚到轮询覆盖 | 已通过 | 真实页面启动 Codex CLI 任务后立即取消，页面保持 `status=cancelled`；等待后仍显示“任务已取消”，没有被旧轮询覆盖回 `running` |
+| Claude CLI 真实页面完成、复制与清空 | 已通过 | 浏览器页面通过真实 Agent API 完成 `Reply with exactly READY.`，约 `5601 ms` 后显示 `READY`；复制后剪贴板为 `READY`，清空后回到 `idle` |
+| Codex CLI 真实页面完成输出 | 未通过 | 当前本机 Codex CLI `0.136.0` 因账户 usage limit 返回失败；修复后页面短错误同时保留前置 warning 与末尾真实 usage-limit 根因，不再只显示 warning |
+| Codex SDK 真实页面完成输出 | 未通过 | 当前本机 Codex SDK 同样因账户 usage limit 返回失败，页面显示明确用量错误 |
+| Agent readiness 与模型根目录 | 已通过 | `POST /agent/providers/probe` 仍返回三个 Provider `ready`，该状态只表示安装就绪；`/health.cache_paths.model_root=G:\AI_projects\voicescriber\models` |
+| 浏览器页面控制台 | 已通过 | Agent 页面交互回归后浏览器 `warn/error` 日志为空 |
+| Tauri dev 桌面进程启动 | 已通过 | `npm run tauri:dev` 成功编译并启动 `target/debug/voicescribe-desktop.exe` |
+| Windows Tauri 窗口真实交互 | 待人工验收 | 本轮桌面自动化连接因 Computer Use 运行时内部导出错误不可用；未观察或点击 Tauri 窗口，不能把进程启动写成桌面交互通过 |

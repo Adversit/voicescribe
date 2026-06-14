@@ -83,7 +83,11 @@ class ProviderReadiness:
 
 def _short_error(error: Exception) -> str:
     message = " ".join(str(error).split())
-    return message[:400] or error.__class__.__name__
+    if not message:
+        return error.__class__.__name__
+    if len(message) <= 400:
+        return message
+    return f"{message[:160]} ... {message[-235:]}"
 
 
 def normalize_target_context(value: Optional[dict]) -> Optional[dict]:

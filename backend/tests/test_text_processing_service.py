@@ -13,10 +13,21 @@ from services.text_processing_service import (
     TextProcessingService,
     _default_command_runner,
     _default_sdk_runner,
+    _short_error,
 )
 
 
 class TextProcessingServiceTests(unittest.TestCase):
+    def test_short_error_preserves_tail_root_cause(self):
+        warning = "WARN plugin manifest issue " + ("x" * 500)
+        error = RuntimeError(f"{warning}\nERROR: usage limit reached")
+
+        result = _short_error(error)
+
+        self.assertLessEqual(len(result), 400)
+        self.assertTrue(result.startswith("WARN plugin manifest issue"))
+        self.assertTrue(result.endswith("ERROR: usage limit reached"))
+
     def make_service(self, **overrides):
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)

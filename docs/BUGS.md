@@ -201,12 +201,26 @@
 - Codex CLI/SDK 固定在当前仓库只读运行；Claude Code 首轮禁用工具，只做 prompt-only 回答
 - 自动化、静态导入、前端构建、真实 HTTP 启动/取消、Provider readiness，以及 Claude CLI、Codex CLI、Codex SDK 三个本地 Provider 的最小完成输出均已通过
 - 当前没有多轮会话、写模式、任意工作目录或 Agent history
+- 2026-06-14 新一轮真实页面回归中，Claude CLI 仍可完成并返回 `READY`；Codex CLI 与 Codex SDK 当前因账户 usage limit 无法完成，说明 readiness 的 `ready` 只代表安装就绪，不代表当前配额可执行
+- 本轮 Windows Tauri dev 进程已真实启动，但桌面自动化连接因外部 Computer Use 运行时内部导出错误不可用，Tauri 窗口交互仍未验收
 
 下一步：
 - 在 Windows Tauri 主窗口分别完成 Claude CLI、Codex CLI、Codex SDK 的真实页面任务；三个 Provider 的后端 API 最小输出均已验证
+- Codex 账户配额恢复后重新完成 CLI 与 SDK 页面输出验收
 - 验证长任务取消后本次 CLI/SDK 运行时退出，且不影响已有 Codex 会话
 - 真实验证输出不进入转写 history、不触发外部文本输入
 - 多轮或写模式必须单独设计授权、工作区和审计契约后再实施
+
+### 6.3 Agent 页面轮询与长错误诊断
+
+状态：
+- 已收口
+
+当前事实：
+- 2026-06-14 发现 Agent 页面在单次任务轮询失败后会清空活动任务 ID，但仍保留 `running` 页面状态，导致后续轮询、取消和清空锁死
+- 同一轮审计发现取消成功后，旧的晚到轮询响应可能把 `cancelled` 覆盖回 `running`
+- 已改为保留活动任务 ID继续轮询，并在应用轮询响应前核对当前任务身份；确定性 `503 -> completed` 页面 smoke 与真实取消 smoke 均通过
+- 真实 Codex CLI usage-limit 回归发现共享短错误只保留前 400 字符，前置 warning 会掩盖末尾根因；已改为长错误同时保留开头和末尾，并新增单元测试
 
 ## 5. 记录规则
 

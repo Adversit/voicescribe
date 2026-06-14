@@ -61,6 +61,30 @@
 - 活跃 pipeline 期间快捷切换必须禁用。
 - 本轮不修改 Rust hotkey、tray、模型路径或下载行为。
 
+## 2026-06-14 Agent 任务轮询恢复
+
+本轮必须遵循 `docs/AGENT_ENTRY_DESIGN.md`：
+
+- Single source of truth：后端 `AgentTaskService` 继续拥有 Agent 任务终态，前端不得因读取失败伪造 `failed`。
+- 输入/输出契约：`GET /agent/tasks/{id}` 单次失败时保留活动任务 ID、展示临时错误并继续轮询；下一次成功读取时清除临时错误并应用后端任务快照；取消或终态后晚到的旧轮询响应必须丢弃。
+- Affected File List：`docs/AGENT_ENTRY_DESIGN.md`、`docs/SPEC.md`、`docs/TEST.md`、`docs/BUGS.md`、`tauri-app/src/pages/AgentPage.tsx`。
+- Affected Runtime Paths：`AgentPage.tsx polling effect -> backend.ts -> GET /agent/tasks/{id} -> server.py -> AgentTaskService`；取消链仍为 `AgentPage.tsx -> DELETE /agent/tasks/{id}`。
+- Affected Persisted Objects：settings、model registry、history、transcription result、token storage 和 logs 均不修改。
+- Old-Logic Removal List：删除“单次轮询读取失败即清空 `activeTaskId`”的旧恢复逻辑。
+- Acceptance Criteria：瞬时读取失败后轮询继续、取消入口保持可用、后续成功读取清除错误、取消终态不被晚到轮询覆盖；前端生产构建和后端回归通过。
+- Failure branches：持续断连时保留真实任务身份并持续显示错误；取消或终态后的旧轮询结果被忽略；页面卸载仍停止轮询且不自动取消任务。
+
+## 2026-06-14 Provider 长错误根因保留
+
+- Single source of truth：后端共享 `_short_error()` 负责文本处理与 Agent 任务对外短错误。
+- 输入/输出契约：短错误继续折叠空白并限制在 400 字符；超过限制时同时保留开头上下文和末尾根因。
+- Affected File List：`docs/AGENT_ENTRY_DESIGN.md`、`docs/SPEC.md`、`docs/TEST.md`、`docs/BUGS.md`、`backend/services/text_processing_service.py`、`backend/tests/test_text_processing_service.py`。
+- Affected Runtime Paths：`AgentService/TextProcessingService provider error -> _short_error() -> task snapshot -> AgentPage/recordingFlow error display`。
+- Affected Persisted Objects：settings、model registry、history、transcription result、token storage 和普通日志均不修改。
+- Old-Logic Removal List：删除“长错误只保留前 400 字符”的旧截断行为。
+- Acceptance Criteria：包含长前置 warning 与末尾真实错误的异常，短错误长度不超过 400 且仍包含真实错误；后端回归通过。
+- Failure branches：短错误保持原样；空错误回退异常类名；不得把完整 prompt、Agent 输出或凭据加入错误。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：
