@@ -51,6 +51,16 @@
 - result/history 只保存 Style ID 与名称，不保存 instructions。
 - 不修改 Provider 配置、模型 registry、模型路径或下载行为。
 
+## 2026-06-14 Style Profile 快捷切换
+
+本轮必须遵循 `docs/STYLE_PROFILE_QUICK_SWITCH_DESIGN.md`：
+
+- `appStore.selectStyleProfile()` 是所有 Style 选择入口，负责同步 base Profile 与持久化。
+- `appStore.cycleStyleProfile()` 负责固定循环顺序。
+- `Layout.tsx` 只展示并触发 action，不自行修改 settings。
+- 活跃 pipeline 期间快捷切换必须禁用。
+- 本轮不修改 Rust hotkey、tray、模型路径或下载行为。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：

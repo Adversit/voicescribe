@@ -517,6 +517,13 @@ flowchart TD
 - 历史记录只保存所用 Style 的 ID 与名称，不保存完整自定义 instructions。
 - 详细契约见 `docs/STYLE_PROFILES_DESIGN.md`。
 
+### 10.0.5 Style Profile 快捷切换增量
+
+- 主窗口常驻区域必须显示当前 Style，并可一键循环切换本地 Style 与无自定义 Style。
+- 切换必须通过 settings 单一事实源持久化，选中 Style 时同步其基础 Profile。
+- 录音或处理任务活跃期间不得切换，避免当前任务的 Style 发生竞态。
+- 首轮不新增第二套全局热键或动态托盘菜单，详细契约见 `docs/STYLE_PROFILE_QUICK_SWITCH_DESIGN.md`。
+
 ### 10.0 Typeless 上下文感知增量
 
 - 用户可显式开启或关闭应用上下文。

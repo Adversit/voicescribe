@@ -173,7 +173,7 @@
 
 ## 6. Phase D Style 与 Agent
 
-### 6.1 Style Profile 仍缺全局快捷切换与真机验收
+### 6.1 Style Profile 仍缺全局热键/托盘切换与真机验收
 
 状态：
 - 未收口
@@ -181,11 +181,13 @@
 当前事实：
 - 首轮已支持本地 Style 创建、编辑、选择、删除，并把当前 Style 应用于独立文本处理任务
 - Style instructions 只保存在本地 settings，history/result 只保存 ID 与名称
-- 当前切换入口仍在通用设置页，没有 Overlay、托盘或独立热键快捷切换
+- 2026-06-14 已增加主窗口常驻侧栏一键循环切换，并让设置页与侧栏共用 store action
+- 当前仍没有 Overlay、托盘动态菜单或独立全局热键快捷切换
+- 活跃任务期间侧栏、设置页和 store action 均锁定 Style 变更，避免当前任务快照漂移
 - 尚未用真实 Windows 桌面录音和真实 Provider 验证风格效果与重启持久化
 
 下一步：
-- 设计不与录音热键冲突的 Profile 快捷切换入口
+- 在完成主窗口真机验收后，再设计不与录音热键冲突的全局 Profile 快捷切换入口
 - 真机验证 Style 重启恢复、真实润色效果和 history 展示
 - 在开始 Agent 模式前继续保持“Style 只影响文本，不执行任务”的边界
 

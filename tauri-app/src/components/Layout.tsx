@@ -1,6 +1,6 @@
 ﻿import type { ReactNode } from "react";
 import clsx from "clsx";
-import { Cpu, History, Keyboard, PersonStanding, Radio, Settings2, TextCursorInput } from "lucide-react";
+import { Cpu, History, Keyboard, PersonStanding, Radio, RefreshCw, Settings2, TextCursorInput } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 
 const items = [
@@ -16,7 +16,9 @@ const items = [
 export function Layout({ children }: { children: ReactNode }) {
   const page = useAppStore((state) => state.currentPage);
   const pipeline = useAppStore((state) => state.pipeline);
+  const settings = useAppStore((state) => state.settings);
   const setPage = useAppStore((state) => state.setPage);
+  const cycleStyleProfile = useAppStore((state) => state.cycleStyleProfile);
   const pipelineLabels = {
     idle: "待命",
     recording: "录音中",
@@ -28,6 +30,10 @@ export function Layout({ children }: { children: ReactNode }) {
     error: "处理失败",
   };
   const isActive = ["recording", "transcribing", "polishing", "outputting"].includes(pipeline.stage);
+  const activeStyle = settings.styleProfiles.find((profile) => profile.id === settings.activeStyleProfileId) ?? null;
+  const styleLabel = settings.styleProfiles.length === 0
+    ? "未创建 Style"
+    : activeStyle?.name ?? "内置 Profile";
 
   return (
     <div className="window-root">
@@ -60,6 +66,19 @@ export function Layout({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="mt-auto px-3 pb-4">
+            <button
+              type="button"
+              aria-label={`切换 Style，当前：${styleLabel}`}
+              disabled={isActive || settings.styleProfiles.length === 0}
+              onClick={cycleStyleProfile}
+              className="sidebar-style-switch"
+            >
+              <span className="sidebar-style-switch-copy">
+                <span className="sidebar-style-switch-label">当前 Style</span>
+                <span className="sidebar-style-switch-value">{styleLabel}</span>
+              </span>
+              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+            </button>
             <div
               aria-label={`处理状态：${pipelineLabels[pipeline.stage]}`}
               className="flex items-center gap-2 rounded-xl border border-[#ccb89d]/80 bg-[#fffaf3]/80 px-3 py-2.5 text-sm text-ink/75"

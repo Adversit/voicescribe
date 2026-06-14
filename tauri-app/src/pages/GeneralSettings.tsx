@@ -29,13 +29,16 @@ const readinessLabels = {
 
 export function GeneralSettings() {
   const settings = useAppStore((state) => state.settings);
+  const pipeline = useAppStore((state) => state.pipeline);
   const updateSettings = useAppStore((state) => state.updateSettings);
+  const selectStyleProfile = useAppStore((state) => state.selectStyleProfile);
   const setLaunchAtLogin = useAppStore((state) => state.setLaunchAtLogin);
   const backendConnected = useAppStore((state) => state.backendConnected);
   const setToast = useAppStore((state) => state.setToast);
   const [providerReadiness, setProviderReadiness] = useState<ProviderReadiness[]>([]);
   const [probingProviders, setProbingProviders] = useState(false);
   const activeStyle = settings.styleProfiles.find((profile) => profile.id === settings.activeStyleProfileId) ?? null;
+  const styleManagementLocked = ["recording", "transcribing", "polishing", "outputting"].includes(pipeline.stage);
 
   useEffect(() => {
     setProviderReadiness([]);
@@ -149,6 +152,7 @@ export function GeneralSettings() {
           <SettingsField label="输出 Profile">
             <select
               value={settings.textProcessingProfile}
+              disabled={styleManagementLocked}
               onChange={(event) => {
                 const nextProfile = event.target.value as typeof settings.textProcessingProfile;
                 updateSettings({
@@ -174,13 +178,9 @@ export function GeneralSettings() {
           <SettingsField label="本地 Style" hint="自定义规则仅保存在本机设置；history 只记录名称。">
             <select
               value={settings.activeStyleProfileId ?? ""}
-              disabled={settings.textProcessingProfile === "raw"}
+              disabled={settings.textProcessingProfile === "raw" || styleManagementLocked}
               onChange={(event) => {
-                const selected = settings.styleProfiles.find((profile) => profile.id === event.target.value) ?? null;
-                updateSettings({
-                  activeStyleProfileId: selected?.id ?? null,
-                  ...(selected ? { textProcessingProfile: selected.base_profile } : {}),
-                });
+                selectStyleProfile(event.target.value || null);
               }}
               className={selectClassName}
             >
@@ -250,9 +250,9 @@ export function GeneralSettings() {
             </div>
             <div className="flex gap-2">
               {activeStyle ? (
-                <button type="button" onClick={deleteActiveStyle} className={secondaryButtonClassName}>删除当前</button>
+                <button type="button" disabled={styleManagementLocked} onClick={deleteActiveStyle} className={secondaryButtonClassName}>删除当前</button>
               ) : null}
-              <button type="button" onClick={addStyleProfile} className={secondaryButtonClassName}>新建 Style</button>
+              <button type="button" disabled={styleManagementLocked} onClick={addStyleProfile} className={secondaryButtonClassName}>新建 Style</button>
             </div>
           </div>
           {activeStyle ? (
@@ -260,6 +260,7 @@ export function GeneralSettings() {
               <SettingsField label="Style 名称">
                 <input
                   value={activeStyle.name}
+                  disabled={styleManagementLocked}
                   onChange={(event) => updateActiveStyle({ name: event.target.value })}
                   className={inputClassName}
                 />
@@ -267,6 +268,7 @@ export function GeneralSettings() {
               <SettingsField label="基础 Profile">
                 <select
                   value={activeStyle.base_profile}
+                  disabled={styleManagementLocked}
                   onChange={(event) => updateActiveStyle({ base_profile: event.target.value as StyleProfile["base_profile"] })}
                   className={selectClassName}
                 >
@@ -282,6 +284,7 @@ export function GeneralSettings() {
                     value={activeStyle.instructions}
                     maxLength={2000}
                     rows={4}
+                    disabled={styleManagementLocked}
                     onChange={(event) => updateActiveStyle({ instructions: event.target.value })}
                     className={inputClassName}
                   />

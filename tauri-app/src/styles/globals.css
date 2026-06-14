@@ -128,6 +128,46 @@ button:disabled {
   background: #fffaf3;
   color: var(--accent);
 }
+.sidebar-style-switch {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(204, 184, 157, 0.8);
+  border-radius: 12px;
+  background: rgba(255, 250, 243, 0.72);
+  padding: 9px 10px;
+  color: rgba(31, 27, 24, 0.72);
+  text-align: left;
+}
+.sidebar-style-switch:hover:not(:disabled) {
+  border-color: #c89a83;
+  background: rgba(255, 250, 243, 0.98);
+  color: var(--accent);
+}
+.sidebar-style-switch-copy {
+  min-width: 0;
+}
+.sidebar-style-switch-label,
+.sidebar-style-switch-value {
+  display: block;
+}
+.sidebar-style-switch-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.sidebar-style-switch-value {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
 .main-panel {
   min-width: 0;
   flex: 1;

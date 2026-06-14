@@ -519,3 +519,14 @@
 | mock Style 任务 API HTTP smoke | 已通过 | 真实 HTTP `POST /text/tasks` 后轮询到 fallback；结果返回 `style_profile_id=concise`、`style_profile_name=Concise`，序列化响应不包含完整 instructions |
 | 模型与缓存路径 | 已通过 | 本轮没有下载模型或修改模型路径，仓库 `<repo>/models/` 约束保持不变 |
 | Windows 设置持久化与真实 Provider 风格效果 | 待人工验收 | 需要在桌面应用新建 Style、重启确认恢复，并使用真实 Claude/Codex 完成一次润色和 history 展示验收 |
+
+## 14. 2026-06-14 Style Profile 主窗口快捷切换测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 前端生产构建 | 已通过 | `npm run build` 通过；主窗口侧栏快捷按钮、store 选择/循环 action、设置页共用选择 action 和活跃任务锁定均通过 TypeScript 检查 |
+| 后端回归 | 已通过 | `python -m unittest discover -s tests -v`：35 项通过；本轮未修改后端请求、结果或模型路径契约 |
+| 快捷切换循环契约 | 已通过 | 代码审查确认固定顺序为“无自定义 Style -> 本地 Style 列表 -> 无自定义 Style”；选中 Style 同步其 base Profile，切回内置模式保留当前 Profile |
+| 活跃任务 Style 稳定性 | 已通过 | `Layout` 与 General Settings 在 `recording/transcribing/polishing/outputting` 禁用 Style 操作；`appStore.selectStyleProfile()` 同时拒绝非 UI 绕过调用 |
+| 全局热键 / 托盘快捷切换 | 未测试 | 本轮明确未新增第二套全局键盘 hook 或动态 Rust tray 菜单 |
+| Windows 主窗口真实点击与重启持久化 | 待人工验收 | 浏览器插件无法访问宿主机 Vite 端口；需在 Tauri 桌面主窗口确认按钮显示、循环顺序、任务期间禁用和重启恢复 |

@@ -572,6 +572,8 @@ interface AppStore {
   setHotkeyCaptureActive: (value: boolean) => void;
   hydrateSettings: () => Promise<void>;
   updateSettings: (partial: Partial<AppSettings>) => void;
+  selectStyleProfile: (profileId: string | null) => void;
+  cycleStyleProfile: () => void;
   syncAutostart: () => Promise<void>;
   setLaunchAtLogin: (enabled: boolean) => Promise<void>;
   setToast: (message: string | null) => void;
@@ -649,6 +651,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
       persistBrowserSettings(next);
       return { settings: next };
     }),
+  selectStyleProfile: (profileId) => {
+    const state = get();
+    if (ACTIVE_PIPELINE_STAGES.has(state.pipeline.stage)) {
+      set({ toast: "当前任务处理中，完成后再切换 Style。" });
+      return;
+    }
+    const settings = state.settings;
+    const selected = settings.styleProfiles.find((profile) => profile.id === profileId) ?? null;
+    get().updateSettings({
+      activeStyleProfileId: selected?.id ?? null,
+      ...(selected ? { textProcessingProfile: selected.base_profile } : {}),
+    });
+  },
+  cycleStyleProfile: () => {
+    const settings = get().settings;
+    if (settings.styleProfiles.length === 0) {
+      return;
+    }
+    const currentIndex = settings.styleProfiles.findIndex(
+      (profile) => profile.id === settings.activeStyleProfileId,
+    );
+    const nextProfile = currentIndex < 0
+      ? settings.styleProfiles[0]
+      : settings.styleProfiles[currentIndex + 1] ?? null;
+    get().selectStyleProfile(nextProfile?.id ?? null);
+  },
   syncAutostart: async () => {
     const enabled = await getAutostartEnabled();
     const next = { ...get().settings, launchAtLogin: enabled };
