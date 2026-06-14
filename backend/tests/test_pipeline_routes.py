@@ -44,6 +44,7 @@ class PipelineRouteTests(unittest.TestCase):
                         provider="claude_cli",
                         hotwords="VoiceScribe, Typeless",
                         target_context={"app_kind": "chat"},
+                        style_profile={"id": "short", "name": "Short", "instructions": "Keep it short."},
                     )
                 )
             )
@@ -53,6 +54,7 @@ class PipelineRouteTests(unittest.TestCase):
         self.assertEqual(request.profile, "light")
         self.assertEqual(request.hotwords, ("VoiceScribe", "Typeless"))
         self.assertEqual(request.target_context["app_kind"], "chat")
+        self.assertEqual(request.style_profile["id"], "short")
 
     def test_provider_probe_endpoint_returns_all_results(self):
         providers = [

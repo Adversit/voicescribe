@@ -723,6 +723,7 @@ class TextProcessPayload(BaseModel):
     target_language: str = ""
     hotwords: str = ""
     target_context: Optional[Dict[str, Any]] = None
+    style_profile: Optional[Dict[str, Any]] = None
 
 
 class TextProviderProbePayload(BaseModel):
@@ -1359,6 +1360,7 @@ def _text_processing_request_from_payload(payload: TextProcessPayload) -> TextPr
         target_language=payload.target_language,
         hotwords=tuple(word.strip() for word in payload.hotwords.split(",") if word.strip()),
         target_context=payload.target_context,
+        style_profile=payload.style_profile,
     )
 
 

@@ -73,6 +73,12 @@ function sleep(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function getActiveStyleProfile(settings: ReturnType<typeof useAppStore.getState>["settings"]) {
+  return settings.styleProfiles.find(
+    (profile) => profile.id === settings.activeStyleProfileId && profile.instructions.trim(),
+  ) ?? null;
+}
+
 async function runTextProcessingTask(payload: TextProcessRequest): Promise<TextProcessingResult> {
   const task = await backendApi.startTextProcessingTask(payload);
   activeTextProcessingTaskId = task.task_id;
@@ -134,6 +140,7 @@ function createTransportFallback(
   error: unknown,
 ): TextProcessingResult {
   const message = error instanceof Error ? error.message : String(error);
+  const styleProfile = getActiveStyleProfile(settings);
   return {
     raw_text: rawText,
     text: rawText,
@@ -144,6 +151,8 @@ function createTransportFallback(
     duration_ms: 0,
     warning: `Text processing request failed; original transcription was kept: ${message}`,
     target_context: targetContext,
+    style_profile_id: styleProfile?.id ?? null,
+    style_profile_name: styleProfile?.name ?? null,
   };
 }
 
@@ -261,6 +270,8 @@ async function persistTranscriptionHistory(result: TranscribeResult, audioPath: 
         duration_ms: 0,
         warning: null,
         target_context: null,
+        style_profile_id: null,
+        style_profile_name: null,
       },
       targetContext: null,
       retainAudio: settings.retainAudio,
@@ -410,6 +421,7 @@ export async function finishRecordingSession() {
         target_language: settings.textProcessingTargetLanguage,
         hotwords: settings.hotwords,
         target_context: targetContext,
+        style_profile: getActiveStyleProfile(settings),
       }).catch((error) => {
         if (error instanceof TextProcessingCancelledError) {
           throw error;

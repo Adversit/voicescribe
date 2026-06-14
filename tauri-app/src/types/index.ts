@@ -36,6 +36,13 @@ export interface TargetContext {
   captured_at: string;
 }
 
+export interface StyleProfile {
+  id: string;
+  name: string;
+  base_profile: Exclude<TextProcessingProfile, "raw">;
+  instructions: string;
+}
+
 export interface EngineSelection {
   asrModel: string;
   diarizationModel: string;
@@ -95,6 +102,8 @@ export interface TextProcessingResult {
   duration_ms: number;
   warning: string | null;
   target_context: TargetContext | null;
+  style_profile_id: string | null;
+  style_profile_name: string | null;
 }
 
 export interface TextProcessRequest {
@@ -106,6 +115,7 @@ export interface TextProcessRequest {
   target_language: string;
   hotwords: string;
   target_context: TargetContext | null;
+  style_profile: StyleProfile | null;
 }
 
 export interface ProviderReadiness {
@@ -231,6 +241,8 @@ export interface AppSettings {
   textProcessingModel: string;
   textProcessingBaseUrl: string;
   textProcessingTargetLanguage: string;
+  styleProfiles: StyleProfile[];
+  activeStyleProfileId: string | null;
   useAppContext: boolean;
   enableStreaming: boolean;
   enableAISummary: boolean;

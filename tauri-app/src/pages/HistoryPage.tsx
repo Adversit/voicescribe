@@ -110,6 +110,9 @@ export function HistoryPage() {
                   <span className="app-chip">{selectedRecord.asr_model ?? selectedRecord.model}</span>
                   <span className="app-chip">{selectedRecord.text_processing.profile}</span>
                   <span className="app-chip">{selectedRecord.text_processing.status}</span>
+                  {selectedRecord.text_processing.style_profile_name ? (
+                    <span className="app-chip">Style：{selectedRecord.text_processing.style_profile_name}</span>
+                  ) : null}
                   {selectedRecord.target_context && selectedRecord.target_context.app_kind !== "unknown" ? (
                     <span className="app-chip">目标：{selectedRecord.target_context.app_kind}</span>
                   ) : null}

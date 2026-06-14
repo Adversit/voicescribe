@@ -48,6 +48,7 @@ class TextProcessingRequest:
     target_language: str = ""
     hotwords: tuple[str, ...] = ()
     target_context: Optional[dict] = None
+    style_profile: Optional[dict] = None
     timeout_seconds: int = 30
 
 
@@ -62,6 +63,8 @@ class TextProcessingResult:
     duration_ms: int
     warning: Optional[str] = None
     target_context: Optional[dict] = None
+    style_profile_id: Optional[str] = None
+    style_profile_name: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -96,6 +99,17 @@ def normalize_target_context(value: Optional[dict]) -> Optional[dict]:
         "executable_name": executable_name,
         "captured_at": captured_at,
     }
+
+
+def normalize_style_profile(value: Optional[dict]) -> Optional[dict]:
+    if not isinstance(value, dict):
+        return None
+    profile_id = " ".join(str(value.get("id") or "").split())[:120]
+    name = " ".join(str(value.get("name") or "").split())[:120]
+    instructions = str(value.get("instructions") or "").replace("<", "").replace(">", "").strip()[:2000]
+    if not profile_id or not name or not instructions:
+        return None
+    return {"id": profile_id, "name": name, "instructions": instructions}
 
 
 def _resolve_command(name: str) -> list[str]:
@@ -535,6 +549,7 @@ class TextProcessingService:
                 target_context=target_context,
             )
 
+        style_profile = normalize_style_profile(request.style_profile)
         try:
             prompt = build_processing_prompt(
                 raw_text,
@@ -542,6 +557,7 @@ class TextProcessingService:
                 request.hotwords,
                 request.target_language,
                 target_context.get("app_kind", "") if target_context else "",
+                style_profile["instructions"] if style_profile else "",
             )
             output = self._dispatch(request, prompt, cancel_event).strip()
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -559,6 +575,8 @@ class TextProcessingService:
                 status="processed",
                 duration_ms=duration_ms,
                 target_context=target_context,
+                style_profile_id=style_profile["id"] if style_profile else None,
+                style_profile_name=style_profile["name"] if style_profile else None,
             )
         except TextProcessingCancelled:
             raise
@@ -579,6 +597,8 @@ class TextProcessingService:
                 duration_ms=duration_ms,
                 warning=warning,
                 target_context=target_context,
+                style_profile_id=style_profile["id"] if style_profile else None,
+                style_profile_name=style_profile["name"] if style_profile else None,
             )
 
     def summarize(

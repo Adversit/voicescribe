@@ -51,6 +51,8 @@ class HistoryService:
         if isinstance(normalized.get("text_processing"), dict):
             normalized["text_processing"] = dict(normalized["text_processing"])
             normalized["text_processing"]["target_context"] = normalized.get("target_context")
+            normalized["text_processing"].setdefault("style_profile_id", None)
+            normalized["text_processing"].setdefault("style_profile_name", None)
         return normalized
 
     @staticmethod
@@ -86,6 +88,8 @@ class HistoryService:
     def export_text(record: dict) -> str:
         target_context = record.get("target_context")
         app_kind = target_context.get("app_kind", "") if isinstance(target_context, dict) else ""
+        processing = record.get("text_processing")
+        style_name = processing.get("style_profile_name", "") if isinstance(processing, dict) else ""
         lines = [
             f"时间: {record.get('created_at', '')}",
             f"模式: {record.get('mode', '')}",
@@ -95,6 +99,7 @@ class HistoryService:
             f"映射模型: {record.get('speaker_mapping_model', '')}",
             f"时长: {record.get('duration', 0)}",
             f"目标应用类别: {app_kind}",
+            f"Style: {style_name}",
             "",
             "原始转写:",
             record.get("raw_text", record.get("text", "")),

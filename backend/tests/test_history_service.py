@@ -20,6 +20,8 @@ class HistoryServiceTests(unittest.TestCase):
         self.assertEqual(records[0]["raw_text"], "legacy transcript")
         self.assertEqual(records[0]["text_processing"]["status"], "skipped")
         self.assertEqual(records[0]["text_processing"]["profile"], "raw")
+        self.assertIsNone(records[0]["text_processing"]["style_profile_id"])
+        self.assertIsNone(records[0]["text_processing"]["style_profile_name"])
         self.assertIsNone(records[0]["target_context"])
 
     def test_context_is_derived_from_processing_result_for_older_phase_b_record(self):

@@ -41,6 +41,16 @@
 - 同步 `/text/process` 保留兼容，但桌面 polishing 主链迁移到 task API。
 - 不修改模型目录、模型 registry 或下载行为。
 
+## 2026-06-14 本地 Style Profiles
+
+本轮必须遵循 `docs/STYLE_PROFILES_DESIGN.md`：
+
+- `AppSettings.styleProfiles` 和 `activeStyleProfileId` 是本地 Style 定义与选择的 canonical owner。
+- 后端只验证和应用当前请求携带的 Style，不单独持久化定义。
+- 自定义 instructions 只能影响写作风格，不能覆盖安全、忠实和 no-tool 规则。
+- result/history 只保存 Style ID 与名称，不保存 instructions。
+- 不修改 Provider 配置、模型 registry、模型路径或下载行为。
+
 更新时间：2026-04-02  
 文档定位：实施交接文档，描述当前工作树中的真实技术实现、模块边界、接口契约、运行链与失败分支。  
 配套文档：

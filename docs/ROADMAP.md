@@ -58,12 +58,14 @@ VoiceScribe 的长期目标是成为 Windows 上本地优先的智能语音输�
 
 ### Phase D：风格与 Agent
 
-状态：待开始
+状态：首轮 Style Profiles 已实现
 
-- 本地 Style Profiles 管理
-- Profile 快捷切换
+- [x] 本地 Style Profiles 管理
+- [ ] Profile 快捷切换
 - 独立 Agent 执行入口
 - Claude Code / Codex 多轮任务与权限策略
+
+首轮规格：`docs/STYLE_PROFILES_DESIGN.md`
 
 ### Phase E：产品收口
 

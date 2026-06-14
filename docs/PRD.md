@@ -510,6 +510,13 @@ flowchart TD
 - OpenAI-compatible 首轮至少必须立即取消 VoiceScribe 任务并丢弃晚到结果；本地服务是否立即停算由其取消能力决定。
 - 详细契约见 `docs/TEXT_PROCESSING_CANCELLATION_DESIGN.md`。
 
+### 10.0.4 本地 Style Profile 增量
+
+- 用户可创建、编辑、选择和删除保存在本地设置中的写作风格。
+- Style 只影响语气、格式、简洁度和措辞，不得覆盖文本润色的安全与忠实规则。
+- 历史记录只保存所用 Style 的 ID 与名称，不保存完整自定义 instructions。
+- 详细契约见 `docs/STYLE_PROFILES_DESIGN.md`。
+
 ### 10.0 Typeless 上下文感知增量
 
 - 用户可显式开启或关闭应用上下文。

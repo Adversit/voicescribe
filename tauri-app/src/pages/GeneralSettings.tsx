@@ -12,7 +12,7 @@ import {
   selectClassName,
 } from "../components/settings-ui";
 import { useAppStore } from "../stores/appStore";
-import type { ProviderReadiness, TextProcessingProvider } from "../types";
+import type { ProviderReadiness, StyleProfile, TextProcessingProvider } from "../types";
 
 const providerLabels: Record<TextProcessingProvider, string> = {
   claude_cli: "Claude Code CLI",
@@ -35,6 +35,7 @@ export function GeneralSettings() {
   const setToast = useAppStore((state) => state.setToast);
   const [providerReadiness, setProviderReadiness] = useState<ProviderReadiness[]>([]);
   const [probingProviders, setProbingProviders] = useState(false);
+  const activeStyle = settings.styleProfiles.find((profile) => profile.id === settings.activeStyleProfileId) ?? null;
 
   useEffect(() => {
     setProviderReadiness([]);
@@ -54,6 +55,41 @@ export function GeneralSettings() {
     } finally {
       setProbingProviders(false);
     }
+  };
+
+  const addStyleProfile = () => {
+    const profile: StyleProfile = {
+      id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`,
+      name: `自定义风格 ${settings.styleProfiles.length + 1}`,
+      base_profile: settings.textProcessingProfile === "raw" ? "light" : settings.textProcessingProfile,
+      instructions: "保持自然、简洁，并保留我的表达方式。",
+    };
+    updateSettings({
+      styleProfiles: [...settings.styleProfiles, profile],
+      activeStyleProfileId: profile.id,
+      textProcessingProfile: profile.base_profile,
+    });
+  };
+
+  const updateActiveStyle = (partial: Partial<StyleProfile>) => {
+    if (!activeStyle) {
+      return;
+    }
+    const nextStyle = { ...activeStyle, ...partial };
+    updateSettings({
+      styleProfiles: settings.styleProfiles.map((profile) => (profile.id === activeStyle.id ? nextStyle : profile)),
+      textProcessingProfile: nextStyle.base_profile,
+    });
+  };
+
+  const deleteActiveStyle = () => {
+    if (!activeStyle) {
+      return;
+    }
+    updateSettings({
+      styleProfiles: settings.styleProfiles.filter((profile) => profile.id !== activeStyle.id),
+      activeStyleProfileId: null,
+    });
   };
 
   return (
@@ -113,11 +149,19 @@ export function GeneralSettings() {
           <SettingsField label="输出 Profile">
             <select
               value={settings.textProcessingProfile}
-              onChange={(event) =>
+              onChange={(event) => {
+                const nextProfile = event.target.value as typeof settings.textProcessingProfile;
                 updateSettings({
-                  textProcessingProfile: event.target.value as typeof settings.textProcessingProfile,
-                })
-              }
+                  textProcessingProfile: nextProfile,
+                  ...(activeStyle && nextProfile !== "raw"
+                    ? {
+                        styleProfiles: settings.styleProfiles.map((profile) =>
+                          profile.id === activeStyle.id ? { ...profile, base_profile: nextProfile } : profile,
+                        ),
+                      }
+                    : {}),
+                });
+              }}
               className={selectClassName}
             >
               <option value="raw">原始转写</option>
@@ -125,6 +169,25 @@ export function GeneralSettings() {
               <option value="structured">结构化提示词</option>
               <option value="formal">正式文本</option>
               <option value="translate">清理并翻译</option>
+            </select>
+          </SettingsField>
+          <SettingsField label="本地 Style" hint="自定义规则仅保存在本机设置；history 只记录名称。">
+            <select
+              value={settings.activeStyleProfileId ?? ""}
+              disabled={settings.textProcessingProfile === "raw"}
+              onChange={(event) => {
+                const selected = settings.styleProfiles.find((profile) => profile.id === event.target.value) ?? null;
+                updateSettings({
+                  activeStyleProfileId: selected?.id ?? null,
+                  ...(selected ? { textProcessingProfile: selected.base_profile } : {}),
+                });
+              }}
+              className={selectClassName}
+            >
+              <option value="">不使用自定义 Style</option>
+              {settings.styleProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.name}</option>
+              ))}
             </select>
           </SettingsField>
           <SettingsField label="处理 Provider">
@@ -178,6 +241,56 @@ export function GeneralSettings() {
               />
             </SettingsField>
           ) : null}
+        </div>
+        <div className="rounded-xl border border-[#e4dbc9] bg-white/55 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-ink">本地 Style Profiles</p>
+              <p className="mt-1 text-xs leading-5 text-ink/50">用于显式控制语气和格式，不会授予 Provider 工具权限。</p>
+            </div>
+            <div className="flex gap-2">
+              {activeStyle ? (
+                <button type="button" onClick={deleteActiveStyle} className={secondaryButtonClassName}>删除当前</button>
+              ) : null}
+              <button type="button" onClick={addStyleProfile} className={secondaryButtonClassName}>新建 Style</button>
+            </div>
+          </div>
+          {activeStyle ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <SettingsField label="Style 名称">
+                <input
+                  value={activeStyle.name}
+                  onChange={(event) => updateActiveStyle({ name: event.target.value })}
+                  className={inputClassName}
+                />
+              </SettingsField>
+              <SettingsField label="基础 Profile">
+                <select
+                  value={activeStyle.base_profile}
+                  onChange={(event) => updateActiveStyle({ base_profile: event.target.value as StyleProfile["base_profile"] })}
+                  className={selectClassName}
+                >
+                  <option value="light">轻度润色</option>
+                  <option value="structured">结构化提示词</option>
+                  <option value="formal">正式文本</option>
+                  <option value="translate">清理并翻译</option>
+                </select>
+              </SettingsField>
+              <div className="md:col-span-2">
+                <SettingsField label="风格说明" hint="最多 2,000 字符；只能影响语气、格式、简洁度和措辞。">
+                  <textarea
+                    value={activeStyle.instructions}
+                    maxLength={2000}
+                    rows={4}
+                    onChange={(event) => updateActiveStyle({ instructions: event.target.value })}
+                    className={inputClassName}
+                  />
+                </SettingsField>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs leading-5 text-ink/50">尚未选择自定义 Style；当前继续使用内置 Profile。</p>
+          )}
         </div>
         {providerReadiness.length > 0 ? (
           <div className="grid gap-2 md:grid-cols-2">

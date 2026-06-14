@@ -20,6 +20,7 @@ import type {
   Transcription,
   TranscriptionSegment,
   TextProcessingProfile,
+  StyleProfile,
 } from "../types";
 
 export type PageKey =
@@ -94,6 +95,8 @@ const defaultSettings: AppSettings = {
   textProcessingModel: "",
   textProcessingBaseUrl: "http://127.0.0.1:11434/v1",
   textProcessingTargetLanguage: "en",
+  styleProfiles: [],
+  activeStyleProfileId: null,
   useAppContext: false,
   enableStreaming: false,
   enableAISummary: false,
@@ -314,6 +317,10 @@ function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppS
   };
   const migratedProfile: TextProcessingProfile = partial.textProcessingProfile
     ?? (partial.enableAIRefine ? "light" : defaultSettings.textProcessingProfile);
+  const styleProfiles = normalizeStyleProfiles(partial.styleProfiles);
+  const activeStyleProfileId = styleProfiles.some((profile) => profile.id === partial.activeStyleProfileId)
+    ? partial.activeStyleProfileId ?? null
+    : null;
   const next: AppSettings = {
     selectedEngine: partial.selectedEngine ?? defaultSettings.selectedEngine,
     engineSelections: mergeEngineSelections(partial.engineSelections),
@@ -327,6 +334,8 @@ function normalizeSettings(value: Partial<AppSettings> | null | undefined): AppS
     textProcessingBaseUrl: partial.textProcessingBaseUrl ?? defaultSettings.textProcessingBaseUrl,
     textProcessingTargetLanguage:
       partial.textProcessingTargetLanguage ?? defaultSettings.textProcessingTargetLanguage,
+    styleProfiles,
+    activeStyleProfileId,
     useAppContext: partial.useAppContext ?? defaultSettings.useAppContext,
     enableStreaming: partial.enableStreaming ?? defaultSettings.enableStreaming,
     enableAISummary: partial.enableAISummary ?? defaultSettings.enableAISummary,
@@ -476,6 +485,32 @@ function createIdlePipelineState(): PipelineState {
       total_ms: 0,
     },
   };
+}
+
+function normalizeStyleProfiles(value: unknown): StyleProfile[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const candidate = item as Partial<StyleProfile>;
+    const id = String(candidate.id ?? "").trim().slice(0, 120);
+    const name = String(candidate.name ?? "").trim().slice(0, 120) || "未命名 Style";
+    const instructions = String(candidate.instructions ?? "").trim().slice(0, 2000);
+    const baseProfile = candidate.base_profile;
+    if (
+      !id
+      || seen.has(id)
+      || !["light", "structured", "formal", "translate"].includes(baseProfile ?? "")
+    ) {
+      return [];
+    }
+    seen.add(id);
+    return [{ id, name, instructions, base_profile: baseProfile as StyleProfile["base_profile"] }];
+  });
 }
 
 function transitionPipeline(current: PipelineState, stage: PipelineStage): PipelineState {

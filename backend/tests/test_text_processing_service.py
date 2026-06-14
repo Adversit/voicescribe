@@ -90,6 +90,47 @@ class TextProcessingServiceTests(unittest.TestCase):
         self.assertNotIn("pwsh.exe", captured["prompt"])
         self.assertEqual(result.target_context["app_kind"], "terminal")
 
+    def test_custom_style_is_bounded_and_identified_without_persisting_instructions(self):
+        captured = {}
+
+        def runner(command, prompt, timeout, cwd, env, cancel_event):
+            captured["prompt"] = prompt
+            return "Polished result"
+
+        service = self.make_service(command_runner=runner)
+        with patch("services.text_processing_service._resolve_command", return_value=["claude.exe"]):
+            result = service.process(
+                TextProcessingRequest(
+                    text="raw words",
+                    profile="light",
+                    style_profile={
+                        "id": " concise ",
+                        "name": " Concise ",
+                        "instructions": "Use <short> sentences." + ("x" * 3000),
+                    },
+                )
+            )
+
+        self.assertIn("<style_instructions>\nUse short sentences.", captured["prompt"])
+        self.assertNotIn("<short>", captured["prompt"])
+        self.assertLessEqual(len(captured["prompt"].split("<style_instructions>\n", 1)[1].split("\n</style_instructions>", 1)[0]), 2000)
+        self.assertEqual(result.style_profile_id, "concise")
+        self.assertEqual(result.style_profile_name, "Concise")
+        self.assertNotIn("instructions", result.to_dict())
+
+    def test_raw_profile_ignores_custom_style(self):
+        service = self.make_service()
+        result = service.process(
+            TextProcessingRequest(
+                text="raw words",
+                profile="raw",
+                style_profile={"id": "short", "name": "Short", "instructions": "Keep it short."},
+            )
+        )
+
+        self.assertIsNone(result.style_profile_id)
+        self.assertIsNone(result.style_profile_name)
+
     def test_raw_profile_keeps_context_without_calling_provider(self):
         calls = []
         service = self.make_service(command_runner=lambda *args: calls.append(args))

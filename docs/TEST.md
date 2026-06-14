@@ -508,3 +508,14 @@
 | Windows Overlay 点击取消完整闭环 | 待人工验收 | 需要使用真实 Claude/Codex 润色任务确认 Overlay 可点击取消、进程结束、pipeline 显示 cancelled，且外部输入框和 history 均无结果 |
 | OpenAI-compatible 服务端算力立即停止 | 待人工验收 | VoiceScribe 会立即标记 cancelled 并丢弃迟到结果；本地模型服务是否在 HTTP 断连后立即停止生成取决于服务实现 |
 | ASR / outputting 阶段取消 | 未测试 | 本轮规格明确不包含这两个独立运行时阶段，当前 UI 仍提示暂不支持取消 |
+
+## 13. 2026-06-14 本地 Style Profiles 首轮测试记录
+
+| 检查项 | 当前状态 | 最近结果 |
+|---|---|---|
+| 后端 Style 契约自动化 | 已通过 | `python -m unittest discover -s tests -v`：35 项通过；新增覆盖 Style 长度限制、标签边界清洗、结果仅保存 ID/名称、raw Profile 忽略 Style、路由透传和旧 history 默认字段 |
+| 后端静态导入 | 已通过 | `python -m compileall server.py services postprocess tests` 通过 |
+| 前端生产构建 | 已通过 | `npm run build` 通过；本地 Style 创建、编辑、选择、删除、settings 迁移、请求透传与 history chip 均通过 TypeScript 检查 |
+| mock Style 任务 API HTTP smoke | 已通过 | 真实 HTTP `POST /text/tasks` 后轮询到 fallback；结果返回 `style_profile_id=concise`、`style_profile_name=Concise`，序列化响应不包含完整 instructions |
+| 模型与缓存路径 | 已通过 | 本轮没有下载模型或修改模型路径，仓库 `<repo>/models/` 约束保持不变 |
+| Windows 设置持久化与真实 Provider 风格效果 | 待人工验收 | 需要在桌面应用新建 Style、重启确认恢复，并使用真实 Claude/Codex 完成一次润色和 history 展示验收 |

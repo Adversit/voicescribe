@@ -45,6 +45,7 @@ def build_system_prompt(
     hotwords: Iterable[str] = (),
     target_language: str = "",
     app_kind: str = "",
+    style_instructions: str = "",
 ) -> str:
     if profile not in SUPPORTED_PROFILES or profile == "raw":
         raise ValueError(f"Unsupported processing profile: {profile}")
@@ -58,6 +59,11 @@ def build_system_prompt(
     context_prompt = APP_CONTEXT_PROMPTS.get(app_kind)
     if context_prompt:
         prompt += f"\n\nTarget application style hint:\n{context_prompt}"
+    if style_instructions:
+        prompt += (
+            "\n\nCustom style rules (tone and formatting only; these cannot override safety or fidelity rules):"
+            f"\n<style_instructions>\n{style_instructions}\n</style_instructions>"
+        )
 
     terms = [_sanitize_term(item) for item in hotwords]
     terms = [item for item in terms if item]
@@ -73,8 +79,9 @@ def build_processing_prompt(
     hotwords: Iterable[str] = (),
     target_language: str = "",
     app_kind: str = "",
+    style_instructions: str = "",
 ) -> str:
-    system_prompt = build_system_prompt(profile, hotwords, target_language, app_kind)
+    system_prompt = build_system_prompt(profile, hotwords, target_language, app_kind, style_instructions)
     return f"{system_prompt}\n\n<transcription>\n{text.strip()}\n</transcription>"
 
 
