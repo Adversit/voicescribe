@@ -11,6 +11,7 @@ import {
   selectClassName,
 } from "../components/settings-ui";
 import { useAppStore } from "../stores/appStore";
+import { copyText } from "../lib/clipboard";
 import type { AgentProvider, AgentTask, ProviderReadiness } from "../types";
 
 const providerLabels: Record<AgentProvider, string> = {
@@ -23,6 +24,7 @@ const terminalStatuses = new Set(["completed", "cancelled", "failed"]);
 
 export function AgentPage() {
   const backendConnected = useAppStore((state) => state.backendConnected);
+  const setToast = useAppStore((state) => state.setToast);
   const [prompt, setPrompt] = useState("");
   const [provider, setProvider] = useState<AgentProvider>("codex_cli");
   const [model, setModel] = useState("");
@@ -192,7 +194,38 @@ export function AgentPage() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="任务结果" description="结果只显示在当前页面，不写入转录 history。">
+      <SettingsSection
+        title="任务结果"
+        description="结果只显示在当前页面，不写入转录 history。"
+        actions={
+          <>
+            <button
+              type="button"
+              className={secondaryButtonClassName}
+              disabled={!task?.result?.output}
+              onClick={() =>
+                void copyText(task?.result?.output ?? "")
+                  .then(() => setToast("已复制 Agent 结果"))
+                  .catch((error) => setToast(error instanceof Error ? error.message : "复制失败"))
+              }
+            >
+              复制结果
+            </button>
+            <button
+              type="button"
+              className={secondaryButtonClassName}
+              disabled={isActive || task === null}
+              onClick={() => {
+                activeTaskId.current = null;
+                setTask(null);
+                setRequestError(null);
+              }}
+            >
+              清空结果
+            </button>
+          </>
+        }
+      >
         <div className="mb-3 flex flex-wrap gap-2 text-sm text-ink/70">
           <span className="app-chip">状态：{task?.status ?? "idle"}</span>
           {task?.result ? <span className="app-chip">耗时：{task.result.duration_ms} ms</span> : null}

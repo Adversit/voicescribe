@@ -537,7 +537,7 @@
 |---|---|---|
 | 后端 Agent 服务、任务与路由自动化 | 已通过 | `python -m unittest discover -s tests -v`：46 项通过；新增覆盖 Claude 禁用工具、Codex CLI 只读且保留仓库规则、Codex SDK 仓库目录、仓库模型缓存环境、空输入、取消后不发布迟到结果、无会话 readiness probe、路由和 lifespan shutdown |
 | 后端静态导入 | 已通过 | `python -m compileall server.py services tests` 通过 |
-| 前端生产构建 | 已通过 | `npm run build` 通过；独立 Agent 页面、Provider 能力提示、启动/轮询/取消和结果展示通过 TypeScript 检查 |
+| 前端生产构建 | 已通过 | `npm run build` 通过；独立 Agent 页面、Provider 能力提示、readiness 检测、启动/轮询/取消、结果展示、统一剪贴板复制和页面内清空通过 TypeScript 检查 |
 | Agent 与转写链路隔离 | 已通过 | 第二遍跨层代码审查确认 Agent 页面和服务不调用 settings 持久化、录音 pipeline、外部文本输出或 history |
 | mock Agent API HTTP smoke | 已通过 | 真实 HTTP `GET /health -> POST /agent/tasks -> DELETE /agent/tasks/{id}` 通过；任务从 `running` 到 `cancelled`，health 返回模型根目录 `G:\AI_projects\voicescriber\models` |
 | 三个本地无头 Provider 真实完成输出 | 已通过 | 通过真实 `/agent/tasks` API 分别完成 Claude CLI、Codex CLI、Codex SDK 最小任务；三者终态均为 `completed`、输出均为 `READY`，Claude 能力为 `prompt_only`，两个 Codex 能力为 `workspace_read_only`，模型根目录保持在仓库 `models/` |
